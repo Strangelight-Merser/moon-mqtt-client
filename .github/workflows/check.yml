@@ -1,0 +1,48 @@
+name: native client
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install broker (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mosquitto openssl libssl-dev
+      - name: Install broker (macOS)
+        if: runner.os == 'macOS'
+        run: brew install mosquitto openssl@3
+      - name: Install MoonBit stable
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o /tmp/install-moonbit.sh
+          bash /tmp/install-moonbit.sh
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Check and build
+        run: |
+          moon version --all
+          moon update
+          moon check --target native
+          moon test --target native
+          moon build --target native
+      - name: Independent broker verification
+        run: |
+          python -m pip install -r tests/integration/requirements.txt
+          MOON="$(command -v moon)" PYTHON="$(command -v python)" ./tests/integration/run.sh
+      - name: Protocol faults and example consumers
+        run: |
+          MOON="$(command -v moon)" python tests/protocol_faults.py
+          MOON="$(command -v moon)" python tests/scenario_smoke.py
+          MOON="$(command -v moon)" python tests/consumer_smoke.py

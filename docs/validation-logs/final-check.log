@@ -1,0 +1,102 @@
+Warning: [0092]
+     ╭─[ /Users/huaiyi/Documents/ChatGPT/moon-mqtt-client/runtime.mbt:111:10 ]
+     │
+ 111 │       }) catch {
+     │          ───┬───  
+     │             ╰───── Warning (fragile_catch_all): 
+Found code that can be simplified:
+
+  try <expr> catch {
+    err => {
+      <cleanup code>
+      raise err
+    }
+  }
+
+If <cleanup code> does not mention `err` or perform `return`/`break`/`continue`, rewrite to:
+
+  errdefer <cleanup code>
+  <expr>
+
+Note: `try ... catch` will no longer capture async cancellation in the future, so using `catch` for cleanup is dangerous for async code.
+If your handler need to manipulate or inspect `err`, but contain cleanup code as well,
+it is still recommended to move the cleanup part to `errdefer` as well, leaving only the error inspecting part in `catch`.
+      
+─────╯
+Finished. moon: ran 2 tasks, now up to date (1 warnings, 0 errors)
+Total tests: 13, passed: 13, failed: 0.
+Warning: [0092]
+     ╭─[ /Users/huaiyi/Documents/ChatGPT/moon-mqtt-client/runtime.mbt:111:10 ]
+     │
+ 111 │       }) catch {
+     │          ───┬───  
+     │             ╰───── Warning (fragile_catch_all): 
+Found code that can be simplified:
+
+  try <expr> catch {
+    err => {
+      <cleanup code>
+      raise err
+    }
+  }
+
+If <cleanup code> does not mention `err` or perform `return`/`break`/`continue`, rewrite to:
+
+  errdefer <cleanup code>
+  <expr>
+
+Note: `try ... catch` will no longer capture async cancellation in the future, so using `catch` for cleanup is dangerous for async code.
+If your handler need to manipulate or inspect `err`, but contain cleanup code as well,
+it is still recommended to move the cleanup part to `errdefer` as well, leaving only the error inspecting part in `catch`.
+      
+─────╯
+Finished. moon: ran 17 tasks, now up to date (1 warnings, 0 errors)
+test_fragmented_broker_packets (__main__.IntegrationTest.test_fragmented_broker_packets) ... ok
+test_lost_puback_never_reports_success (__main__.IntegrationTest.test_lost_puback_never_reports_success) ... ok
+test_reconnect_and_resubscribe (__main__.IntegrationTest.test_reconnect_and_resubscribe) ... ok
+test_retained_delivery_and_zero_byte_clear (__main__.IntegrationTest.test_retained_delivery_and_zero_byte_clear) ... ok
+test_silent_broker_causes_heartbeat_disconnect (__main__.IntegrationTest.test_silent_broker_causes_heartbeat_disconnect) ... ok
+test_tcp_qos0_qos1_and_subscription (__main__.IntegrationTest.test_tcp_qos0_qos1_and_subscription) ... ok
+test_tls_custom_ca_and_rejections (__main__.IntegrationTest.test_tls_custom_ca_and_rejections) ... ok
+test_unsubscribe_ack_then_no_further_delivery (__main__.IntegrationTest.test_unsubscribe_ack_then_no_further_delivery) ... ok
+test_will_suppressed_on_disconnect_and_sent_on_abrupt_scope_end (__main__.IntegrationTest.test_will_suppressed_on_disconnect_and_sent_on_abrupt_scope_end) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 5.842s
+
+OK
+PASS wrong_puback: {'wrong_for': 1, 'closed': True}
+PASS timeout_reconnect: {'first_id': 1, 'closed_before_late_ack': True, 'second_id': 1, 'disconnect': True}
+PASS full_inflight_disconnect: {'pending_id': 1, 'disconnect_packet': b'\xe0\x00'}
+PASS partial_suback: {'results': [0, 128], 'disconnect_packet': b'\xe0\x00'}
+PASS slow_consumer_overflow: {'closed': True, 'sent': 3}
+Finished. moon: no work to do
+scenario fixture passed: Frigate dedup + ROS command/telemetry
+temperature fixture passed: ON, deadband/invalid ignored, OFF, offline Will
+Created moon.work
+Warning: [0092]
+     ╭─[ /private/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/moon-mqtt-consumer-ec6fzjd8/library/runtime.mbt:111:10 ]
+     │
+ 111 │       }) catch {
+     │          ───┬───  
+     │             ╰───── Warning (fragile_catch_all): 
+Found code that can be simplified:
+
+  try <expr> catch {
+    err => {
+      <cleanup code>
+      raise err
+    }
+  }
+
+If <cleanup code> does not mention `err` or perform `return`/`break`/`continue`, rewrite to:
+
+  errdefer <cleanup code>
+  <expr>
+
+Note: `try ... catch` will no longer capture async cancellation in the future, so using `catch` for cleanup is dangerous for async code.
+If your handler need to manipulate or inspect `err`, but contain cleanup code as well,
+it is still recommended to move the cleanup part to `errdefer` as well, leaving only the error inspecting part in `catch`.
+      
+─────╯
+separate module consumer passed

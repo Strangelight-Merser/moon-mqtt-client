@@ -1,0 +1,12 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/async/cond_var",
+  "moonbitlang/async/socket",
+  "moonbitlang/async/tls",
+  "moonbitlang/async/io",
+  "moonbitlang/core/debug",
+  "zbhzs1/moonbit-mqtt" @codec,
+}
+
+supported_targets = "+native"

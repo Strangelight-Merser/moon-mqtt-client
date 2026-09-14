@@ -1,0 +1,77 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "huaiyi/moon-mqtt-client/examples/contracts"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn availability_payload(Bool) -> String
+
+pub fn command_receipt(String, Bool) -> String
+
+pub fn parse_velocity_command(String) -> VelocityCommand?
+
+pub fn primitive_payload(PrimitiveTelemetry) -> String
+
+pub fn thermostat_step(Bool, Double) -> ThermostatResult
+
+pub fn twist_payload(VelocityCommand) -> String
+
+// Errors
+
+// Types and methods
+pub(all) struct Alert {
+  event_id : String
+  text : String
+} derive(Eq, @debug.Debug)
+
+pub struct AlertDeduper {
+  recent : Array[String?]
+  mut next : Int
+  mut count : Int
+}
+pub fn AlertDeduper::accept(Self, FrigateEvent, String) -> Alert?
+pub fn AlertDeduper::new(Int) -> Self
+pub fn AlertDeduper::remembered(Self) -> Int
+
+pub(all) enum EventPhase {
+  New
+  Update
+  End
+} derive(Eq, @debug.Debug)
+
+pub(all) struct FrigateEvent {
+  id : String
+  phase : EventPhase
+  label : String
+  zones : Array[String]
+} derive(Eq, @debug.Debug)
+
+pub(all) enum PrimitiveTelemetry {
+  BoolValue(Bool)
+  IntValue(Int)
+  DoubleValue(Double)
+  TextValue(String)
+} derive(Eq, @debug.Debug)
+
+pub(all) enum RelayCommand {
+  TurnOn
+  TurnOff
+  NoChange
+} derive(Eq, @debug.Debug)
+
+pub(all) struct ThermostatResult {
+  command : RelayCommand
+  state : String
+} derive(Eq, @debug.Debug)
+
+pub(all) struct VelocityCommand {
+  command_id : String
+  linear_x : Double
+  angular_z : Double
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits

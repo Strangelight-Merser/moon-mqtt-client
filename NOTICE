@@ -1,0 +1,11 @@
+moon-mqtt-client
+Copyright 2026 huaiyi
+Licensed under the Apache License, Version 2.0.
+
+Uses, as separate dependencies:
+- zbhzs1/moonbit-mqtt 0.1.0 (MQTT packet codec), Apache-2.0
+  https://github.com/zbhzs1/moonbit-mqtt
+- moonbitlang/async 0.21.3 (async I/O, networking, TLS), Apache-2.0
+  https://github.com/moonbitlang/async
+
+No dependency source is vendored in the source distribution.

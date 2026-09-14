@@ -1,0 +1,6 @@
+.tools/
+.mooncakes/
+_build/
+.venv/
+__pycache__/
+tests/integration/artifacts/

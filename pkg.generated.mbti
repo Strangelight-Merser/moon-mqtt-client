@@ -1,0 +1,101 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "huaiyi/moon-mqtt-client"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub async fn[T] with_client(Config, async (Client) -> T) -> T
+
+// Errors
+pub(all) suberror ClientError {
+  InvalidConfig(String)
+  ProtocolError(String)
+  NotConnected
+  Closed
+  Backpressure(String)
+  NotSent(String)
+  OutcomeUnknown(String)
+  ConnectionRefused(String)
+  ReconnectExhausted(String)
+} derive(@debug.Debug)
+
+// Types and methods
+type Client
+pub async fn Client::disconnect(Self) -> Unit
+pub async fn Client::next_event(Self) -> Event
+pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool) -> Unit
+pub async fn Client::subscribe(Self, Array[Subscription]) -> Array[SubscriptionResult]
+pub async fn Client::unsubscribe(Self, Array[String]) -> Unit
+pub async fn Client::wait_connected(Self) -> Unit
+
+pub(all) struct Config {
+  host : String
+  port : Int
+  client_id : String
+  tls : TlsMode
+  username : String?
+  password : Bytes?
+  will : Will?
+  keep_alive_secs : Int
+  connect_timeout_ms : Int
+  ack_timeout_ms : Int
+  send_capacity : Int
+  receive_capacity : Int
+  max_inflight : Int
+  max_packet_size : Int
+  reconnect_delay_ms : Int
+  max_reconnect_delay_ms : Int
+  reconnect_attempts : Int
+}
+pub fn Config::new(String, String, port? : Int, tls? : TlsMode, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, ack_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int) -> Self
+
+pub(all) enum Event {
+  Connected(Int)
+  Disconnected(Int, String)
+  MessageReceived(Message)
+} derive(@debug.Debug)
+
+pub(all) struct Message {
+  topic : String
+  payload : Bytes
+  qos : QoS
+  retain : Bool
+  dup : Bool
+  generation : Int
+} derive(@debug.Debug)
+
+pub(all) enum QoS {
+  AtMostOnce
+  AtLeastOnce
+} derive(Eq, @debug.Debug)
+
+type Session
+
+pub(all) struct Subscription {
+  topic : String
+  qos : QoS
+} derive(Eq, @debug.Debug)
+
+pub(all) enum SubscriptionResult {
+  Granted(QoS)
+  Rejected
+} derive(Eq, @debug.Debug)
+
+pub(all) enum TlsMode {
+  Plain
+  SystemRoots
+  CustomCA(String)
+} derive(@debug.Debug)
+
+pub(all) struct Will {
+  topic : String
+  payload : Bytes
+  qos : QoS
+  retain : Bool
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
