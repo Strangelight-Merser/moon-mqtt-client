@@ -2,6 +2,8 @@ name = "huaiyi/moon-mqtt-client"
 
 version = "0.1.0"
 
+repository = "https://github.com/Strangelight-Merser/moon-mqtt-client"
+
 license = "Apache-2.0"
 
 readme = "README.md"
