@@ -79,7 +79,7 @@ interoperability, use `./tests/integration/run.sh`. The other scripts are
 ## Limits
 
 This is not a conformance certification, a throughput benchmark or a long-term
-soak test. Linux/macOS hosted CI is defined but has not executed publicly.
+soak test. [Linux and macOS hosted CI passed](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/34859567268).
 System-root TLS is implemented but the reproducible positive TLS test uses a
 custom CA. Username/password fields are encoded but an authenticated broker
 policy was not part of these tests. The tests do not establish interoperability

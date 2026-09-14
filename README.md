@@ -1,5 +1,7 @@
 # moon-mqtt-client
 
+[![native client](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml/badge.svg)](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml)
+
 A native asynchronous MQTT 3.1.1 client for MoonBit. Connect to an existing MQTT
 broker, subscribe to device or application events, and publish commands and
 state without writing a socket loop for each application.
@@ -37,8 +39,14 @@ moon build --target native
 
 `scripts/moon.sh` uses a local `.tools/moon` installation or `MOON_HOME` when
 provided. Toolchains and build outputs are not part of the source distribution.
-The package is **not yet published** to Mooncakes; do not use `moon add` until
-there is a verified registry release.
+For registry releases, install the package with:
+
+```sh
+moon add Strangelight-Merser/moon-mqtt-client
+```
+
+See [GitHub Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)
+for available versions and their verification results.
 
 ## API
 

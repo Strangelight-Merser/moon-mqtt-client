@@ -4,7 +4,9 @@
 接收设备/应用消息，执行自己的规则，再发布结果。底层编解码复用现有开源包；
 本项目实现异步连接、收发、确认、心跳、TLS、断线重连和失败语义。
 
-首版可以本地运行。它还没有发布到 GitHub 或 Mooncakes，也没有经过真实硬件部署。
+首版已公开在 [GitHub](https://github.com/Strangelight-Merser/moon-mqtt-client)。
+注册表版本和安装验证记录见 [Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)。
+示例尚未经过真实硬件部署。
 
 本机完整复跑：`./scripts/check.sh`。工具链、Paho 和本地测试 broker 已准备在本目录的忽略项中。
 

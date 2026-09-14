@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "huaiyi/moon-mqtt-client/examples/contracts"
+package "Strangelight-Merser/moon-mqtt-client/examples/contracts"
 
 import {
   "moonbitlang/core/debug",

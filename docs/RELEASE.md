@@ -12,11 +12,11 @@ notices govern acceptance.
 | Useful reusable scope | Native MQTT 3.1.1 QoS 0/1 client; no application-specific topic coupling in the library. |
 | Three complete intended scenarios | `SCENARIOS.md`, temperature executable, Frigate/ROS network fixture. These are reproducible contracts, not user interviews or actual hardware deployment. |
 | Runnable core, README and examples | Local native check/build/test and broker fixtures; see `VALIDATION.md`. |
-| Core tests and CI check/build/test | Tests and GitHub workflow are in the source. Hosted CI has not run until a public repository is created and pushed. |
+| Core tests and CI check/build/test | Tests and GitHub workflow are in the source. Linux and macOS hosted CI passed; see the repository Actions page. |
 | OSI license and upstream attribution | Apache-2.0, `NOTICE`, separate pinned codec and async dependencies. |
-| Public GitHub repository | Not published yet. Set the real repository URL in `moon.mod` only after creation. |
+| Public GitHub repository | https://github.com/Strangelight-Merser/moon-mqtt-client is public; its URL is set in moon.mod. |
 | At least 10 meaningful commits | Not yet fulfilled. Record genuine subsequent implementation/review/test work; no empty or artificially split commits. |
-| Mooncakes release | Not published. Verify namespace ownership, package metadata, public CI, and installation of the published package before declaring distribution complete. |
+| Mooncakes release | Release target: Strangelight-Merser/moon-mqtt-client 0.1.0. Registry installation is checked with tests/consumer_smoke.py --registry; release results are attached to GitHub Releases. |
 | Participant-written one-page application | The participant must write and understand it. This repository's documentation is supporting evidence, not a substitute submitted under their name. |
 | Registration and competition group | Participant action still required. |
 
@@ -26,6 +26,6 @@ module, and check that the README's supported platform and failure semantics
 match the results. Keep the claim at MQTT 3.1.1 native QoS 0/1 clean sessions.
 
 Remaining engineering work beyond the tested first version includes sustained
-soak/resource tests, broader broker interoperability and executing hosted Linux
+soak/resource tests, broader broker interoperability and ongoing hosted Linux
 and macOS CI. Browser/embedded targets and persistent sessions are separate
 future scope, not implied by the native client.

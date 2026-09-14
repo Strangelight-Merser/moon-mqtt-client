@@ -107,7 +107,7 @@ feedback-to-MQTT telemetry contract.
 Run all three rule sets without a broker:
 
 ```sh
-./scripts/moon.sh test -p huaiyi/moon-mqtt-client/examples/contracts
+./scripts/moon.sh test -p Strangelight-Merser/moon-mqtt-client/examples/contracts
 ```
 
 The tests cover threshold inclusivity and deadband state, availability payloads,

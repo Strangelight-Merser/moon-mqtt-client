@@ -1,4 +1,4 @@
-name = "huaiyi/moon-mqtt-client"
+name = "Strangelight-Merser/moon-mqtt-client"
 
 version = "0.1.0"
 

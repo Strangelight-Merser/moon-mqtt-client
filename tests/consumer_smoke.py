@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Compile a fresh, separate consumer module and exchange data via Mosquitto."""
+import argparse
 import importlib.util
 from pathlib import Path
 import shutil
 import subprocess
 import tempfile
 
+parser = argparse.ArgumentParser()
+parser.add_argument('--registry', action='store_true', help='install the published package instead of a local workspace copy')
+args = parser.parse_args()
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('mqtt_integration', ROOT / 'tests/integration/run.py')
 h = importlib.util.module_from_spec(spec)
@@ -16,22 +20,23 @@ failed = True
 try:
     with tempfile.TemporaryDirectory(prefix='moon-mqtt-consumer-') as temp:
         work = Path(temp)
-        library = work / 'library'
-        library.mkdir()
-        for name in ['moon.mod', 'moon.pkg', 'types.mbt', 'client.mbt', 'runtime.mbt',
-                     'session.mbt', 'wire.mbt', 'LICENSE', 'NOTICE', 'README.md']:
-            shutil.copy2(ROOT / name, library / name)
+        if not args.registry:
+            library = work / 'library'
+            library.mkdir()
+            for name in ['moon.mod', 'moon.pkg', 'types.mbt', 'client.mbt', 'runtime.mbt',
+                         'session.mbt', 'wire.mbt', 'LICENSE', 'NOTICE', 'README.md']:
+                shutil.copy2(ROOT / name, library / name)
         consumer = work / 'consumer'
         consumer.mkdir()
         (consumer / 'moon.mod').write_text('''name = "acceptance/consumer"
 preferred_target = "native"
 import {
-  "huaiyi/moon-mqtt-client@0.1.0",
+  "Strangelight-Merser/moon-mqtt-client@0.1.0",
   "moonbitlang/async@0.21.3",
 }
 ''')
         (consumer / 'moon.pkg').write_text('''import {
-  "huaiyi/moon-mqtt-client" @mqtt,
+  "Strangelight-Merser/moon-mqtt-client" @mqtt,
   "moonbitlang/async",
 }
 supported_targets = "+native"
@@ -56,8 +61,12 @@ pkgtype(kind: "executable")
   println("separate module consumer passed")
 }
 '''.replace('PORT', str(broker.port)))
-        subprocess.run([str(h.MOON), 'work', 'init', 'library', 'consumer'], cwd=work, check=True)
+        if args.registry:
+            subprocess.run([str(h.MOON), 'update'], cwd=consumer, check=True)
+        else:
+            subprocess.run([str(h.MOON), 'work', 'init', 'library', 'consumer'], cwd=work, check=True)
         subprocess.run([str(h.MOON), 'run', 'consumer'], cwd=work, check=True, timeout=90)
+        print('consumer source: Mooncakes registry' if args.registry else 'consumer source: local workspace')
         failed = False
 finally:
     broker.close(failed=failed)

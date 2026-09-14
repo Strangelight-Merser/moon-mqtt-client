@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "huaiyi/moon-mqtt-client"
+package "Strangelight-Merser/moon-mqtt-client"
 
 import {
   "moonbitlang/core/debug",
@@ -70,8 +70,6 @@ pub(all) enum QoS {
   AtMostOnce
   AtLeastOnce
 } derive(Eq, @debug.Debug)
-
-type Session
 
 pub(all) struct Subscription {
   topic : String

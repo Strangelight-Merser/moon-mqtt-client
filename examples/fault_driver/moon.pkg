@@ -1,5 +1,5 @@
 import {
-  "huaiyi/moon-mqtt-client" @mqtt,
+  "Strangelight-Merser/moon-mqtt-client" @mqtt,
   "moonbitlang/async",
   "moonbitlang/core/env",
   "moonbitlang/core/string",
