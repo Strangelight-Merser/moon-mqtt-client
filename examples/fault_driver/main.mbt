@@ -123,6 +123,30 @@ async fn cancel_reconnect() -> Unit {
 }
 
 ///|
+async fn large_incoming_publish() -> Unit {
+  @mqtt.with_client(config(), async fn(client) {
+    let mut received = false
+    while !received {
+      match client.next_event() {
+        @mqtt.MessageReceived(message) => {
+          guard message.topic == "fault/large" else {
+            fail("large publish topic changed")
+          }
+          guard message.payload.length() == 32000 else {
+            fail("large publish payload was truncated")
+          }
+          guard message.payload[0] == 0 && message.payload[31999] == 122 else {
+            fail("large publish payload was corrupted")
+          }
+          received = true
+        }
+        _ => ()
+      }
+    }
+  })
+}
+
+///|
 async fn slow_consumer_overflow() -> Unit {
   let mut saw_backpressure = false
   @mqtt.with_client(config(receive_capacity=2), async fn(_) {
@@ -148,6 +172,7 @@ async fn main {
       "slow_suback_header" | "slow_suback_body" => single_suback()
       "idle_then_suback" => idle_then_suback()
       "cancel_reconnect" => cancel_reconnect()
+      "large_incoming_publish" => large_incoming_publish()
       "slow_consumer_overflow" => slow_consumer_overflow()
       _ => fail("unknown fault case")
     }

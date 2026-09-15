@@ -184,6 +184,29 @@ def qos0_publish(topic: str, payload: bytes) -> bytes:
     return b"\x30" + bytes([len(body)]) + body
 
 
+def large_qos0_publish(topic: str, payload: bytes) -> bytes:
+    topic_bytes = topic.encode()
+    body = len(topic_bytes).to_bytes(2, "big") + topic_bytes + payload
+    remaining = bytearray()
+    value = len(body)
+    while True:
+        digit = value % 128
+        value //= 128
+        remaining.append(digit | (0x80 if value else 0))
+        if not value:
+            break
+    return b"\x30" + bytes(remaining) + body
+
+
+def inject_large_incoming_publish(listener: socket.socket, evidence: dict) -> None:
+    conn = accept_client(listener)
+    payload = bytes(index % 251 for index in range(32_000))
+    conn.sendall(large_qos0_publish("fault/large", payload))
+    evidence["payload_bytes"] = len(payload)
+    evidence["disconnect_packet"] = recv_packet(conn)
+    conn.close()
+
+
 def inject_slow_consumer_overflow(listener: socket.socket, evidence: dict) -> None:
     conn = accept_client(listener)
     for index in range(3):
@@ -205,6 +228,7 @@ CASES = {
     "slow_suback_body": inject_slow_suback_body,
     "idle_then_suback": inject_idle_then_suback,
     "cancel_reconnect": inject_cancel_reconnect,
+    "large_incoming_publish": inject_large_incoming_publish,
     "slow_consumer_overflow": inject_slow_consumer_overflow,
 }
 
@@ -258,6 +282,9 @@ def run_case(name: str) -> None:
     elif name == "cancel_reconnect":
         assert evidence.get("closed"), evidence
         assert evidence.get("disconnect"), evidence
+    elif name == "large_incoming_publish":
+        assert evidence.get("payload_bytes") == 32_000, evidence
+        assert evidence.get("disconnect_packet") == b"\xe0\x00", evidence
     elif name == "slow_consumer_overflow":
         assert evidence.get("sent") == 3
         assert evidence.get("closed"), evidence

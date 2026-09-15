@@ -367,6 +367,24 @@ async fn read_session_byte(session : Session) -> Byte? {
 }
 
 ///|
+/// Read an available body chunk in one bounded operation. `read_some` returns as
+/// soon as any bytes arrive, so a timeout never cancels a loop that has already
+/// consumed an earlier part of the requested body.
+async fn read_session_chunk(session : Session, max_len : Int) -> Bytes? {
+  while session.alive {
+    let incoming = @async.with_timeout_opt(100, () => {
+      session.reader.read_some(max_len~)
+    })
+    match incoming {
+      Some(Some(bytes)) => return Some(bytes)
+      Some(None) => raise @io.ReaderClosed
+      None => ()
+    }
+  }
+  None
+}
+
+///|
 /// Assemble one MQTT frame across any number of 100 ms idle slices. Parser state
 /// stays in this coroutine until the frame is complete or the session is aborted.
 async fn read_session_packet(
@@ -401,9 +419,15 @@ async fn read_session_packet(
     }
     multiplier *= 128
   }
-  for _ in 0..<size {
-    match read_session_byte(session) {
-      Some(byte) => data.push(byte)
+  let mut received = 0
+  while received < size {
+    match read_session_chunk(session, size - received) {
+      Some(chunk) => {
+        for byte in chunk {
+          data.push(byte)
+        }
+        received += chunk.length()
+      }
       None => return None
     }
   }
@@ -412,4 +436,3 @@ async fn read_session_packet(
     Err(reason) => raise ProtocolError(reason)
   }
 }
-

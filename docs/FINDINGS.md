@@ -134,7 +134,9 @@ and body state stay in the read-loop coroutine across any number of idle slices.
 
 **Verification.** Protocol fault cases delay after the fixed header by 150 ms,
 delay twice inside the body by 110 ms, and keep an otherwise healthy connection
-idle across three read slices before sending a valid SUBACK.
+idle across three read slices before sending a valid SUBACK. A 32,000-byte
+incoming PUBLISH verifies that completed body data is consumed in chunks rather
+than by creating a timeout task group for every payload byte.
 
 ## Advisories left in place
 
