@@ -21,6 +21,7 @@ fixed.
 | State-sync demo smoke | `tests/scenario_smoke.py` | Passed: startup query, ON at 28 C, invalid input ignored, OFF at 26 C, correlated device feedback. |
 | State-sync demo scenarios | `examples/mqtt_demo/demo.py` | 4 scenarios passed: `normal`, `lost_puback`, `broker_restart`, `controller_restart`. |
 | Separate consumer module | `tests/consumer_smoke.py` | Passed from a fresh module and workspace against the local source copy. |
+| Registry install acceptance | `tests/consumer_smoke.py --registry` | Passed: a clean temporary module resolved `Strangelight-Merser/moon-mqtt-client@0.2.0` from Mooncakes and completed a QoS 1 round trip. Published package sha256 `ee5af2a2503611a427a8555cdcb3cfaeff5ab4527bd4c85fadfe700998cbb76b` equals the verified local zip; registry record time `2026-09-15T08:35:55Z`. |
 | Soak | `tests/soak.py --duration 1800 --cycles 100` | Passed all gates; see the soak section below. |
 | Hosted CI | `.github/workflows/check.yml` | Passed on Linux and macOS for commit `fe2ef4c`; the fixed toolchain check and the rolling-stable compatibility job are separate. |
 | All-in-one local check | `./scripts/check.sh` | Passed end to end. |
@@ -106,6 +107,7 @@ resource section automatically.
 ```sh
 ./scripts/check.sh                    # check, test, build, all harnesses
 .venv/bin/python examples/mqtt_demo/demo.py   # the four demo scenarios
+.venv/bin/python tests/consumer_smoke.py --registry   # published 0.2.0 install
 ```
 
 Tool selection can be overridden with `MOON`, `PYTHON`, and `MOSQUITTO`. The
