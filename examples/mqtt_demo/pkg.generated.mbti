@@ -23,8 +23,6 @@ pub fn encode_query(String) -> String
 
 pub fn encode_temperature(Double) -> String
 
-pub fn fail_usage(String) -> Unit raise
-
 pub fn finite(Double) -> Bool
 
 pub async fn log_line(String) -> Unit

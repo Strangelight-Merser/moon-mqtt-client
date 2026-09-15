@@ -121,7 +121,22 @@ async fn reconnect_case() -> Unit {
         @mqtt.MessageReceived(message) if reconnected &&
           message.topic == "it/reconnect" &&
           message.payload == b"after-restart" => {
-          log_line("{\"event\":\"message_after_reconnect\"}")
+          let snapshot = client.stats()
+          guard snapshot.generation >= 2 else {
+            fail("reconnect must advance the generation")
+          }
+          guard snapshot.reconnects >= 1 else {
+            fail("stats must count successful reconnects")
+          }
+          guard snapshot.disconnects >= 1 else {
+            fail("stats must count disconnects")
+          }
+          guard snapshot.last_disconnect is Some(_) else {
+            fail("stats must record the last disconnect reason")
+          }
+          log_line(
+            "{\"event\":\"message_after_reconnect\",\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests}}",
+          )
           client.disconnect()
           return
         }

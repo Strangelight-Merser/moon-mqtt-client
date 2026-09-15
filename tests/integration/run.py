@@ -345,6 +345,24 @@ class IntegrationTest(unittest.TestCase):
         while not messages and time.monotonic() < end: time.sleep(.025)
         self.assertEqual(messages, [b"abrupt"])
 
+    def test_reconnect_stats_count_generations(self) -> None:
+        broker = self.run_broker()
+        driver = Driver("reconnect", broker.port); self.addCleanup(driver.close)
+        first = driver.expect("connected"); self.assertEqual(first.get("generation"), 1)
+        broker.stop(); driver.expect("disconnected")
+        broker.start(); second = driver.expect("connected", 12)
+        self.assertGreater(second.get("generation", 0), 1)
+        publisher = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-reconnect-stats")
+        publisher.connect("127.0.0.1", broker.port); publisher.loop_start()
+        publisher.publish("it/reconnect", b"after-restart", qos=1).wait_for_publish(3)
+        publisher.disconnect(); publisher.loop_stop()
+        outcome = driver.expect("message_after_reconnect")
+        self.assertGreaterEqual(outcome.get("generation", 0), 2, outcome)
+        self.assertGreaterEqual(outcome.get("reconnects", 0), 1, outcome)
+        self.assertGreaterEqual(outcome.get("disconnects", 0), 1, outcome)
+        self.assertEqual(outcome.get("pending"), 0, outcome)
+        self.assertEqual(driver.finish()[0], 0)
+
     def test_silent_broker_causes_heartbeat_disconnect(self) -> None:
         broker = self.run_broker()
         proxy = PacketProxy(broker.port, "drop_pingresp"); self.addCleanup(proxy.close)

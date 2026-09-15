@@ -11,6 +11,33 @@ connection lifecycle, TLS transport, request tracking, heartbeat and clean-sessi
 reconnection on top of **moonbitlang/async**. It is an early implementation, not
 a certified MQTT conformance implementation.
 
+## Start with the state-sync demo
+
+The primary demonstration is a controller process and an **independent simulated
+device** process (no hardware; the device is a simulation and is labelled as one)
+talking to a real broker:
+
+```sh
+./scripts/moon.sh build --target native
+.venv/bin/python examples/mqtt_demo/demo.py
+```
+
+Four reproducible scenarios run in sequence: normal ON/OFF, a lost PUBACK whose
+command the device still executes, a broker restart, and a controller restart
+while the device stays ON. Every line of output keeps three things apart:
+`desired` (what hysteresis wants), `result` (`sent`/`not_sent`/`unknown`), and
+`reported` (what the device actually says, correlated by id). See
+[docs/SCENARIOS.md](docs/SCENARIOS.md) for the topics and rules.
+
+A thin publish/subscribe CLI reuses the public API:
+
+```sh
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  publish --host 127.0.0.1 -t lab/state -m ON --qos 1 --retain --stats
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  subscribe --host 127.0.0.1 -t 'lab/#' --count 1 --timeout-ms 3000
+```
+
 ## Scope
 
 - Native TCP and server-authenticated TLS (system roots or a custom PEM CA).
@@ -82,6 +109,9 @@ the verified TLS hostname. There is no option to disable verification.
 
 ## Delivery and failure semantics
 
+The normative description of timeouts, queueing, cancellation and failure
+classification is [docs/API-CONTRACT.md](docs/API-CONTRACT.md). In short:
+
 | Result | What it establishes |
 |---|---|
 | QoS 0 publish returns | The transport write completed; no broker acknowledgement exists. |
@@ -91,10 +121,18 @@ the verified TLS hostname. There is no option to disable verification.
 | `Backpressure` from a request | The send or inflight limit prevented accepting that request. |
 | Event/control queue overflow | The client terminates with an error instead of silently dropping messages. |
 
-An acknowledgement timeout closes the connection and ends **all** pending
-requests. Old identifiers never cross into the new connection. The application
-chooses whether to retry an uncertain operation; use idempotent state-setting
-commands or application command IDs where appropriate.
+The whole operation is budgeted by `operation_timeout_ms` (default 5000 ms),
+covering queue time, the write and the wait for the acknowledgement. A single
+socket write is separately bounded by `write_timeout_ms`, and PINGRESP is
+timed from the *completed* PINGREQ write. An expired operation budget closes the
+connection and ends **all** pending requests; old identifiers never cross into
+the new connection. The application chooses whether to retry an uncertain
+operation; use idempotent state-setting commands or application command IDs where
+appropriate.
+
+Protocol control packets (PUBACK, PINGREQ, DISCONNECT) use reserved bounded slots
+and are never blocked behind a full business queue. If the control slots
+themselves run out, the client terminates loudly instead of dropping one.
 
 Incoming QoS 1 is acknowledged after acceptance into the bounded event queue,
 not after application processing. The queue is volatile. QoS 1 duplicates are
@@ -102,11 +140,18 @@ possible. Reconnection with a clean session can lose messages during the gap;
 a broker may replay retained state on resubscription. The library does not promise
 exactly-once processing, durable delivery or uninterrupted subscriptions.
 
-Default limits: 64 queued sends, 128 queued events, 32 pending operations,
-65,536 bytes per packet, 5-second connect/write/ACK timeout, 30-second keepalive,
-10 consecutive reconnect attempts with a delay growing from 250 ms to 5 seconds
-plus a small deterministic jitter. Confirmed subscription filters remain in
-memory until unsubscribed; keep their set bounded in the application.
+Default limits: 64 queued business sends, 16 reserved control slots, 128 queued
+events, 32 pending operations, 65,536 bytes per packet, 5-second connect,
+operation, write and PINGRESP timeouts, 30-second keepalive, 10 consecutive
+reconnect attempts with a delay growing from 250 ms to 5 seconds plus per-client
+jitter. `Client::set_reconnect_seed` pins that jitter for tests. Confirmed
+subscription filters remain in memory until unsubscribed; keep their set bounded
+in the application.
+
+`Client::stats()` returns a read-only snapshot: generation, connection state,
+business/control/event queue occupancy, pending requests, reconnects, disconnects,
+unknown outcomes and the most recent disconnect reason. It contains no
+credentials and no message bodies and needs no monitoring service.
 
 ## Runnable scenarios
 
@@ -120,11 +165,9 @@ failure boundaries for three intended uses:
 3. A ROS bridge JSON/primitive contract with command validation and receipts.
 
 The examples use fixtures. They do not claim a deployed camera, robot or Zigbee
-integration. The temperature example connects to `127.0.0.1:1883`:
-
-```sh
-moon run examples/temperature_controller --target native
-```
+integration. The Frigate and ROS contracts remain supplementary adapter
+contracts; their tests reject non-finite speeds, empty command ids and
+quote/backslash/control-character payloads, and every emitted payload is JSON.
 
 ## Verification
 

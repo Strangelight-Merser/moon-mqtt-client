@@ -1,0 +1,126 @@
+# Defects found and fixed for v0.2.0
+
+Each entry records the problem, the cause, the fix and how it was verified. The
+first four defects were found while building the state-sync demo; they were real
+connection-lifecycle bugs, not cosmetic issues.
+
+## D1 — a caller-side abort never reconnected
+
+**Problem.** When an operation timed out or a request was cancelled, the session
+was aborted but the supervisor task stayed parked. The next connection was never
+attempted: `wait_connected()` eventually failed instead of waiting through a
+reconnect. The independent fault injector case `timeout_reconnect` failed, and a
+minimal two-connection fake peer reproduced it deterministically.
+
+**Cause.** The supervisor body waited on a condition variable for
+`session.alive` to become false. A task-group child that raises cannot wake a
+group body parked on `Cond::wait`, and the read loop had been changed to swallow
+its transport error and return normally, so nothing woke the body either.
+
+**Fix.** The read loop again owns the connection lifetime and the body waits on
+its task, so a transport failure propagates directly. The read loop uses a
+bounded read (100 ms slices) instead of one unbounded blocking read, so a
+caller-side abort is observed as a normal generation end rather than as a
+cancellation of the read.
+
+**Verification.** `tests/protocol_faults.py` case `timeout_reconnect` passes
+again (late ACK after close, new connection, reused identifier 1, real
+`E0 00`). The demo's `broker_restart` and `lost_puback` scenarios pass.
+
+## D2 — a timed-out request poisoned the caller's coroutine
+
+**Problem.** After a request hit `operation_timeout_ms`, the caller's next
+asynchronous operation failed immediately with `Cancelled`, which also broke the
+reconnect path above.
+
+**Cause.** `@async.with_timeout` implements its timer as a task-group child that
+*fails* when it fires; that cancels the waiting coroutine and leaves it in a
+cancelled state, which persists after the timeout error is caught.
+
+**Fix.** Request waiting uses a watchdog task plus a deadline loop. The watchdog
+only marks the request timed out and aborts the session; the waiter itself never
+runs inside a failing sub-group. The deadline is still enforced exactly, starting
+from the moment the request was accepted (queue time included).
+
+**Verification.** `docs/API-CONTRACT.md` documents the rule; the fault injector
+and all four demo scenarios pass; a unit probe confirmed that a caller can
+publish successfully immediately after an unknown-outcome publish.
+
+## D3 — closing a queue failed the write loop
+
+**Problem.** After a session abort, the write loop's dequeue raised once the
+queue had been closed, which failed the task group instead of ending the
+generation quietly.
+
+**Cause.** `@aqueue.Queue::try_get` raises on a closed queue, but the write loop
+treated any raise as a fault.
+
+**Fix.** `Session::next_outgoing` treats a closed queue as normal shutdown and
+returns `None`, so the write loop exits cleanly.
+
+**Verification.** `session_wbtest.mbt` covers control-slot reservation, control
+exhaustion, FIFO ordering and abort accounting; the integration and demo suites
+exercise the real write path.
+
+## D4 — `stats()` reported a discarded backlog
+
+**Problem.** After a disconnect, queue occupancy still reported items that had
+been discarded.
+
+**Cause.** `Session::abort` closed both queues with `clear=true`, but the
+occupancy mirrors were only decremented on successful dequeue.
+
+**Fix.** `abort` zeroes both mirrors, and `session_wbtest.mbt` asserts it.
+
+**Verification.** Unit test `abort zeroes the queue occupancy mirrors`; the
+integration test `test_stats_snapshot_reports_live_connection` asserts a zero
+control depth on a live connection.
+
+## D5 — non-finite speeds and empty command ids were accepted
+
+**Problem.** `1e999` parses to `+inf` in the JSON parser and a NaN compares false
+against every bound, so a range-free contract could not reject them by
+comparison alone. An empty `command_id` was accepted, so a receiver could not
+correlate the command. Non-finite telemetry was emitted as the bare tokens
+`Infinity`/`NaN`, which are not JSON.
+
+**Fix.** `finite()` uses the self-comparison NaN test (`value != value`) plus
+infinity comparisons; `parse_velocity_command` rejects empty ids and non-finite
+values; `json_encode_number` emits `null` for non-finite values and all emitted
+payloads go through one escaping helper.
+
+**Verification.** `ros_bridge_wbtest.mbt` covers `1e999`, `-1e999`, `NaN`, empty
+and missing ids, finite edge values, quotes, backslashes, and C0 control
+characters.
+
+## D6 — the thermostat assumed `relay_on = false`
+
+**Problem.** The old controller sample started from `relay_on = false` and
+therefore reported a successful OFF for a 27 C sample even though the real relay
+state was unknown.
+
+**Fix.** `thermostat_step` takes `Bool?` and returns `Uncertain` inside the
+deadband when the state is unknown; the controller queries the device instead of
+guessing. `temperature_wbtest.mbt` covers the exact regression.
+
+## D7 — the integration harness required a pty
+
+**Problem.** `tests/integration/run.py` allocated a pty to defeat `println`
+block buffering. Sandboxes that deny `/dev/ptmx` could not run any integration
+test (`OSError: out of pty devices`), and the buffering hidden by a pty is itself
+a defect.
+
+**Fix.** The drivers and demo processes write each JSON line through the async
+library's unbuffered stdout writer, and the harness uses a plain pipe.
+
+**Verification.** All 10 integration methods pass without a pty.
+
+## Advisories left in place
+
+- The read loop's `with_timeout_opt` slice means a shutdown can take up to
+  100 ms to be observed; this is a deliberate latency/robustness tradeoff.
+- Clean sessions mean an offline client loses messages; the library still does
+  not promise durable delivery.
+- The distribution checks (Mooncakes install, public asset checksums, EMQX
+  interop, 30-minute soak) are release gates documented in `RELEASE.md`; they are
+  not claimed as executed by this document.
