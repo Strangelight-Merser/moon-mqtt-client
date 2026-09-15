@@ -23,7 +23,7 @@ fixed.
 | Separate consumer module | `tests/consumer_smoke.py` | Passed from a fresh module and workspace against the local source copy. |
 | Registry install acceptance | `tests/consumer_smoke.py --registry` | Passed: a clean temporary module resolved `Strangelight-Merser/moon-mqtt-client@0.2.0` from Mooncakes and completed a QoS 1 round trip. Published package sha256 `ee5af2a2503611a427a8555cdcb3cfaeff5ab4527bd4c85fadfe700998cbb76b` equals the verified local zip; registry record time `2026-09-15T08:35:55Z`. |
 | Soak | `tests/soak.py --duration 1800 --cycles 100` | Passed all gates; see the soak section below. |
-| Hosted CI | `.github/workflows/check.yml` | Passed on Linux and macOS for commit `fe2ef4c`; the fixed toolchain check and the rolling-stable compatibility job are separate. |
+| Hosted CI | `.github/workflows/check.yml` | Passed on Linux and macOS for `f07e201` after pinning the exact toolchain archives; [PR run](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/34950310413). Merged into `main` at the identical tree `a5ab5d7`. The optional rolling-stable compatibility job is separate. |
 | All-in-one local check | `./scripts/check.sh` | Passed end to end. |
 
 `moon check` is now warning-free; the previous `fragile_catch_all` advisory is
@@ -122,7 +122,14 @@ uses the official `0.10.12+1634b282e` path (without a leading `v`), verifies the
 original platform hashes and core SHA-256
 `784a12ce4e204a3a98a0b704a021f747b916412efacd4dfe2f4e5c27ae183ac1`, and installs
 those verified bytes. A clean macOS installation passed core bundling and the
-exact `moon`/`moonc` version checks. See D11 in `docs/FINDINGS.md`.
+exact `moon`/`moonc` version checks. Both Linux/macOS push and PR checks then
+passed on `f07e201`; PR #1 merged that tree into `main` at `a5ab5d7`.
+See D11 in `docs/FINDINGS.md`.
+
+The GitHub Release's package ZIP, source archive and checksum file were then
+downloaded from their public URLs without authentication. All three match the
+local files byte for byte; the package and source hashes are recorded in
+`docs/RELEASE-NOTES-v0.2.0.md`.
 
 Local acceptance and installation logs are under the ignored
 `_build/release-v0.2.0/` directory; the public CI and asset records are linked
@@ -147,5 +154,5 @@ single-host baseline, not a benchmark. The soak covers 30 minutes and 100
 recoveries, not days of uptime. It does not establish system-root TLS against a
 public CA, actual hardware execution or leak-free behaviour under sustained
 load beyond the FD-leak check and the drained-queue gate. The device in the demo
-is simulated. Hosted CI results are reported as a status for commit `fe2ef4c`;
-the run itself is on the repository's Actions page.
+is simulated. Hosted CI results above identify `f07e201` and its merge tree;
+later documentation commits have their own runs on the repository's Actions page.

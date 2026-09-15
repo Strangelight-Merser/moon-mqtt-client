@@ -212,9 +212,9 @@ in `docs/VALIDATION.md`.
 - RSS and file-descriptor curves are absent from the recorded soak because this
   sandbox denies `ps` and has no `/proc`; the soak gates and the async runtime's
   FD-leak check still ran.
-- Mooncakes publication, public asset checksums and the final `main` merge are
-  release gates documented in `RELEASE.md`; they are not claimed as executed by
-  this document.
+- Mooncakes publication, public asset checksum verification and the `main`
+  merge are complete; the corresponding records are in `RELEASE.md` and
+  `RELEASE-NOTES-v0.2.0.md`. Participant submission actions are tracked separately.
 - Updating the fixed CI baseline requires choosing a new explicit compiler/core
   version, recording its hashes and rerunning validation; it is independent of
   the optional rolling-stable compatibility check.
