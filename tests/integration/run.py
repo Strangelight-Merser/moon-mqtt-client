@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import pty
 import queue
 import shutil
 import socket
@@ -200,14 +199,17 @@ class Driver:
         child_env = {**os.environ, "MQTT_TEST_SCENARIO": scenario,
                      "MQTT_TEST_HOST": env.pop("host", "127.0.0.1"),
                      "MQTT_TEST_PORT": str(port), **env}
-        master, slave = pty.openpty()
+        # The driver writes each JSON event through moonbitlang/async/stdio's
+        # unbuffered stdout, so a plain pipe is enough. A pty is deliberately not
+        # used: it hides output buffering bugs and is unavailable in sandboxes
+        # that block /dev/ptmx.
         self.process = subprocess.Popen(
             [str(MOON), "run", "examples/test_driver"], cwd=ROOT, env=child_env,
-            stdin=subprocess.PIPE, stdout=slave, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1,
         )
-        os.close(slave)
-        self.stdout = os.fdopen(master, "r", encoding="utf-8", errors="replace")
+        assert self.process.stdout
+        self.stdout = self.process.stdout
         self.events: queue.Queue[dict] = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
 
@@ -346,7 +348,7 @@ class IntegrationTest(unittest.TestCase):
     def test_silent_broker_causes_heartbeat_disconnect(self) -> None:
         broker = self.run_broker()
         proxy = PacketProxy(broker.port, "drop_pingresp"); self.addCleanup(proxy.close)
-        driver = Driver("heartbeat", proxy.port, MQTT_TEST_ACK_TIMEOUT_MS="500")
+        driver = Driver("heartbeat", proxy.port, MQTT_TEST_OPERATION_TIMEOUT_MS="500")
         self.addCleanup(driver.close)
         driver.expect("connected")
         driver.expect("disconnected", 5)
@@ -391,10 +393,23 @@ class IntegrationTest(unittest.TestCase):
         driver.expect("no_message_after_unsubscribe", 2)
         self.assertEqual(driver.finish()[0], 0)
 
+    def test_stats_snapshot_reports_live_connection(self) -> None:
+        broker = self.run_broker()
+        driver = Driver("stats", broker.port); self.addCleanup(driver.close)
+        snapshot = driver.expect("stats")
+        self.assertEqual(snapshot.get("generation"), 1, snapshot)
+        self.assertEqual(snapshot.get("pending"), 0, snapshot)
+        self.assertEqual(snapshot.get("business"), 0, snapshot)
+        self.assertEqual(snapshot.get("control"), 0, snapshot)
+        self.assertEqual(snapshot.get("reconnects"), 0, snapshot)
+        self.assertEqual(snapshot.get("disconnects"), 0, snapshot)
+        self.assertEqual(snapshot.get("unknown"), 0, snapshot)
+        self.assertEqual(driver.finish()[0], 0)
+
     def test_lost_puback_never_reports_success(self) -> None:
         broker = self.run_broker()
         proxy = PacketProxy(broker.port, "drop_puback"); self.addCleanup(proxy.close)
-        driver = Driver("lost_puback", proxy.port, MQTT_TEST_ACK_TIMEOUT_MS="700")
+        driver = Driver("lost_puback", proxy.port, MQTT_TEST_OPERATION_TIMEOUT_MS="700")
         self.addCleanup(driver.close)
         self.assertTrue(proxy.dropped_puback.wait(5), "proxy did not observe a PUBACK")
         outcome = driver.expect("publish_outcome", 5)

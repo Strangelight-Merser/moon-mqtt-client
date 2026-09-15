@@ -14,12 +14,15 @@ pub(all) struct VelocityCommand {
 } derive(Debug, Eq)
 
 ///|
+/// Encode primitive telemetry. Booleans, integers, finite doubles and strings
+/// are each a valid JSON document; non-finite doubles become `null` (see
+/// `json_encode_number`).
 pub fn primitive_payload(value : PrimitiveTelemetry) -> String {
   match value {
-    BoolValue(v) => v.to_string()
+    BoolValue(v) => if v { "true" } else { "false" }
     IntValue(v) => v.to_string()
-    DoubleValue(v) => v.to_string()
-    TextValue(v) => v
+    DoubleValue(v) => json_encode_number(v)
+    TextValue(v) => json_encode_string(v)
   }
 }
 
@@ -40,9 +43,24 @@ fn json_double_field(object : Map[String, Json], name : String) -> Double? {
 }
 
 ///|
-/// Decode the public MQTT JSON command contract. JSON parsing excludes
-/// non-finite numbers; missing and wrongly typed fields are rejected instead of
-/// receiving defaults.
+/// JSON numbers are finite by definition. `1e999` parses to `+inf`, and bare
+/// `NaN`/`Infinity` are not JSON at all, so every non-finite value is rejected
+/// before it can reach a device.
+fn finite(value : Double) -> Bool {
+  let inf = 1.0 / 0.0
+  // `value != value` is the portable NaN test. A NaN speed would otherwise
+  // compare false against every bound and slip through a range check.
+  !(value != value || value == inf || value == -inf)
+}
+
+///|
+/// Decode the public MQTT JSON command contract. Missing, wrongly typed and
+/// non-finite fields are rejected instead of receiving defaults, and the
+/// command id must be non-empty so a receiver can correlate the command.
+///
+/// Velocity *ranges* are a device concern and are deliberately not enforced
+/// here: a generic MQTT contract accepts any finite speed and lets the target
+/// device reject values it cannot execute.
 pub fn parse_velocity_command(payload : String) -> VelocityCommand? {
   let value = @json.parse(payload) catch { _ => return None }
   match value {
@@ -51,7 +69,7 @@ pub fn parse_velocity_command(payload : String) -> VelocityCommand? {
       let linear_x = json_double_field(object, "linear_x")
       let angular_z = json_double_field(object, "angular_z")
       match (id, linear_x, angular_z) {
-        (Some(id), Some(x), Some(z)) =>
+        (Some(id), Some(x), Some(z)) if !id.is_empty() && finite(x) && finite(z) =>
           Some({ command_id: id, linear_x: x, angular_z: z, })
         _ => None
       }
@@ -62,24 +80,34 @@ pub fn parse_velocity_command(payload : String) -> VelocityCommand? {
 
 ///|
 pub fn command_receipt(command_id : String, accepted : Bool) -> String {
-  (
-    {
-      "command_id": command_id,
-      "status": if accepted {
-        "accepted"
-      } else {
-        "rejected"
-      },
-    } : Json).stringify()
+  let out = StringBuilder()
+  json_append_object(out, [
+    ("command_id", json_encode_string(command_id)),
+    ("status", json_encode_string(if accepted { "accepted" } else { "rejected" })),
+  ])
+  out.to_string()
 }
 
 ///|
 /// Convert the application command envelope to the JSON representation of
 /// `geometry_msgs/msg/Twist` used by a JSON-configured MQTT/ROS bridge.
 pub fn twist_payload(command : VelocityCommand) -> String {
-  (
-    {
-      "linear": { "x": command.linear_x, "y": 0.0, "z": 0.0 },
-      "angular": { "x": 0.0, "y": 0.0, "z": command.angular_z },
-    } : Json).stringify()
+  let linear = StringBuilder()
+  json_append_object(linear, [
+    ("x", json_encode_number(command.linear_x)),
+    ("y", "0"),
+    ("z", "0"),
+  ])
+  let angular = StringBuilder()
+  json_append_object(angular, [
+    ("x", "0"),
+    ("y", "0"),
+    ("z", json_encode_number(command.angular_z)),
+  ])
+  let out = StringBuilder()
+  json_append_object(out, [
+    ("linear", linear.to_string()),
+    ("angular", angular.to_string()),
+  ])
+  out.to_string()
 }

@@ -1,0 +1,83 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Strangelight-Merser/moon-mqtt-client/examples/mqtt_demo"
+
+import {
+  "Strangelight-Merser/moon-mqtt-client",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn decode_command(String) -> RelayCommand?
+
+pub fn decode_feedback(String) -> DeviceFeedback?
+
+pub fn decode_query(String) -> String?
+
+pub fn decode_temperature(String) -> Double?
+
+pub fn encode_command(RelayCommand) -> String
+
+pub fn encode_feedback(DeviceFeedback) -> String
+
+pub fn encode_query(String) -> String
+
+pub fn encode_temperature(Double) -> String
+
+pub fn fail_usage(String) -> Unit raise
+
+pub fn finite(Double) -> Bool
+
+pub async fn log_line(String) -> Unit
+
+pub fn relay_step(Bool?, Double) -> RelayDecision
+
+// Errors
+
+// Types and methods
+pub(all) struct DemoConfig {
+  host : String
+  port : Int
+  client_id : String
+  username : String?
+  password : String?
+  tls : Bool
+  ca_file : String?
+  topic_prefix : String
+  drop_first_puback : Bool
+}
+pub fn DemoConfig::from_env(String, String) -> Self
+pub fn DemoConfig::mqtt_config(Self) -> @moon-mqtt-client.Config
+
+pub(all) struct DeviceFeedback {
+  startup_id : String
+  sequence : Int
+  state_on : Bool
+  command_id : String?
+  query_id : String?
+} derive(Eq, @debug.Debug)
+
+pub(all) struct RelayCommand {
+  command_id : String
+  target_on : Bool
+  reason : String
+} derive(Eq, @debug.Debug)
+
+pub(all) enum RelayDecision {
+  SetOn
+  SetOff
+  Hold
+  QueryDevice
+} derive(Eq, @debug.Debug)
+
+pub(all) struct TopicLayout {
+  temperature : String
+  command : String
+  feedback : String
+  query : String
+  availability : String
+}
+pub fn TopicLayout::new(String) -> Self
+
+// Type aliases
+
+// Traits

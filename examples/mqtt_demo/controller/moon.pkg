@@ -1,11 +1,10 @@
 import {
+  "Strangelight-Merser/moon-mqtt-client/examples/mqtt_demo" @demo,
   "Strangelight-Merser/moon-mqtt-client" @mqtt,
+  "Strangelight-Merser/moon-mqtt-client/examples/contracts" @contracts,
   "moonbitlang/async",
-  "moonbitlang/async/stdio",
-  "moonbitlang/core/env",
-  "moonbitlang/core/debug",
-  "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/debug",
 }
 
 supported_targets = "+native"

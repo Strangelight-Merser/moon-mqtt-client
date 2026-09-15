@@ -11,6 +11,9 @@ fn test_session(next_id? : Int = 1) -> Session {
       raw_writer.close()
     },
     outgoing: @aqueue.Queue(kind=@aqueue.Blocking(8)),
+    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(4)),
+    business_depth: 0,
+    control_depth: 0,
     pending: {},
     next_id,
     alive: true,
@@ -22,6 +25,128 @@ fn test_session(next_id? : Int = 1) -> Session {
 }
 
 ///|
+/// Build a pending request for queue tests.
+fn test_pending(id : Int, kind : RequestKind) -> Pending {
+  {
+    id,
+    kind,
+    changed: @cond_var.Cond(),
+    started: false,
+    result: None,
+    queued_at: 0L,
+  }
+}
+
+///|
+test "reserved control slots stay usable when the business queue is full" {
+  let session = test_session()
+  // Saturate the business queue with ordinary publishes.
+  for index in 0..<8 {
+    let request = test_pending(index + 1, Publish1)
+    session.pending[index + 1] = request
+    assert_true(
+      session.outgoing.try_put({
+        bytes: b"publish",
+        pending: Some(request),
+        is_ping: false,
+      }),
+    )
+    session.business_depth += 1
+  }
+  // A further business publish is refused...
+  assert_false(
+    session.outgoing.try_put({
+      bytes: b"overflow",
+      pending: None,
+      is_ping: false,
+    }),
+  )
+  // ...but protocol control packets still have their own reserved slots.
+  session.control(@codec.PubackPacket({ message_id: 7 }), 1024)
+  session.control(@codec.PingreqPacket, 1024, is_ping=true)
+  assert_eq(session.control_depth, 2)
+  assert_eq(session.business_depth, 8)
+  session.abort("test complete")
+}
+
+///|
+test "abort zeroes the queue occupancy mirrors" {
+  let session = test_session()
+  ignore(
+    session.outgoing.try_put({
+      bytes: b"business",
+      pending: None,
+      is_ping: false,
+    }),
+  )
+  session.business_depth += 1
+  session.control(@codec.PingreqPacket, 1024, is_ping=true)
+  assert_eq(session.business_depth, 1)
+  assert_eq(session.control_depth, 1)
+
+  session.abort("transport lost")
+
+  // The queued items were discarded, so stats must not keep reporting them.
+  assert_eq(session.business_depth, 0)
+  assert_eq(session.control_depth, 0)
+}
+
+///|
+test "control exhaustion aborts instead of dropping a control packet" {
+  let session = test_session()
+  for _ in 0..<4 {
+    session.control(@codec.PingreqPacket, 1024, is_ping=true)
+  }
+  try {
+    session.control(@codec.PingrespPacket, 1024)
+    abort("a full control queue must terminate the session")
+  } catch {
+    ProtocolError(reason) =>
+      assert_true(reason.contains("control queue exhausted"))
+    _ => abort("expected ProtocolError when control slots are exhausted")
+  }
+  session.abort("test complete")
+}
+
+///|
+test "control packets are dequeued before business traffic in FIFO order" {
+  let session = test_session()
+  let first = test_pending(1, Publish1)
+  let second = test_pending(2, Publish1)
+  ignore(
+    session.outgoing.try_put({
+      bytes: b"one",
+      pending: Some(first),
+      is_ping: false,
+    }),
+  )
+  session.business_depth += 1
+  ignore(
+    session.outgoing.try_put({
+      bytes: b"two",
+      pending: Some(second),
+      is_ping: false,
+    }),
+  )
+  session.business_depth += 1
+  session.control(@codec.PingreqPacket, 1024, is_ping=true)
+
+  // Control first, then business FIFO; each pop decrements its own depth.
+  let control_item = session.next_outgoing()
+  assert_true(control_item is Some(item) && item.is_ping)
+  assert_eq(session.control_depth, 0)
+  assert_eq(session.business_depth, 2)
+  let one = session.next_outgoing()
+  assert_eq(one.unwrap().bytes, b"one")
+  assert_eq(session.business_depth, 1)
+  let two = session.next_outgoing()
+  assert_eq(two.unwrap().bytes, b"two")
+  assert_eq(session.business_depth, 0)
+  assert_true(session.next_outgoing() is None)
+  session.abort("test complete")
+}
+
+///|
 test "abort classifies unsent and started pending requests" {
   let session = test_session()
   let unsent : Pending = {
@@ -30,6 +155,7 @@ test "abort classifies unsent and started pending requests" {
     changed: @cond_var.Cond(),
     started: false,
     result: None,
+    queued_at: 0L,
   }
   let started : Pending = {
     id: 2,
@@ -37,6 +163,7 @@ test "abort classifies unsent and started pending requests" {
     changed: @cond_var.Cond(),
     started: true,
     result: None,
+    queued_at: 0L,
   }
   session.pending[unsent.id] = unsent
   session.pending[started.id] = started
@@ -64,6 +191,7 @@ test "packet id allocation wraps and skips occupied identifiers" {
     changed: @cond_var.Cond(),
     started: false,
     result: None,
+    queued_at: 0L,
   }
   session.pending[65535] = occupied
 
@@ -81,6 +209,7 @@ test "packet id allocation enforces inflight limit" {
     changed: @cond_var.Cond(),
     started: false,
     result: None,
+    queued_at: 0L,
   }
   session.pending[3] = pending
 
