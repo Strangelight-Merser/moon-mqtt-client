@@ -6,15 +6,25 @@ import {
 }
 
 // Values
+pub fn availability_json(Bool) -> String
+
 pub fn availability_payload(Bool) -> String
 
 pub fn command_receipt(String, Bool) -> String
+
+pub fn json_append_object(StringBuilder, Array[(String, String)]) -> Unit
+
+pub fn json_append_string(StringBuilder, String) -> Unit
+
+pub fn json_encode_number(Double) -> String
+
+pub fn json_encode_string(String) -> String
 
 pub fn parse_velocity_command(String) -> VelocityCommand?
 
 pub fn primitive_payload(PrimitiveTelemetry) -> String
 
-pub fn thermostat_step(Bool, Double) -> ThermostatResult
+pub fn thermostat_step(Bool?, Double) -> ThermostatResult
 
 pub fn twist_payload(VelocityCommand) -> String
 
@@ -25,6 +35,7 @@ pub(all) struct Alert {
   event_id : String
   text : String
 } derive(Eq, @debug.Debug)
+pub fn Alert::to_json(Self) -> String
 
 pub struct AlertDeduper {
   recent : Array[String?]
@@ -59,6 +70,7 @@ pub(all) enum RelayCommand {
   TurnOn
   TurnOff
   NoChange
+  Uncertain
 } derive(Eq, @debug.Debug)
 
 pub(all) struct ThermostatResult {

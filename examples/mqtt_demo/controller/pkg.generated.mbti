@@ -1,0 +1,15 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Strangelight-Merser/moon-mqtt-client/examples/mqtt_demo/controller"
+
+// Values
+
+// Errors
+
+// Types and methods
+type ControllerState
+
+type Outcome
+
+// Type aliases
+
+// Traits

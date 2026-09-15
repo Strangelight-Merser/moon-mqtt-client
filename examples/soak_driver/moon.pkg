@@ -3,7 +3,6 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/stdio",
   "moonbitlang/core/env",
-  "moonbitlang/core/debug",
   "moonbitlang/core/string",
   "moonbitlang/core/encoding/utf8",
 }

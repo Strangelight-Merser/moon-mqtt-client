@@ -20,6 +20,19 @@ pub(all) struct Alert {
 } derive(Debug, Eq)
 
 ///|
+/// Serialize the alert to the published JSON payload. Every string field is
+/// escaped, so an event id or zone containing a quote, a backslash or a control
+/// character cannot produce malformed JSON.
+pub fn Alert::to_json(self : Alert) -> String {
+  let out = StringBuilder()
+  json_append_object(out, [
+    ("event_id", json_encode_string(self.event_id)),
+    ("text", json_encode_string(self.text)),
+  ])
+  out.to_string()
+}
+
+///|
 /// A bounded replay-deduplication window. Once more than `capacity` different
 /// alerts have been emitted, the oldest id can be emitted again if replayed.
 pub struct AlertDeduper {

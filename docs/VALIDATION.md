@@ -1,93 +1,151 @@
-# Executed validation — 2026-09-14
+# Executed validation — v0.2.0
 
-Platform: macOS arm64. MoonBit: `moon 0.1.20260904`,
-`moonc v0.10.12+1634b282e` (2026-09-07).
-Independent peers: Mosquitto 2.0.22 and Eclipse Paho Python 2.1.0;
-Python 3.13.12. TLS tests generate fresh temporary CA/server certificates.
+Platform: macOS arm64. MoonBit: `moon 0.1.20260904 (94521db 2026-09-04)`,
+`moonc v0.10.12+1634b282e` (2026-09-07). Independent peers: Mosquitto 2.0.22,
+Eclipse Paho Python 2.1.0, and the pinned official EMQX `5.8.8` container image
+(digests in `tests/emqx_interop.py`). Python 3.13.12; OpenSSL 3.6.2 (temporary
+certificates per TLS test). See `docs/FINDINGS.md` for the defects this round
+fixed.
 
 ## Results
 
-| Check | Observed result |
-|---|---|
-| `moon check --target native` | Passed; one compiler advisory, described below. |
-| `moon build --target native` | Passed. |
-| MoonBit tests | 13 passed, 0 failed. |
-| Independent Mosquitto/Paho integration | 9 test methods passed. |
-| Controlled protocol fault injector | 5 cases passed. |
-| Scenario network fixtures | Temperature, Frigate events and ROS-side command/telemetry contracts passed. |
-| Separate consumer module | Fresh source copy, new module and workspace, actual QoS 1 subscribe/publish/receive passed. This is local-module consumption, not a Mooncakes installation test. |
+| Check | Command | Observed result |
+|---|---|---|
+| Type check | `moon check --target native` | Passed, no warnings. |
+| Native build | `moon build --target native` | Passed. |
+| MoonBit unit tests | `moon test --target native` | 26 passed, 0 failed. |
+| Mosquitto/Paho integration | `tests/integration/run.py` | 12 methods passed. |
+| Protocol fault injector | `tests/protocol_faults.py` | 10 cases passed. |
+| EMQX interoperability | `tests/emqx.sh` (pinned 5.8.8 image) | Passed: QoS 1 both directions, subscription denial, restart recovery. |
+| Scenario fixture runner | `moon run examples/scenario_runner` | Passed: Frigate dedup + ROS command/telemetry. |
+| State-sync demo smoke | `tests/scenario_smoke.py` | Passed: startup query, ON at 28 C, invalid input ignored, OFF at 26 C, correlated device feedback. |
+| State-sync demo scenarios | `examples/mqtt_demo/demo.py` | 4 scenarios passed: `normal`, `lost_puback`, `broker_restart`, `controller_restart`. |
+| Separate consumer module | `tests/consumer_smoke.py` | Passed from a fresh module and workspace against the local source copy. |
+| Registry install acceptance | `tests/consumer_smoke.py --registry` | Passed: a clean temporary module resolved `Strangelight-Merser/moon-mqtt-client@0.2.0` from Mooncakes and completed a QoS 1 round trip. Published package sha256 `ee5af2a2503611a427a8555cdcb3cfaeff5ab4527bd4c85fadfe700998cbb76b` equals the verified local zip; registry record time `2026-09-15T08:35:55Z`. |
+| Soak | `tests/soak.py --duration 1800 --cycles 100` | Passed all gates; see the soak section below. |
+| Hosted CI | `.github/workflows/check.yml` | Passed on Linux and macOS for commit `fe2ef4c`; the fixed toolchain check and the rolling-stable compatibility job are separate. |
+| All-in-one local check | `./scripts/check.sh` | Passed end to end. |
 
-`validation-logs/final-check.log` contains the final all-in-one run. The test
-harness checks external traffic and process outcomes. Protocol-injector socket
-timeouts are failures, not evidence that a connection was closed.
+`moon check` is now warning-free; the previous `fragile_catch_all` advisory is
+gone because the supervisor records the failure on the session instead of
+re-raising it from a catch-all cleanup block.
 
-## What was exercised
+## What the new checks establish
 
-The 13 MoonBit tests cover stream length validation and exact frame consumption,
-binary QoS 1 payloads, pending-request outcome classification, packet identifier
-wrap/occupation, inflight bounds, invalid Will topics and the three scenario
-rules. Several methods contain multiple boundary assertions.
+**Regression (26 MoonBit tests).** Stream length validation and exact frame
+consumption, binary QoS 1 payloads, `NotSent` vs `OutcomeUnknown` classification,
+packet-identifier wrap/occupation, inflight bounds, reserved control-slot
+independence, control-queue exhaustion, FIFO ordering, occupancy reset on abort,
+invalid Will topics, and the contract rules: threshold inclusivity, the
+`Uncertain` result for an unknown state in the deadband, non-finite and
+empty-id rejection, JSON escaping (quote, backslash, C0 controls), and Frigate
+lifecycle/label/zone/dedup behaviour.
 
-The nine independent-broker tests cover:
+**Integration (12 methods, independent Paho/Mosquitto).** TCP QoS 0/1 both
+directions and SUBACK results; custom-CA TLS success plus wrong-CA and
+wrong-hostname rejection; broker restart with a new generation and
+resubscription; bytewise packet fragmentation; lost PUBACK without a false
+success; missing PINGRESP causing a disconnect; graceful DISCONNECT suppressing
+the Will while an abrupt callback failure sends it; retained delivery and
+zero-byte clear observed by a fresh subscriber; unsubscribe followed by a quiet
+window; a `stats()` snapshot on a live connection; and reconnect counters after
+a broker restart.
 
-- TCP QoS 0/1 in both directions and subscribe acknowledgements;
-- custom-CA TLS success, wrong CA rejection and wrong hostname rejection;
-- broker restart, new connection generation and resubscription;
-- broker-to-client bytewise packet fragmentation;
-- lost PUBACK without a false successful publish;
-- missing PINGRESP causing a disconnect;
-- graceful DISCONNECT suppressing Will, and callback failure causing Will;
-- retained publish observed by a fresh subscriber, and empty retained publish clearing it;
-- unsubscribe completion followed by a bounded window with no further delivery.
+**Fault injector (10 cases, scripted byte-level peer).** Wrong PUBACK identifier;
+operation timeout closing before a late ACK and reconnecting with a reused
+identifier; DISCONNECT emitted with a full inflight table; partial SUBACK
+preserved as one grant and one rejection; a SUBACK whose fixed header arrives
+slowly; a SUBACK whose body arrives in slow pieces; an idle link that then sends
+a SUBACK; cancellation followed by a successful reconnect; a large incoming
+PUBLISH; and a slow consumer terminating with `Backpressure` under a flood. The
+slow-frame cases are the regression for bytes lost across idle slices.
 
-The five protocol-fault cases cover:
+**EMQX (pinned official image).** The same core send/receive, subscription-denied
+SUBACK and restart-recovery scenarios as the Mosquitto suite, which is what makes
+"broker interoperability" a verified statement rather than a Mosquitto-only one.
 
-1. A PUBACK with the wrong ID cannot complete the publish and the client closes.
-2. A live connection without PUBACK reaches the ACK deadline and closes **before**
-   the injector sends the late ACK. An immediate `wait_connected()` waits for the
-   new connection; its publish completes only after its own ACK, even when ID 1
-   is reused on the new connection.
-3. With one inflight slot occupied, graceful close still emits actual `E0 00`.
-4. SUBACK `[0x00, 0x80]` returns one granted result and one rejection.
-5. A consumer which does not drain its two-slot event queue terminates with
-   `Backpressure` during a flood and closes the transport.
+**Soak (30 minutes, 100 recovery cycles).** Parameters: 1800 s, 100
+broker-restart cycles, 1 KiB QoS 1 payloads, 16 concurrent workers,
+`MOONBIT_ASYNC_CHECK_FD_LEAK=1`, quiet broker logging. Observed: 10,828,581
+acknowledged publishes, 10,405,797 messages seen by the independent Paho
+observer with 0 corrupt payloads, 101 generations, 100 reconnects and 100
+disconnects. All final gates were met: `pending=0`, `business=0`, `control=0`,
+`event_queue=0`, `active_workers=0`, every cycle recovered (100/100) and the
+driver exited 0. Recovery time min/median/p95/max = 0.302/0.326/0.351/0.376 s.
+The run used 18,646 bytes of driver evidence; the quiet, capped broker log stayed
+at 0 bytes.
 
-The finite scenario runner uses the documented Frigate `type`/`after` fields,
-deduplicates repeated completed person events, converts an application command
-envelope to nested Twist JSON, checks six Twist fields and roundtrips primitive
-telemetry/receipts. The separate temperature test observes ON, deadband and
-invalid-input suppression, OFF and an offline Will through Paho. These are
-fixtures, not a running Frigate service, ROS graph or physical actuator.
+**State-sync demo (4 scenarios, separate processes).** The controller never
+reports success before correlated device feedback; a lost PUBACK yields
+`unknown` followed by a re-query that re-aligns to ON; a broker restart
+re-queries and ignores stale retained feedback; a controller restart while the
+device stays ON learns ON from its own query rather than from the retained
+payload. All four run from one command and assert on both process output and
+independent Paho observations.
+
+## Throughput and latency (single-machine baseline)
+
+From the soak run above, on this macOS arm64 development machine with both
+processes sharing one host: 6,012 acknowledged QoS 1 publishes per second
+end-to-end, with p50/p95/p99 acknowledgement latency of 3/3/3 ms and a maximum of
+144 ms. Recovery after a broker restart took 0.30-0.38 s.
+
+These are single-host baseline numbers for a debug build, not a performance
+claim. They exist so a later change can be compared against something measured.
+No production-throughput conclusion is drawn.
+
+The soak's automatic resource sampling could not run in the sandbox used here
+(`ps` is denied, so `resource_evidence_available` is `false`), so RSS and
+open-file-descriptor curves are **not** part of this evidence. What is covered:
+the async runtime's own `MOONBIT_ASYNC_CHECK_FD_LEAK` check during the run, and
+a driver that exits 0 after draining with zero pending requests and zero queued
+work. A run on a machine that permits `ps` or exposes `/proc` will populate the
+resource section automatically.
+
+## Release acceptance recheck (2026-09-15)
+
+The source archive generated from tag `v0.2.0` (`85bc0a5`) was extracted into
+a clean temporary directory. `scripts/check.sh` passed there: 26 unit tests,
+12 Mosquitto/Paho integration methods, 10 protocol fault cases, the scenario
+smoke and the separate consumer module. The four state-sync demo scenarios also
+passed. `tests/consumer_smoke.py --registry` then installed `@0.2.0` into a fresh
+temporary module and completed the QoS 1 round trip.
+
+The source archive SHA-256 is
+`0c0dbfb24328d803695d53f139a25cde017af835c49c24c959f92b95a9ee71f7`.
+The original 30-minute soak and EMQX evidence above was retained; those longer
+checks were not repeated for the documentation and CI-installation update.
+
+Fresh branch and tag workflows initially stopped before tests because the
+old installer downloaded the rolling `latest` archives. The fixed installer now
+uses the official `0.10.12+1634b282e` path (without a leading `v`), verifies the
+original platform hashes and core SHA-256
+`784a12ce4e204a3a98a0b704a021f747b916412efacd4dfe2f4e5c27ae183ac1`, and installs
+those verified bytes. A clean macOS installation passed core bundling and the
+exact `moon`/`moonc` version checks. See D11 in `docs/FINDINGS.md`.
+
+Local acceptance and installation logs are under the ignored
+`_build/release-v0.2.0/` directory; the public CI and asset records are linked
+from `docs/RELEASE-NOTES-v0.2.0.md`.
 
 ## Reproduce
 
-With MoonBit, Mosquitto, OpenSSL and the pinned Paho test dependency available:
-
 ```sh
-./scripts/check.sh
+./scripts/check.sh                    # check, test, build, all harnesses
+.venv/bin/python examples/mqtt_demo/demo.py   # the four demo scenarios
+.venv/bin/python tests/consumer_smoke.py --registry   # published 0.2.0 install
 ```
 
-Tool selection can be overridden with `MOON`, `PYTHON`, and `MOSQUITTO`. This
-local development checkout also has ignored `.tools` and `.venv` installations,
-so the command runs here without relying on the earlier research project.
-Those installations are not included in Git or the source distribution.
-
-For only the library tests, use `moon test --target native`. For only external
-interoperability, use `./tests/integration/run.sh`. The other scripts are
-`tests/protocol_faults.py`, `tests/scenario_smoke.py`, and `tests/consumer_smoke.py`.
+Tool selection can be overridden with `MOON`, `PYTHON`, and `MOSQUITTO`. The
+ignored `.tools` and `.venv` installations used here are not part of Git or the
+source distribution.
 
 ## Limits
 
-This is not a conformance certification, a throughput benchmark or a long-term
-soak test. [Linux and macOS hosted CI passed](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/34859567268).
-System-root TLS is implemented but the reproducible positive TLS test uses a
-custom CA. Username/password fields are encoded but an authenticated broker
-policy was not part of these tests. The tests do not establish interoperability
-with every broker, actual hardware execution, unbounded uptime or leak-free
-behavior under sustained load.
-
-The compiler reports `fragile_catch_all` in the session supervisor where the
-original I/O error is recorded and rethrown. An enclosing `defer` independently
-closes the session on every exit, including cancellation. This advisory remains
-visible; future async-runtime/toolchain updates require rerunning cancellation
-and connection-lifecycle tests.
+This is not a conformance certification and the performance numbers are a
+single-host baseline, not a benchmark. The soak covers 30 minutes and 100
+recoveries, not days of uptime. It does not establish system-root TLS against a
+public CA, actual hardware execution or leak-free behaviour under sustained
+load beyond the FD-leak check and the drained-queue gate. The device in the demo
+is simulated. Hosted CI results are reported as a status for commit `fe2ef4c`;
+the run itself is on the repository's Actions page.

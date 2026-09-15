@@ -20,12 +20,19 @@ priv struct Pending {
   changed : @cond_var.Cond
   mut started : Bool
   mut result : Result[Reply, ClientError]?
+  /// Monotonic time the request was accepted, used as the start of the
+  /// `operation_timeout_ms` budget (queue time counts).
+  queued_at : Int64
 }
 
 ///|
+/// One queued write. Business requests carry a `pending` entry; protocol
+/// control packets do not. `is_ping` lets the write loop start the PINGRESP
+/// clock exactly when the PINGREQ write completes.
 priv struct Outgoing {
   bytes : Bytes
   pending : Pending?
+  is_ping : Bool
 }
 
 ///|
@@ -34,11 +41,23 @@ priv struct Session {
   reader : &@io.Reader
   writer : &@io.Writer
   close_transport : () -> Unit
+  /// Business writes. Bounded by `Config::send_capacity`.
   outgoing : @aqueue.Queue[Outgoing]
+  /// Reserved protocol slots. Bounded by `Config::control_capacity` and never
+  /// occupied by business traffic, so a saturated business queue cannot starve
+  /// PUBACK/PINGREQ/DISCONNECT.
+  control_queue : @aqueue.Queue[Outgoing]
+  /// Occupancy mirrors maintained by the producers/consumer. `@aqueue.Queue`
+  /// exposes no length, and `Client::stats` must report occupancy without
+  /// consuming items.
+  mut business_depth : Int
+  mut control_depth : Int
   pending : Map[Int, Pending]
   mut next_id : Int
   mut alive : Bool
   mut last_write : Int64
+  /// Set by the write loop only after PINGREQ has been fully written, so the
+  /// PINGRESP clock never starts while the ping is still queued.
   mut ping_sent : Int64?
   early_messages : Array[Message]
   mut failure_reason : String?
@@ -56,10 +75,20 @@ fn Pending::finish(self : Pending, result : Result[Reply, ClientError]) -> Unit 
 fn Session::abort(self : Session, reason : String) -> Unit {
   if self.alive {
     self.alive = false
-    self.failure_reason = Some(reason)
+    if self.failure_reason is None {
+      self.failure_reason = Some(reason)
+    }
     (self.close_transport)()
+    // `clear=true` discards every queued item, so the occupancy mirrors must be
+    // zeroed here too. Otherwise `Client::stats` would keep reporting a
+    // discarded backlog as if it were still queued.
     self.outgoing.close(error=Closed, clear=true)
+    self.control_queue.close(error=Closed, clear=true)
+    self.business_depth = 0
+    self.control_depth = 0
     for _, request in self.pending {
+      // `started` means the bytes reached the socket write call, so the peer
+      // may have executed the request even though no ACK arrived.
       let error = if request.started {
         OutcomeUnknown(reason)
       } else {
@@ -93,40 +122,167 @@ fn Session::allocate(
 }
 
 ///|
+/// Enqueue one protocol control packet into the reserved slots. A full control
+/// queue is a terminal condition: dropping a PUBACK or a PINGREQ would silently
+/// break the protocol, so the caller terminates the session instead.
 fn Session::control(
   self : Session,
   packet : @codec.Packet,
   limit : Int,
-) -> Unit raise {
-  if !self.outgoing.try_put({ bytes: encode(packet, limit), pending: None, }) {
-    raise Backpressure("outgoing queue cannot accept control packet")
+  is_ping? : Bool = false,
+) -> Unit raise ClientError {
+  if !self.alive {
+    raise NotConnected
+  }
+  let encoded = encode(packet, limit)
+  let accepted = self.control_queue.try_put({
+    bytes: encoded,
+    pending: None,
+    is_ping,
+  }) catch {
+    _ => false
+  }
+  if accepted {
+    self.control_depth += 1
+  } else {
+    raise ProtocolError(
+      "control queue exhausted; terminating instead of dropping a control packet",
+    )
   }
 }
 
 ///|
-async fn Session::write_loop(self : Session, timeout_ms : Int) -> Unit {
-  while self.alive {
-    let item = self.outgoing.get()
-    if item.pending is Some(request) && request.result is Some(_) {
-      continue
+/// Choose the next write. Protocol control packets take priority over business
+/// traffic so heartbeats and acknowledgements cannot be delayed behind a large
+/// business backlog. Both queues are empty exactly when this returns `None`.
+fn Session::next_outgoing(self : Session) -> Outgoing? {
+  // `try_get` raises once the queue has been closed by `abort`. Reaching that
+  // state is normal shutdown, not a fault: the write loop must return quietly so
+  // the supervisor can reconnect. Without this, closing the queue while the
+  // write loop sleeps would fail the task group and hang the reconnection path.
+  let control = self.control_queue.try_get() catch { _ => return None }
+  match control {
+    Some(item) => {
+      if self.control_depth > 0 {
+        self.control_depth -= 1
+      }
+      return Some(item)
     }
-    if item.pending is Some(request) {
-      request.started = true
+    None => ()
+  }
+  let business = self.outgoing.try_get() catch { _ => return None }
+  match business {
+    Some(item) => {
+      if self.business_depth > 0 {
+        self.business_depth -= 1
+      }
+      Some(item)
     }
-    @async.with_timeout(timeout_ms, () => self.writer.write(item.bytes))
-    self.last_write = @async.now()
-    match item.pending {
-      Some(request) =>
-        match request.kind {
-          Publish0 | Disconnect => {
-            self.pending.remove(request.id)
-            request.finish(Ok(Done))
-          }
-          _ => ()
+    None => None
+  }
+}
+
+///|
+/// Mark a request as started. From this point the bytes may reach the peer, so
+/// a later failure is an unknown outcome, never "not sent".
+fn mark_started(request : Pending) -> Unit {
+  if !request.started {
+    request.started = true
+  }
+}
+
+///|
+/// Perform the single socket write for one queued item.
+///
+/// - a cancellation propagates unchanged (scope shutdown),
+/// - a write that exceeds its write timeout aborts the session and stops the
+///   loop: the transport is in an unknown state and must be re-established,
+/// - an expired operation budget aborts the session and stops the loop so a
+///   queued request can be reported as `NotSent` instead of waiting forever.
+async fn Session::write_one(
+  self : Session,
+  item : Outgoing,
+  operation_timeout_ms : Int,
+  write_timeout_ms : Int,
+) -> Bool {
+  let timed_out_before_write = match item.pending {
+    Some(request) =>
+      operation_timeout_ms.to_int64() <= @async.now() - request.queued_at
+    None => false
+  }
+  if timed_out_before_write {
+    // Reaching here means the caller-side operation timeout has not aborted yet
+    // (or the request was queued after it was already late). Stop the loop so
+    // the request is reported as not sent instead of waiting forever.
+    self.abort(
+      "operation timeout of \{operation_timeout_ms} ms expired before the request was written",
+    )
+    return false
+  }
+  match item.pending {
+    Some(request) =>
+      if request.result is Some(_) {
+        // The caller abandoned this request (cancellation) while it was still
+        // queued. It must never be written: it is already settled as not sent.
+        return true
+      }
+    None => ()
+  }
+  if item.pending is Some(request) {
+    mark_started(request)
+  }
+  try {
+    @async.with_timeout(write_timeout_ms, () => self.writer.write(item.bytes))
+  } catch {
+    error => {
+      if @async.is_cancellation_error(error) {
+        raise error
+      }
+      if self.alive {
+        self.abort(
+          "socket write exceeded write_timeout_ms=\{write_timeout_ms}",
+        )
+        return false
+      }
+      return false
+    }
+  }
+  self.last_write = @async.now()
+  if item.is_ping {
+    // PINGRESP timer starts here: after the PINGREQ write completed.
+    self.ping_sent = Some(self.last_write)
+  }
+  match item.pending {
+    Some(request) =>
+      match request.kind {
+        Publish0 | Disconnect => {
+          self.pending.remove(request.id)
+          request.finish(Ok(Done))
         }
-      None => ()
+        _ => ()
+      }
+    None => ()
+  }
+  true
+}
+
+///|
+async fn Session::write_loop(
+  self : Session,
+  operation_timeout_ms : Int,
+  write_timeout_ms : Int,
+) -> Unit {
+  while self.alive {
+    match self.next_outgoing() {
+      Some(item) =>
+        if !self.write_one(item, operation_timeout_ms, write_timeout_ms) {
+          return
+        }
+      None => {
+        // Neither queue has work: stay cancellable with the session task group.
+        @async.sleep(1)
+      }
     }
-    @async.pause()
   }
 }
 
@@ -146,13 +302,16 @@ async fn Session::heartbeat(self : Session, config : Config) -> Unit {
     let now = @async.now()
     match self.ping_sent {
       Some(sent) =>
-        if now - sent >= config.ack_timeout_ms.to_int64() {
-          raise ProtocolError("PINGRESP timeout")
+        if now - sent >= config.ping_response_timeout_ms.to_int64() {
+          raise PingResponseTimeout(
+            "no PINGRESP within \{config.ping_response_timeout_ms} ms of the completed PINGREQ write",
+          )
         }
       None =>
         if now - self.last_write >= (interval / 2).to_int64() {
-          self.ping_sent = Some(now)
-          self.control(@codec.PingreqPacket, config.max_packet_size)
+          // `ping_sent` is only set after the PINGREQ has left the write loop,
+          // so a queued ping can never be mistaken for a lost PINGRESP.
+          self.control(@codec.PingreqPacket, config.max_packet_size, is_ping=true)
         }
     }
   }

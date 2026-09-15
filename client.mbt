@@ -9,6 +9,40 @@ struct Client {
   mut stopped : Bool
   mut generation : Int
   mut worker : @async.Task[Unit]?
+  /// Diagnostics counters. They are plain increments on the owning tasks; the
+  /// snapshot is best-effort and does not claim cross-field atomicity.
+  mut event_depth : Int
+  mut reconnects : Int
+  mut disconnects : Int
+  mut unknown_outcomes : Int
+  mut last_disconnect : String?
+  mut backoff : ReconnectBackoff
+}
+
+///|
+/// Bounded exponential backoff with jitter. The jitter comes from a per-client
+/// xorshift stream, so two clients that lose the same broker do not retry in
+/// lockstep (the previous formula depended only on the generation and attempt,
+/// which made every client world-identical).
+priv struct ReconnectBackoff {
+  mut seed : Int
+}
+
+///|
+fn ReconnectBackoff::new(seed : Int) -> ReconnectBackoff {
+  // Zero is a fixed point of xorshift, so replace it with a constant.
+  { seed: if seed == 0 { 0x9E3779B9 } else { seed } }
+}
+
+///|
+fn ReconnectBackoff::next(self : ReconnectBackoff) -> Int {
+  let mut x = self.seed
+  x = x ^ (x << 13)
+  x = x ^ (x >> 17)
+  x = x ^ (x << 5)
+  self.seed = x
+  // Keep jitter in 0..base/2 without depending on the sign bit.
+  ((x & 0x7FFFFFFF) % 1000)
 }
 
 ///|
@@ -26,6 +60,12 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     stopped: false,
     generation: 0,
     worker: None,
+    event_depth: 0,
+    reconnects: 0,
+    disconnects: 0,
+    unknown_outcomes: 0,
+    last_disconnect: None,
+    backoff: ReconnectBackoff::new(0),
   }
   @async.with_task_group(group => {
     let worker = group.spawn(() => client.supervise())
@@ -48,6 +88,39 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
 }
 
 ///|
+/// Pin the per-client reconnect jitter stream. Intended for tests that need a
+/// reproducible backoff sequence; the value never reaches the wire. Setting it
+/// after a reconnect has started only affects subsequent attempts.
+pub fn Client::set_reconnect_seed(self : Client, seed : Int) -> Unit {
+  self.backoff = ReconnectBackoff::new(seed)
+}
+
+///|
+/// Read-only runtime snapshot. Safe to call from any task; it never blocks.
+pub fn Client::stats(self : Client) -> ClientStats {
+  let (business, control, inflight) = match self.session {
+    Some(session) if session.alive => (
+      session.business_depth,
+      session.control_depth,
+      session.pending.length(),
+    )
+    _ => (0, 0, 0)
+  }
+  {
+    generation: self.generation,
+    connected: self.ready,
+    business_queue_depth: business,
+    control_queue_depth: control,
+    event_queue_depth: self.event_depth,
+    pending_requests: inflight,
+    reconnects: self.reconnects,
+    disconnects: self.disconnects,
+    unknown_outcomes: self.unknown_outcomes,
+    last_disconnect: self.last_disconnect,
+  }
+}
+
+///|
 pub async fn Client::wait_connected(self : Client) -> Unit {
   while !self.ready || !(self.session is Some(session) && session.alive) {
     if self.stopped {
@@ -59,7 +132,11 @@ pub async fn Client::wait_connected(self : Client) -> Unit {
 
 ///|
 pub async fn Client::next_event(self : Client) -> Event {
-  self.events.get()
+  let event = self.events.get()
+  if self.event_depth > 0 {
+    self.event_depth -= 1
+  }
+  event
 }
 
 ///|
@@ -68,6 +145,14 @@ fn Client::emit(self : Client, event : Event) -> Unit raise {
     raise Backpressure(
       "event queue full; client terminates instead of dropping messages",
     )
+  }
+  self.event_depth += 1
+  match event {
+    Disconnected(_, reason) => {
+      self.disconnects += 1
+      self.last_disconnect = Some(reason)
+    }
+    _ => ()
   }
 }
 
@@ -88,6 +173,8 @@ async fn Session::request(
   config : Config,
   kind : RequestKind,
   packet : (Int) -> @codec.Packet,
+  abort_session : (String) -> Unit,
+  on_unknown? : () -> Unit = () => (),
 ) -> Reply {
   if !self.alive {
     raise NotConnected
@@ -106,35 +193,99 @@ async fn Session::request(
     changed: @cond_var.Cond(),
     started: false,
     result: None,
+    queued_at: @async.now(),
   }
   self.pending[id] = request
-  defer (if request.result is None { self.abort("request cancelled") })
-  if !(kind is Disconnect) &&
-    !self.outgoing.try_put({ bytes, pending: Some(request), }) {
-    self.pending.remove(id)
-    request.finish(Err(Backpressure("send queue full")))
-    raise Backpressure("send queue full")
-  }
-  @async.with_timeout(config.ack_timeout_ms, () => {
-    if kind is Disconnect {
-      self.outgoing.put({ bytes, pending: Some(request), })
+  // Cancelling an in-flight request is conservative by design: the connection is
+  // aborted, because after the bytes may have reached the peer the client cannot
+  // know whether the broker executed the request. Every pending request is
+  // therefore settled exactly once, as `NotSent` or `OutcomeUnknown`, and a late
+  // ACK from the old generation can never complete a new request. `client` is the
+  // owner of the wake-up, so the closure is passed in by the caller.
+  defer (if request.result is None { abort_session("request cancelled") })
+  if !(kind is Disconnect) {
+    let accepted = self.outgoing.try_put({
+      bytes,
+      pending: Some(request),
+      is_ping: false,
+    }) catch {
+      _ => false
     }
-    while request.result is None {
+    if !accepted {
+      self.pending.remove(id)
+      request.finish(Err(Backpressure("send queue full")))
+      raise Backpressure("send queue full")
+    }
+    self.business_depth += 1
+  }
+  if kind is Disconnect {
+    // DISCONNECT still completes when the business queue is full: the control
+    // slots are reserved and never occupied by business traffic.
+    try {
+      self.control_queue.put({ bytes, pending: Some(request), is_ping: false })
+      self.control_depth += 1
+    } catch {
+      _ => raise NotSent("control queue closed before DISCONNECT was queued")
+    }
+  }
+  // Budget the whole operation, including the time it spent queued.
+  //
+  // Deliberately not `@async.with_timeout`: that helper implements its timer as
+  // a failing task-group child. This watchdog returns normally and only wakes
+  // the condition variable; the request coroutine owns deadline classification
+  // and session abort, so its cancellation state remains clean.
+  let deadline = request.queued_at + config.operation_timeout_ms.to_int64()
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, () => {
+      let remaining = deadline - @async.now()
+      if remaining > 0 {
+        @async.sleep(remaining.to_int())
+      }
+      request.changed.broadcast()
+    })
+    while request.result is None && @async.now() < deadline {
       request.changed.wait()
     }
-  }) catch {
-    error => {
-      self.abort(error.to_string())
-      if @async.is_cancellation_error(error) {
-        raise error
-      }
-    }
+  })
+  if request.result is None && @async.now() >= deadline {
+    // The caller-side budget expired. Aborting settles this request and every
+    // other pending request exactly once.
+    abort_session("operation_timeout_ms=\{config.operation_timeout_ms} expired")
   }
   match request.result {
     Some(Ok(reply)) => reply
-    Some(Err(error)) => raise error
+    Some(Err(error)) => {
+      match error {
+        OutcomeUnknown(_) => on_unknown()
+        _ => ()
+      }
+      raise error
+    }
     None => raise Closed
   }
+}
+
+///|
+/// Count a request that may have executed without an acknowledgement. Called on
+/// every `OutcomeUnknown` completion so `Client::stats` can expose it.
+fn Client::note_unknown(self : Client) -> Unit {
+  self.unknown_outcomes += 1
+}
+
+///|
+/// Abort the current session and wake the supervisor.
+///
+/// A task-group child that raises cannot wake a group body parked on
+/// `Cond::wait`, so any code that kills a session must broadcast `changed`
+/// explicitly. Without this, a caller-side abort (operation timeout or
+/// cancellation) leaves the supervisor asleep and the next connection is never
+/// attempted.
+fn Client::abort_session(self : Client, reason : String) -> Unit {
+  match self.session {
+    Some(session) => session.abort(reason)
+    None => ()
+  }
+  self.changed.broadcast()
 }
 
 ///|
@@ -171,6 +322,8 @@ pub async fn Client::publish(
           dup: false,
         })
       },
+      reason => self.abort_session(reason),
+      on_unknown=() => self.note_unknown(),
     ),
   )
 }
@@ -195,7 +348,7 @@ async fn Client::subscribe_on(
         message_id: id,
         topics: topics.map(t => { topic: t.topic, qos: t.qos.wire(), }),
       })
-    }) {
+    }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()) {
     Subscriptions(results) => results
     _ => raise ProtocolError("wrong subscribe completion")
   }
@@ -208,7 +361,7 @@ pub async fn Client::unsubscribe(self : Client, topics : Array[String]) -> Unit 
   ignore(
     session.request(self.config, Unsubscribe(topics), id => {
       @codec.UnsubscribePacket({ message_id: id, topics, })
-    }),
+    }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()),
   )
 }
 
@@ -232,7 +385,12 @@ pub async fn Client::disconnect(self : Client) -> Unit {
   }
   if self.session is Some(session) && session.alive {
     ignore(
-      session.request(self.config, Disconnect, _ => @codec.DisconnectPacket),
+      session.request(
+        self.config,
+        Disconnect,
+        _ => @codec.DisconnectPacket,
+        reason => self.abort_session(reason),
+      ),
     )
   }
   if self.session is Some(session) {

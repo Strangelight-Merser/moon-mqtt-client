@@ -1,5 +1,5 @@
 // Generated using `moon info`, DON'T EDIT IT
-package "Strangelight-Merser/moon-mqtt-client/examples/temperature_controller"
+package "Strangelight-Merser/moon-mqtt-client/examples/mqtt_demo/test_device"
 
 // Values
 

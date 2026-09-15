@@ -97,7 +97,7 @@ async fn run_fixture(host : String, port : Int) -> Unit {
     "moon-scenario-fixture",
     port~,
     connect_timeout_ms=3000,
-    ack_timeout_ms=3000,
+    operation_timeout_ms=3000,
     reconnect_attempts=0,
   )
   @mqtt.with_client(config, async fn(client) {
@@ -148,9 +148,7 @@ async fn run_fixture(host : String, port : Int) -> Unit {
                   Some(alert) =>
                     client.publish(
                       alert_output,
-                      @utf8.encode(
-                        "{\"event_id\":\"\{alert.event_id}\",\"zone\":\"front_door\"}",
-                      ),
+                      @utf8.encode(alert.to_json()),
                       qos=@mqtt.AtLeastOnce,
                     )
                   None => ()
@@ -197,7 +195,9 @@ async fn run_fixture(host : String, port : Int) -> Unit {
           } else if message.topic == alert_output {
             require(
               decode_text(message.payload) ==
-              Some("{\"event_id\":\"event-17\",\"zone\":\"front_door\"}"),
+              Some(
+                "{\"event_id\":\"event-17\",\"text\":\"person completed in front_door\"}",
+              ),
               "wrong alert output",
             )
             alert_count += 1

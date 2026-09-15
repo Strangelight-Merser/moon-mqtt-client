@@ -4,46 +4,52 @@
 接收设备/应用消息，执行自己的规则，再发布结果。底层编解码复用现有开源包；
 本项目实现异步连接、收发、确认、心跳、TLS、断线重连和失败语义。
 
-首版已公开在 [GitHub](https://github.com/Strangelight-Merser/moon-mqtt-client)。
-注册表版本和安装验证记录见 [Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)。
-示例尚未经过真实硬件部署。
+已公开在 [GitHub](https://github.com/Strangelight-Merser/moon-mqtt-client)，
+注册表版本与安装验证记录见 [Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)。
+**示例中的设备是模拟进程，没有真实硬件。**
 
-本机完整复跑：`./scripts/check.sh`。工具链、Paho 和本地测试 broker 已准备在本目录的忽略项中。
+本机完整复跑：`./scripts/check.sh`。工具链、Paho 与本地测试 broker 位于本目录的忽略项中。
 
 ## 看什么
 
 - [README](../README.md)：支持范围、API、运行与失败语义。
+- [运行时契约](API-CONTRACT.md)：超时、队列、取消与失败分类的正式约定。
 - [三个使用场景](SCENARIOS.md)：输入、业务规则、输出以及各自边界。
+- [本轮缺陷与修复](FINDINGS.md)：问题、原因、修复与验证方式。
 - [实测记录](VALIDATION.md)：哪些检查真正运行通过。
-- [参赛与发布剩余事项](RELEASE.md)：工程完成和正式提交分开核对。
+- [发布与参赛清单](RELEASE.md)：已完成项与仍待完成的发布门禁。
 
-## 最直观的演示
+## 最直观的演示：状态同步
 
-启动本机 Mosquitto，然后运行：
-
-```sh
-./scripts/moon.sh run examples/scenario_runner
-```
-
-它会通过真实 broker 发出并收回样例消息，验证：同一个 Frigate 人员事件不会在
-去重窗口内重复告警；自定义速度命令转换成 ROS Twist 的 JSON 字段；遥测和
-应用层接收回执能完成往返。成功时会打印 `scenario fixture passed`。
-
-另一个长期运行的例子：
+一条命令跑完四个场景（正常开关、丢 PUBACK、broker 重启、控制器重启）：
 
 ```sh
-./scripts/moon.sh run examples/temperature_controller
+./scripts/moon.sh build --target native
+.venv/bin/python examples/mqtt_demo/demo.py
 ```
 
-向 `demo/thermostat/temperature` 发 `{"temperature_c":28}`，输出一次 ON；
-发 27 保持原状态；发 26 输出 OFF。状态是示例控制器自己的逻辑状态，不是实际继电器反馈。
-两个示例都支持 `MQTT_TEST_HOST` / `MQTT_TEST_PORT`，默认 `127.0.0.1:1883`。
+- 控制器只维护**期望状态**，收到设备反馈前不会显示“执行成功”。
+- 设备是独立进程（同一库），反馈带回启动 ID、序号和关联命令/查询 ID。
+- 反馈可保留，但控制器启动/重连后一定主动查询，只认自己这次查询 ID 对应的新反馈。
+- 阈值 28℃ 开、26℃ 关；中间区间保持最近目标；首次处于中间区间且状态未知时先查询。
+
+每条输出都把 `desired`（期望）、`result`（sent / not_sent / unknown）和
+`reported`（设备实际反馈）分开，不混成一种“成功”。
+
+## 其他演示
+
+```sh
+# 薄层发布/订阅 CLI（支持 QoS、retain、TLS、--stats 诊断）
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  publish --host 127.0.0.1 -t lab/state -m ON --qos 1 --retain --stats
+
+# Frigate 去重 + ROS 命令/遥测契约（真实 broker 往返）
+./scripts/moon.sh run examples/scenario_runner --target native
+```
 
 ## 当前最重要的约定
 
 QoS 1 成功只表示收到 broker 的 PUBACK，不表示机器人或设备真的执行。
-若数据已开始发送，但断线或确认超时，API 返回 `OutcomeUnknown`，由业务判断能否重试。
-重连使用新的 clean session，恢复订阅；离线期间可能缺消息，不自动重放旧命令。
-
-如果要继续做真实应用，优先接入一个现有 MQTT 数据源，保留其原始消息作为测试样本。
-Frigate 和 ROS 目前是按公开格式构造的契约示例，不是三个已部署的用户案例。
+若数据已开始发送但断线或确认超时，API 返回 `OutcomeUnknown`，由业务查询或重发幂等命令。
+重连使用新的 clean session 并恢复订阅；离线期间可能缺消息，不自动重放旧命令。
+取消未完成请求会中止当前连接（保守语义），并保证每个请求以“未发送”或“未知”结束。

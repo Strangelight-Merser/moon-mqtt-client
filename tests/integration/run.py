@@ -11,7 +11,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-import pty
 import queue
 import shutil
 import socket
@@ -49,14 +48,31 @@ def wait_port(port: int, deadline: float = 3.0) -> None:
 
 
 class Broker:
-    def __init__(self, *, tls: bool = False, port: int | None = None):
+    def __init__(self, *, tls: bool = False, authenticated: bool = False,
+                 port: int | None = None):
         self.port = port or free_port()
         self.tls = tls
+        self.authenticated = authenticated
         self.temp = Path(tempfile.mkdtemp(prefix="moon-mqtt-it-"))
         self.process: subprocess.Popen[str] | None = None
 
     def start(self) -> None:
-        lines = [f"listener {self.port} 127.0.0.1", "allow_anonymous true", "log_type all"]
+        lines = [f"listener {self.port} 127.0.0.1", "log_type all"]
+        if self.authenticated:
+            password_file = self.temp / "passwords"
+            acl_file = self.temp / "acl"
+            # Fixed PBKDF2-SHA512 fixture generated in Mosquitto's documented
+            # password-file format. The cleartext is deliberately test-only.
+            password_file.write_text(
+                "moon:$7$101$MDEyMzQ1Njc4OWFi$"
+                "ce5rBZuUHDrLzLiwk/47IcBv56gfmNa6DRRAD6lCasNKttQaV4jhuIOCvmgPyR0I4MEcJTS3Cb981Vdi6rNwWQ==\n"
+            )
+            acl_file.write_text("user moon\ntopic readwrite allowed/#\n")
+            password_file.chmod(0o600)
+            acl_file.chmod(0o600)
+            lines += ["allow_anonymous false", f"password_file {password_file}", f"acl_file {acl_file}"]
+        else:
+            lines.append("allow_anonymous true")
         if self.tls:
             if not (self.temp / "ca.pem").exists():
                 self._certificates()
@@ -200,14 +216,17 @@ class Driver:
         child_env = {**os.environ, "MQTT_TEST_SCENARIO": scenario,
                      "MQTT_TEST_HOST": env.pop("host", "127.0.0.1"),
                      "MQTT_TEST_PORT": str(port), **env}
-        master, slave = pty.openpty()
+        # The driver writes each JSON event through moonbitlang/async/stdio's
+        # unbuffered stdout, so a plain pipe is enough. A pty is deliberately not
+        # used: it hides output buffering bugs and is unavailable in sandboxes
+        # that block /dev/ptmx.
         self.process = subprocess.Popen(
             [str(MOON), "run", "examples/test_driver"], cwd=ROOT, env=child_env,
-            stdin=subprocess.PIPE, stdout=slave, stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1,
         )
-        os.close(slave)
-        self.stdout = os.fdopen(master, "r", encoding="utf-8", errors="replace")
+        assert self.process.stdout
+        self.stdout = self.process.stdout
         self.events: queue.Queue[dict] = queue.Queue()
         threading.Thread(target=self._read, daemon=True).start()
 
@@ -218,7 +237,7 @@ class Driver:
                     self.events.put(json.loads(line))
                 except json.JSONDecodeError:
                     self.events.put({"event": "non_json_stdout", "line": line.rstrip()})
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     def expect(self, event: str, timeout: float = 8.0) -> dict:
@@ -263,8 +282,8 @@ class Driver:
 
 
 class IntegrationTest(unittest.TestCase):
-    def run_broker(self, *, tls: bool = False) -> Broker:
-        broker = Broker(tls=tls); broker.start()
+    def run_broker(self, *, tls: bool = False, authenticated: bool = False) -> Broker:
+        broker = Broker(tls=tls, authenticated=authenticated); broker.start()
         self.addCleanup(broker.close)
         return broker
 
@@ -287,7 +306,41 @@ class IntegrationTest(unittest.TestCase):
         driver.expect("received_qos0"); driver.expect("received_qos1")
         code, stderr = driver.finish()
         self.assertEqual(code, 0, stderr)
+        end = time.monotonic() + 3
+        while len(received) < 2 and time.monotonic() < end:
+            time.sleep(.025)
         self.assertEqual(sorted(received), [("it/from-moon/qos0", b"moon-qos0", 0), ("it/from-moon/qos1", b"moon-qos1", 1)])
+
+    def test_authenticated_broker_credentials_and_subscription_acl(self) -> None:
+        broker = self.run_broker(authenticated=True)
+        good = Driver(
+            "auth_acl", broker.port,
+            MQTT_TEST_USERNAME="moon", MQTT_TEST_PASSWORD="correct-password",
+        )
+        self.addCleanup(good.close)
+        good.expect("auth_acl_ready")
+        publisher = paho.Client(
+            paho.CallbackAPIVersion.VERSION2,
+            client_id="paho-authenticated-acl-oracle",
+        )
+        publisher.username_pw_set("moon", "correct-password")
+        publisher.connect("127.0.0.1", broker.port)
+        publisher.loop_start()
+        try:
+            publisher.publish("denied/read", b"must-not-arrive", qos=1).wait_for_publish(3)
+        finally:
+            publisher.disconnect()
+            publisher.loop_stop()
+        good.expect("acl_denied_delivery", 2)
+        self.assertEqual(good.finish()[0], 0)
+
+        bad = Driver(
+            "fragment", broker.port,
+            MQTT_TEST_USERNAME="moon", MQTT_TEST_PASSWORD="wrong-password",
+        )
+        self.addCleanup(bad.close)
+        code, stderr = bad.finish()
+        self.assertNotEqual(code, 0, f"broker accepted wrong credentials: {stderr}")
 
     def test_tls_custom_ca_and_rejections(self) -> None:
         broker = self.run_broker(tls=True)
@@ -343,13 +396,31 @@ class IntegrationTest(unittest.TestCase):
         while not messages and time.monotonic() < end: time.sleep(.025)
         self.assertEqual(messages, [b"abrupt"])
 
+    def test_reconnect_stats_count_generations(self) -> None:
+        broker = self.run_broker()
+        driver = Driver("reconnect", broker.port); self.addCleanup(driver.close)
+        first = driver.expect("connected"); self.assertEqual(first.get("generation"), 1)
+        broker.stop(); driver.expect("disconnected")
+        broker.start(); second = driver.expect("connected", 12)
+        self.assertGreater(second.get("generation", 0), 1)
+        publisher = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-reconnect-stats")
+        publisher.connect("127.0.0.1", broker.port); publisher.loop_start()
+        publisher.publish("it/reconnect", b"after-restart", qos=1).wait_for_publish(3)
+        publisher.disconnect(); publisher.loop_stop()
+        outcome = driver.expect("message_after_reconnect")
+        self.assertGreaterEqual(outcome.get("generation", 0), 2, outcome)
+        self.assertGreaterEqual(outcome.get("reconnects", 0), 1, outcome)
+        self.assertGreaterEqual(outcome.get("disconnects", 0), 1, outcome)
+        self.assertEqual(outcome.get("pending"), 0, outcome)
+        self.assertEqual(driver.finish()[0], 0)
+
     def test_silent_broker_causes_heartbeat_disconnect(self) -> None:
         broker = self.run_broker()
         proxy = PacketProxy(broker.port, "drop_pingresp"); self.addCleanup(proxy.close)
-        driver = Driver("heartbeat", proxy.port, MQTT_TEST_ACK_TIMEOUT_MS="500")
+        driver = Driver("heartbeat", proxy.port, MQTT_TEST_OPERATION_TIMEOUT_MS="500")
         self.addCleanup(driver.close)
         driver.expect("connected")
-        driver.expect("disconnected", 5)
+        driver.expect("disconnected", 10)
         self.assertEqual(driver.finish()[0], 0)
 
     def test_retained_delivery_and_zero_byte_clear(self) -> None:
@@ -391,10 +462,23 @@ class IntegrationTest(unittest.TestCase):
         driver.expect("no_message_after_unsubscribe", 2)
         self.assertEqual(driver.finish()[0], 0)
 
+    def test_stats_snapshot_reports_live_connection(self) -> None:
+        broker = self.run_broker()
+        driver = Driver("stats", broker.port); self.addCleanup(driver.close)
+        snapshot = driver.expect("stats")
+        self.assertEqual(snapshot.get("generation"), 1, snapshot)
+        self.assertEqual(snapshot.get("pending"), 0, snapshot)
+        self.assertEqual(snapshot.get("business"), 0, snapshot)
+        self.assertEqual(snapshot.get("control"), 0, snapshot)
+        self.assertEqual(snapshot.get("reconnects"), 0, snapshot)
+        self.assertEqual(snapshot.get("disconnects"), 0, snapshot)
+        self.assertEqual(snapshot.get("unknown"), 0, snapshot)
+        self.assertEqual(driver.finish()[0], 0)
+
     def test_lost_puback_never_reports_success(self) -> None:
         broker = self.run_broker()
         proxy = PacketProxy(broker.port, "drop_puback"); self.addCleanup(proxy.close)
-        driver = Driver("lost_puback", proxy.port, MQTT_TEST_ACK_TIMEOUT_MS="700")
+        driver = Driver("lost_puback", proxy.port, MQTT_TEST_OPERATION_TIMEOUT_MS="700")
         self.addCleanup(driver.close)
         self.assertTrue(proxy.dropped_puback.wait(5), "proxy did not observe a PUBACK")
         outcome = driver.expect("publish_outcome", 5)

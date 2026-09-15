@@ -19,6 +19,9 @@ pub(all) suberror ClientError {
   OutcomeUnknown(String)
   ConnectionRefused(String)
   ReconnectExhausted(String)
+  OperationTimeout(String)
+  WriteTimeout(String)
+  PingResponseTimeout(String)
 } derive(@debug.Debug)
 
 // Types and methods
@@ -26,9 +29,24 @@ type Client
 pub async fn Client::disconnect(Self) -> Unit
 pub async fn Client::next_event(Self) -> Event
 pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool) -> Unit
+pub fn Client::set_reconnect_seed(Self, Int) -> Unit
+pub fn Client::stats(Self) -> ClientStats
 pub async fn Client::subscribe(Self, Array[Subscription]) -> Array[SubscriptionResult]
 pub async fn Client::unsubscribe(Self, Array[String]) -> Unit
 pub async fn Client::wait_connected(Self) -> Unit
+
+pub(all) struct ClientStats {
+  generation : Int
+  connected : Bool
+  business_queue_depth : Int
+  control_queue_depth : Int
+  event_queue_depth : Int
+  pending_requests : Int
+  reconnects : Int
+  disconnects : Int
+  unknown_outcomes : Int
+  last_disconnect : String?
+}
 
 pub(all) struct Config {
   host : String
@@ -40,7 +58,9 @@ pub(all) struct Config {
   will : Will?
   keep_alive_secs : Int
   connect_timeout_ms : Int
-  ack_timeout_ms : Int
+  operation_timeout_ms : Int
+  write_timeout_ms : Int
+  ping_response_timeout_ms : Int
   send_capacity : Int
   receive_capacity : Int
   max_inflight : Int
@@ -48,8 +68,9 @@ pub(all) struct Config {
   reconnect_delay_ms : Int
   max_reconnect_delay_ms : Int
   reconnect_attempts : Int
+  control_capacity : Int
 }
-pub fn Config::new(String, String, port? : Int, tls? : TlsMode, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, ack_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int) -> Self
+pub fn Config::new(String, String, port? : Int, tls? : TlsMode, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
 
 pub(all) enum Event {
   Connected(Int)

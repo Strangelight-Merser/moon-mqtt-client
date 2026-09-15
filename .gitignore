@@ -4,3 +4,4 @@ _build/
 .venv/
 __pycache__/
 tests/integration/artifacts/
+.DS_Store

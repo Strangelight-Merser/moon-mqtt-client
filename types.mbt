@@ -59,7 +59,42 @@ pub(all) suberror ClientError {
   OutcomeUnknown(String)
   ConnectionRefused(String)
   ReconnectExhausted(String)
+  /// The request's total `operation_timeout_ms` expired. Raised through the
+  /// request as `NotSent` (never written) or `OutcomeUnknown` (write started).
+  OperationTimeout(String)
+  /// A single socket write exceeded `write_timeout_ms`.
+  WriteTimeout(String)
+  /// PINGREQ completed its write but no PINGRESP arrived within
+  /// `ping_response_timeout_ms`.
+  PingResponseTimeout(String)
 } derive(@debug.Debug)
+
+///|
+/// Read-only runtime snapshot returned by `Client::stats`. It contains counters
+/// and queue occupancy only: no credentials, no message bodies, and no peer
+/// address beyond the reason text the client already reports through
+/// `Disconnected`.
+pub(all) struct ClientStats {
+  /// Connection generation; increments on every successful CONNACK.
+  generation : Int
+  connected : Bool
+  /// Business writes waiting to be written (`send_capacity` bound).
+  business_queue_depth : Int
+  /// Protocol control packets waiting to be written (`control_capacity` bound).
+  control_queue_depth : Int
+  /// Application events waiting to be consumed (`receive_capacity` bound).
+  event_queue_depth : Int
+  /// Requests allocated but not yet completed.
+  pending_requests : Int
+  /// Cumulative successful reconnects since the client was created.
+  reconnects : Int
+  /// Cumulative disconnects observed; each one starts a new generation.
+  disconnects : Int
+  /// Requests that finished as `OutcomeUnknown`: written, never acknowledged.
+  unknown_outcomes : Int
+  /// Reason of the most recent disconnect, if any.
+  last_disconnect : String?
+}
 
 ///|
 pub(all) struct Config {
@@ -72,7 +107,13 @@ pub(all) struct Config {
   will : Will?
   keep_alive_secs : Int
   connect_timeout_ms : Int
-  ack_timeout_ms : Int
+  /// Total time from request acceptance to completion, covering queueing, the
+  /// write and waiting for the acknowledgement.
+  operation_timeout_ms : Int
+  /// Time allowed for one socket write of an already-dequeued request.
+  write_timeout_ms : Int
+  /// Time allowed for PINGRESP after PINGREQ has completed its write.
+  ping_response_timeout_ms : Int
   send_capacity : Int
   receive_capacity : Int
   max_inflight : Int
@@ -80,6 +121,9 @@ pub(all) struct Config {
   reconnect_delay_ms : Int
   max_reconnect_delay_ms : Int
   reconnect_attempts : Int
+  /// Reserved slots for protocol control packets (PUBACK, PINGREQ, DISCONNECT)
+  /// that business traffic may never occupy.
+  control_capacity : Int
 }
 
 ///|
@@ -93,7 +137,9 @@ pub fn Config::new(
   will? : Will? = None,
   keep_alive_secs? : Int = 30,
   connect_timeout_ms? : Int = 5000,
-  ack_timeout_ms? : Int = 5000,
+  operation_timeout_ms? : Int = 5000,
+  write_timeout_ms? : Int = 5000,
+  ping_response_timeout_ms? : Int = 5000,
   send_capacity? : Int = 64,
   receive_capacity? : Int = 128,
   max_inflight? : Int = 32,
@@ -101,6 +147,7 @@ pub fn Config::new(
   reconnect_delay_ms? : Int = 250,
   max_reconnect_delay_ms? : Int = 5000,
   reconnect_attempts? : Int = 10,
+  control_capacity? : Int = 16,
 ) -> Config {
   {
     host,
@@ -112,7 +159,9 @@ pub fn Config::new(
     will,
     keep_alive_secs,
     connect_timeout_ms,
-    ack_timeout_ms,
+    operation_timeout_ms,
+    write_timeout_ms,
+    ping_response_timeout_ms,
     send_capacity,
     receive_capacity,
     max_inflight,
@@ -120,6 +169,7 @@ pub fn Config::new(
     reconnect_delay_ms,
     max_reconnect_delay_ms,
     reconnect_attempts,
+    control_capacity,
   }
 }
 
@@ -143,9 +193,12 @@ fn Config::validate(self : Config) -> Unit raise ClientError {
     raise InvalidConfig("keep_alive_secs must be 0..65535")
   }
   if self.connect_timeout_ms <= 0 ||
-    self.ack_timeout_ms <= 0 ||
+    self.operation_timeout_ms <= 0 ||
+    self.write_timeout_ms <= 0 ||
+    self.ping_response_timeout_ms <= 0 ||
     self.send_capacity <= 0 ||
     self.receive_capacity <= 0 ||
+    self.control_capacity <= 0 ||
     self.max_inflight <= 0 ||
     self.max_inflight > 65535 ||
     self.max_packet_size < 8 ||
