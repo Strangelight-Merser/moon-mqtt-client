@@ -15,7 +15,7 @@ not claimed as complete.
 | Reusable scope | Done | Native MQTT 3.1.1 QoS 0/1 client; no application-specific topic coupling in the library. |
 | Primary scenario | Done | `examples/mqtt_demo` + `demo.py`: 4 scenarios, simulated device, Paho observer, one command. |
 | Three complete scenarios | Done | `docs/SCENARIOS.md`: state-sync thermostat, Frigate alert contract, ROS bridge contract. |
-| Regression and fault coverage | Done | `docs/FINDINGS.md`; `docs/VALIDATION.md` records 28 unit, 11 integration, 5 fault, 4 demo results. |
+| Regression and fault coverage | Done | `docs/FINDINGS.md`; `docs/VALIDATION.md` records 26 unit, 11 integration, 5 fault, 4 demo results. |
 | Warning-free build | Done | `moon check --target native` passes with no warnings. |
 | License and attribution | Done | Apache-2.0, `NOTICE`, separate pinned codec and async dependencies. |
 | Public repository | Done | https://github.com/Strangelight-Merser/moon-mqtt-client |

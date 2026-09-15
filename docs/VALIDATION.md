@@ -11,7 +11,7 @@ See `docs/FINDINGS.md` for the defects this round fixed.
 |---|---|---|
 | Type check | `moon check --target native` | Passed, no warnings. |
 | Native build | `moon build --target native` | Passed. |
-| MoonBit unit tests | `moon test --target native` | 28 passed, 0 failed. |
+| MoonBit unit tests | `moon test --target native` | 26 passed, 0 failed. |
 | Mosquitto/Paho integration | `tests/integration/run.py` | 11 methods passed. |
 | Protocol fault injector | `tests/protocol_faults.py` | 5 cases passed. |
 | Scenario fixture runner | `moon run examples/scenario_runner` | Passed: Frigate dedup + ROS command/telemetry. |
@@ -26,7 +26,7 @@ re-raising it from a catch-all cleanup block.
 
 ## What the new checks establish
 
-**Regression (28 MoonBit tests).** Stream length validation and exact frame
+**Regression (26 MoonBit tests).** Stream length validation and exact frame
 consumption, binary QoS 1 payloads, `NotSent` vs `OutcomeUnknown` classification,
 packet-identifier wrap/occupation, inflight bounds, reserved control-slot
 independence, control-queue exhaustion, FIFO ordering, occupancy reset on abort,
