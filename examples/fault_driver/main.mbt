@@ -11,11 +11,20 @@ fn config(
   receive_capacity? : Int = 128,
 ) -> @mqtt.Config raise {
   let case = env("MQTT_FAULT_CASE")
+  // Slow-fragment cases isolate the 100 ms reader-slice boundary. Their peer
+  // deliberately sleeps in Python, whose wake-up can be delayed on hosted CI;
+  // a wider operation budget keeps scheduler delay from becoming the assertion.
+  // The old whole-packet slice still fails these cases because it loses the
+  // already-consumed header byte, regardless of this request budget.
+  let operation_timeout_ms = match case {
+    "slow_suback_header" | "slow_suback_body" => 1000
+    _ => 250
+  }
   @mqtt.Config::new(
     "127.0.0.1",
     "fault-" + case,
     port=@string.from_str(env("MQTT_FAULT_PORT")),
-    operation_timeout_ms=250,
+    operation_timeout_ms~,
     write_timeout_ms=250,
     ping_response_timeout_ms=250,
     reconnect_delay_ms=30,
