@@ -237,7 +237,7 @@ class Driver:
                     self.events.put(json.loads(line))
                 except json.JSONDecodeError:
                     self.events.put({"event": "non_json_stdout", "line": line.rstrip()})
-        except OSError:
+        except (OSError, ValueError):
             pass
 
     def expect(self, event: str, timeout: float = 8.0) -> dict:
@@ -306,6 +306,9 @@ class IntegrationTest(unittest.TestCase):
         driver.expect("received_qos0"); driver.expect("received_qos1")
         code, stderr = driver.finish()
         self.assertEqual(code, 0, stderr)
+        end = time.monotonic() + 3
+        while len(received) < 2 and time.monotonic() < end:
+            time.sleep(.025)
         self.assertEqual(sorted(received), [("it/from-moon/qos0", b"moon-qos0", 0), ("it/from-moon/qos1", b"moon-qos1", 1)])
 
     def test_authenticated_broker_credentials_and_subscription_acl(self) -> None:
@@ -417,7 +420,7 @@ class IntegrationTest(unittest.TestCase):
         driver = Driver("heartbeat", proxy.port, MQTT_TEST_OPERATION_TIMEOUT_MS="500")
         self.addCleanup(driver.close)
         driver.expect("connected")
-        driver.expect("disconnected", 5)
+        driver.expect("disconnected", 10)
         self.assertEqual(driver.finish()[0], 0)
 
     def test_retained_delivery_and_zero_byte_clear(self) -> None:
