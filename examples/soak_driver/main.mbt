@@ -155,7 +155,7 @@ async fn main {
       }
     }
     log_line(
-      "{\"event\":\"final\",\"ended_ms\":\{@async.now()},\"acknowledged\":\{metrics.acknowledged},\"unknown\":\{metrics.unknown},\"not_connected\":\{metrics.not_connected},\"connected_events\":\{metrics.connected_events},\"disconnected_events\":\{metrics.disconnected_events},\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests},\"business\":\{snapshot.business_queue_depth},\"control\":\{snapshot.control_queue_depth},\"event_queue\":\{snapshot.event_queue_depth}}",
+      "{\"event\":\"final\",\"ended_ms\":\{@async.now()},\"acknowledged\":\{metrics.acknowledged},\"unknown\":\{metrics.unknown},\"not_connected\":\{metrics.not_connected},\"active_workers\":\{metrics.active_workers},\"connected_events\":\{metrics.connected_events},\"disconnected_events\":\{metrics.disconnected_events},\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests},\"business\":\{snapshot.business_queue_depth},\"control\":\{snapshot.control_queue_depth},\"event_queue\":\{snapshot.event_queue_depth}}",
     )
   })
 }

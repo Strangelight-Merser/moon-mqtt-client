@@ -251,6 +251,7 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             histogram[int(event["ms"])] = int(event["count"])
 
     elapsed = time.monotonic() - wall_started
+    after_exit_rss, after_exit_fds, after_exit_tasks = process_sample(driver.pid)
     result = {
         "parameters": {
             "duration_seconds": duration, "disconnect_cycles": cycles,
@@ -286,13 +287,45 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "tasks_end": samples[-1]["tasks"] if samples else None,
             "tasks_peak": max((s["tasks"] for s in samples), default=None),
             "process_exit_code": code,
+            "after_exit_rss_kib": after_exit_rss,
+            "after_exit_fds": after_exit_fds,
+            "after_exit_tasks": after_exit_tasks,
         },
         "ready": ready,
     }
+    failures = []
+    expected = {
+        "active_workers": 0,
+        "pending": 0,
+        "business": 0,
+        "control": 0,
+        "event_queue": 0,
+        "generation": cycles + 1,
+        "reconnects": cycles,
+        "disconnects": cycles,
+    }
+    for field, wanted in expected.items():
+        if final.get(field) != wanted:
+            failures.append(f"final.{field}={final.get(field)!r}, expected {wanted!r}")
+    if len(recoveries) != cycles:
+        failures.append(f"recovery count={len(recoveries)}, expected {cycles}")
+    if observed["invalid"] != 0:
+        failures.append(f"observer.invalid={observed['invalid']}, expected 0")
+    if observed["messages"] <= 0:
+        failures.append("observer saw no messages")
+    if code != 0:
+        failures.append(f"driver exit code={code}, expected 0")
+    if after_exit_fds != 0 or after_exit_tasks != 0:
+        failures.append(
+            f"driver retained resources after exit: fds={after_exit_fds}, tasks={after_exit_tasks}"
+        )
+    result["gate"] = {"passed": not failures, "failures": failures}
     (artifacts / "summary.json").write_text(json.dumps(result, indent=2) + "\n")
     (artifacts / "resources.jsonl").write_text(
         "".join(json.dumps(sample) + "\n" for sample in samples)
     )
+    if failures:
+        raise AssertionError("; ".join(failures))
     return result
 
 
