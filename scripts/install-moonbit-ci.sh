@@ -11,10 +11,11 @@ esac
 installer=$(mktemp "${TMPDIR:-/tmp}/moonbit-install.XXXXXX")
 trap 'rm -f "$installer"' EXIT
 curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o "$installer"
+moon_bin="${MOON_HOME:-$HOME/.moon}/bin/moon"
 
 if [ "$channel" = latest ]; then
   bash "$installer" latest
-  moon version --all
+  "$moon_bin" version --all
   exit
 fi
 if [ "$channel" != fixed ]; then
@@ -38,9 +39,9 @@ fi
 # The official installer supplies the matching core bundle. The archive hash
 # check above makes this job fail closed when the rolling stable release moves.
 bash "$installer" latest
-first_line=$(moon version --all | sed -n '1p')
+first_line=$("$moon_bin" version --all | sed -n '1p')
 case "$first_line" in
   "moon 0.1.20260904 (94521db 2026-09-04) "*) ;;
   *) echo "unexpected fixed MoonBit version: $first_line" >&2; exit 1 ;;
 esac
-moon version --all
+"$moon_bin" version --all
