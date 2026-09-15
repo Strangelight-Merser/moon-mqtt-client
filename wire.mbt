@@ -12,6 +12,13 @@ fn encode(packet : @codec.Packet, limit : Int) -> Bytes raise ClientError {
 }
 
 ///|
+/// Reference stream parser for one complete frame.
+///
+/// The live client does not call this: `read_session_packet` in `runtime.mbt`
+/// owns the socket path because it must survive idle slices between chunks
+/// without losing the bytes it already read. This function stays as the single
+/// place where the frame-shape rules (remaining-length canonical form, packet
+/// size limit, decode errors) are stated and unit-tested over a plain reader.
 async fn read_packet(reader : &@io.Reader, limit : Int) -> @codec.Packet {
   let header = reader.read_exactly(1)
   let data : Array[Byte] = [header[0]]

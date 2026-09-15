@@ -178,7 +178,18 @@ python3 -m venv .venv
 PYTHON=.venv/bin/python ./tests/integration/run.sh
 ```
 
-Run every local check with `./scripts/check.sh`.
+Run every local check with `./scripts/check.sh`. Two heavier harnesses are run
+separately and are recorded in [docs/VALIDATION.md](docs/VALIDATION.md):
+
+```sh
+# Pinned official EMQX image: send/receive, subscription denial, restart recovery
+./tests/emqx.sh
+
+# 30-minute restart soak: 1 KiB QoS 1, concurrency 16, 100 disconnect cycles.
+# The broker log is quiet by default and capped, so the run leaves bounded evidence.
+MOONBIT_ASYNC_CHECK_FD_LEAK=1 .venv/bin/python tests/soak.py \
+  --duration 1800 --cycles 100 --artifacts tests/integration/artifacts/soak
+```
 
 The integration suite uses independent Mosquitto and Eclipse Paho processes,
 loopback-only listeners, temporary certificates and packet fault injection.

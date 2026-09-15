@@ -116,7 +116,7 @@ a defect.
 **Fix.** The drivers and demo processes write each JSON line through the async
 library's unbuffered stdout writer, and the harness uses a plain pipe.
 
-**Verification.** All 10 integration methods pass without a pty.
+**Verification.** All 12 integration methods pass without a pty.
 
 ## D8 — a slow fragmented packet lost its header
 
@@ -138,12 +138,61 @@ idle across three read slices before sending a valid SUBACK. A 32,000-byte
 incoming PUBLISH verifies that completed body data is consumed in chunks rather
 than by creating a timeout task group for every payload byte.
 
+## D9 — the soak left gigabyte broker logs
+
+**Problem.** The long-running soak configured Mosquitto with `log_type all` and
+`-v`, so a 30-minute run wrote roughly 2.1 GB of per-packet broker output. The
+artifact was hard to inspect and impractical to retain, while the per-packet
+detail is only useful when diagnosing one specific failure.
+
+**Cause.** The soak harness copied the integration harness's maximum-verbosity
+broker configuration, which is appropriate for a short fault test and wrong for
+a sustained run.
+
+**Fix.** `tests/soak.py` now defaults to a quiet broker (`log_type warning` and
+`log_type error`) and drops `-v`, with `--broker-log normal|debug` for
+connection notices or full per-packet output. It also caps `broker.log` at
+`--broker-log-limit-mb` (64 MiB) by keeping the newest bytes, so a future
+regression cannot leave an unbounded artifact. `summary.json` records each
+artifact's size.
+
+**Verification.** The 30-minute, 100-cycle soak finished with `broker.log` at 0
+bytes and 18,646 bytes of driver evidence, and `evidence_bytes` in
+`summary.json` records both.
+
+## D10 — resource sampling died silently
+
+**Problem.** The soak's resource sampler called `ps` and `lsof` with no error
+handling. In an environment where those are denied, the sampler thread died on
+the first iteration and the summary reported `null` resource fields with no
+explanation, which reads like "not measured" rather than "not measurable" and
+could also hide a real sampling bug on a normal machine.
+
+**Cause.** The sampling loop had no per-iteration error boundary, and the
+reporting code could not distinguish "no samples yet" from "sampling failed".
+
+**Fix.** `process_sample` prefers `/proc` and raises a named
+`SamplingUnavailable` when neither `/proc` nor `ps` can be read; the sampler
+records the first error and keeps running; `summary.json` sets
+`resource_evidence_available` and reports the error text instead of publishing
+zeros as measurements. The RSS growth check only runs when real samples exist.
+
+**Verification.** All soak gates pass and the sandbox run honestly reports
+`resource_evidence_available: false` with the underlying `PermissionError`
+instead of a silent gap.
+
 ## Advisories left in place
 
 - The read loop checks session shutdown between bounded one-byte reads, so an
   idle connection can take up to 100 ms to observe an abort.
 - Clean sessions mean an offline client loses messages; the library still does
   not promise durable delivery.
-- The distribution checks (Mooncakes install, public asset checksums, EMQX
-  interop, 30-minute soak) are release gates documented in `RELEASE.md`; they are
-  not claimed as executed by this document.
+- RSS and file-descriptor curves are absent from the recorded soak because this
+  sandbox denies `ps` and has no `/proc`; the soak gates and the async runtime's
+  FD-leak check still ran.
+- Mooncakes publication, public asset checksums and the final `main` merge are
+  release gates documented in `RELEASE.md`; they are not claimed as executed by
+  this document.
+- The pinned CI toolchain digest must be re-recorded when MoonBit publishes a new
+  stable release; the job is designed to fail closed until then.
+

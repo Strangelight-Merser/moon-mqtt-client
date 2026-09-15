@@ -1,9 +1,11 @@
 # Executed validation — v0.2.0
 
-Platform: macOS arm64. MoonBit: `moon 0.1.20260904 (94521db 2026-09-04)`.
-Independent peers: Mosquitto 2.0.22 and Eclipse Paho Python 2.1.0; Python
-3.13.12; OpenSSL 3.6.2 (temporary certificates are generated per TLS test).
-See `docs/FINDINGS.md` for the defects this round fixed.
+Platform: macOS arm64. MoonBit: `moon 0.1.20260904 (94521db 2026-09-04)`,
+`moonc v0.10.12+1634b282e` (2026-09-07). Independent peers: Mosquitto 2.0.22,
+Eclipse Paho Python 2.1.0, and the pinned official EMQX `5.8.8` container image
+(digests in `tests/emqx_interop.py`). Python 3.13.12; OpenSSL 3.6.2 (temporary
+certificates per TLS test). See `docs/FINDINGS.md` for the defects this round
+fixed.
 
 ## Results
 
@@ -12,12 +14,15 @@ See `docs/FINDINGS.md` for the defects this round fixed.
 | Type check | `moon check --target native` | Passed, no warnings. |
 | Native build | `moon build --target native` | Passed. |
 | MoonBit unit tests | `moon test --target native` | 26 passed, 0 failed. |
-| Mosquitto/Paho integration | `tests/integration/run.py` | 11 methods passed. |
-| Protocol fault injector | `tests/protocol_faults.py` | 5 cases passed. |
+| Mosquitto/Paho integration | `tests/integration/run.py` | 12 methods passed. |
+| Protocol fault injector | `tests/protocol_faults.py` | 10 cases passed. |
+| EMQX interoperability | `tests/emqx.sh` (pinned 5.8.8 image) | Passed: QoS 1 both directions, subscription denial, restart recovery. |
 | Scenario fixture runner | `moon run examples/scenario_runner` | Passed: Frigate dedup + ROS command/telemetry. |
 | State-sync demo smoke | `tests/scenario_smoke.py` | Passed: startup query, ON at 28 C, invalid input ignored, OFF at 26 C, correlated device feedback. |
 | State-sync demo scenarios | `examples/mqtt_demo/demo.py` | 4 scenarios passed: `normal`, `lost_puback`, `broker_restart`, `controller_restart`. |
 | Separate consumer module | `tests/consumer_smoke.py` | Passed from a fresh module and workspace against the local source copy. |
+| Soak | `tests/soak.py --duration 1800 --cycles 100` | Passed all gates; see the soak section below. |
+| Hosted CI | `.github/workflows/check.yml` | Passed on Linux and macOS for commit `fe2ef4c`; the fixed toolchain check and the rolling-stable compatibility job are separate. |
 | All-in-one local check | `./scripts/check.sh` | Passed end to end. |
 
 `moon check` is now warning-free; the previous `fragile_catch_all` advisory is
@@ -35,20 +40,39 @@ invalid Will topics, and the contract rules: threshold inclusivity, the
 empty-id rejection, JSON escaping (quote, backslash, C0 controls), and Frigate
 lifecycle/label/zone/dedup behaviour.
 
-**Integration (11 methods, independent Paho/Mosquitto).** TCP QoS 0/1 both
+**Integration (12 methods, independent Paho/Mosquitto).** TCP QoS 0/1 both
 directions and SUBACK results; custom-CA TLS success plus wrong-CA and
 wrong-hostname rejection; broker restart with a new generation and
 resubscription; bytewise packet fragmentation; lost PUBACK without a false
 success; missing PINGRESP causing a disconnect; graceful DISCONNECT suppressing
 the Will while an abrupt callback failure sends it; retained delivery and
 zero-byte clear observed by a fresh subscriber; unsubscribe followed by a quiet
-window; and a `stats()` snapshot on a live connection.
+window; a `stats()` snapshot on a live connection; and reconnect counters after
+a broker restart.
 
-**Fault injector (5 cases, scripted byte-level peer).** Wrong PUBACK identifier;
+**Fault injector (10 cases, scripted byte-level peer).** Wrong PUBACK identifier;
 operation timeout closing before a late ACK and reconnecting with a reused
 identifier; DISCONNECT emitted with a full inflight table; partial SUBACK
-preserved as one grant and one rejection; a slow consumer terminating with
-`Backpressure` under a flood.
+preserved as one grant and one rejection; a SUBACK whose fixed header arrives
+slowly; a SUBACK whose body arrives in slow pieces; an idle link that then sends
+a SUBACK; cancellation followed by a successful reconnect; a large incoming
+PUBLISH; and a slow consumer terminating with `Backpressure` under a flood. The
+slow-frame cases are the regression for bytes lost across idle slices.
+
+**EMQX (pinned official image).** The same core send/receive, subscription-denied
+SUBACK and restart-recovery scenarios as the Mosquitto suite, which is what makes
+"broker interoperability" a verified statement rather than a Mosquitto-only one.
+
+**Soak (30 minutes, 100 recovery cycles).** Parameters: 1800 s, 100
+broker-restart cycles, 1 KiB QoS 1 payloads, 16 concurrent workers,
+`MOONBIT_ASYNC_CHECK_FD_LEAK=1`, quiet broker logging. Observed: 10,828,581
+acknowledged publishes, 10,405,797 messages seen by the independent Paho
+observer with 0 corrupt payloads, 101 generations, 100 reconnects and 100
+disconnects. All final gates were met: `pending=0`, `business=0`, `control=0`,
+`event_queue=0`, `active_workers=0`, every cycle recovered (100/100) and the
+driver exited 0. Recovery time min/median/p95/max = 0.302/0.326/0.351/0.376 s.
+The run used 18,646 bytes of driver evidence; the quiet, capped broker log stayed
+at 0 bytes.
 
 **State-sync demo (4 scenarios, separate processes).** The controller never
 reports success before correlated device feedback; a lost PUBACK yields
@@ -58,12 +82,24 @@ device stays ON learns ON from its own query rather than from the retained
 payload. All four run from one command and assert on both process output and
 independent Paho observations.
 
-## Throughput and latency
+## Throughput and latency (single-machine baseline)
 
-Not yet measured for a fixed workload. This round establishes the correctness
-baseline only; no performance claim is made, and the 30-minute, 1 KiB, QoS 1,
-concurrency-16 soak with 100 disconnect/recovery cycles is listed as an open
-release gate in `RELEASE.md`.
+From the soak run above, on this macOS arm64 development machine with both
+processes sharing one host: 6,012 acknowledged QoS 1 publishes per second
+end-to-end, with p50/p95/p99 acknowledgement latency of 3/3/3 ms and a maximum of
+144 ms. Recovery after a broker restart took 0.30-0.38 s.
+
+These are single-host baseline numbers for a debug build, not a performance
+claim. They exist so a later change can be compared against something measured.
+No production-throughput conclusion is drawn.
+
+The soak's automatic resource sampling could not run in the sandbox used here
+(`ps` is denied, so `resource_evidence_available` is `false`), so RSS and
+open-file-descriptor curves are **not** part of this evidence. What is covered:
+the async runtime's own `MOONBIT_ASYNC_CHECK_FD_LEAK` check during the run, and
+a driver that exits 0 after draining with zero pending requests and zero queued
+work. A run on a machine that permits `ps` or exposes `/proc` will populate the
+resource section automatically.
 
 ## Reproduce
 
@@ -78,9 +114,10 @@ source distribution.
 
 ## Limits
 
-This is not a conformance certification, a throughput benchmark or a long-term
-soak test. It does not establish EMQX interoperability, authenticated broker
-policy, system-root TLS against a public CA, actual hardware execution,
-unbounded uptime or leak-free behaviour under sustained load. The device in the
-demo is simulated. Hosted CI for this commit is recorded in the repository's
-Actions page; a workflow definition alone is not evidence of a completed run.
+This is not a conformance certification and the performance numbers are a
+single-host baseline, not a benchmark. The soak covers 30 minutes and 100
+recoveries, not days of uptime. It does not establish system-root TLS against a
+public CA, actual hardware execution or leak-free behaviour under sustained
+load beyond the FD-leak check and the drained-queue gate. The device in the demo
+is simulated. Hosted CI results are reported as a status for commit `fe2ef4c`;
+the run itself is on the repository's Actions page.
