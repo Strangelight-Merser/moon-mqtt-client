@@ -122,6 +122,43 @@ def inject_partial_suback(listener: socket.socket, evidence: dict) -> None:
     conn.close()
 
 
+def inject_slow_suback_header(listener: socket.socket, evidence: dict) -> None:
+    conn = accept_client(listener)
+    subscribe = recv_packet(conn)
+    packet_id = leading_packet_id(subscribe)
+    conn.sendall(b"\x90")
+    time.sleep(0.15)
+    conn.sendall(b"\x03" + packet_id.to_bytes(2, "big") + b"\x00")
+    evidence["delay_ms"] = 150
+    evidence["disconnect_packet"] = recv_packet(conn)
+    conn.close()
+
+
+def inject_slow_suback_body(listener: socket.socket, evidence: dict) -> None:
+    conn = accept_client(listener)
+    subscribe = recv_packet(conn)
+    packet_id = leading_packet_id(subscribe)
+    conn.sendall(b"\x90\x03" + packet_id.to_bytes(2, "big")[:1])
+    time.sleep(0.11)
+    conn.sendall(packet_id.to_bytes(2, "big")[1:])
+    time.sleep(0.11)
+    conn.sendall(b"\x00")
+    evidence["delays_ms"] = [110, 110]
+    evidence["disconnect_packet"] = recv_packet(conn)
+    conn.close()
+
+
+def inject_idle_then_suback(listener: socket.socket, evidence: dict) -> None:
+    conn = accept_client(listener)
+    time.sleep(0.35)
+    subscribe = recv_packet(conn)
+    packet_id = leading_packet_id(subscribe)
+    conn.sendall(b"\x90\x03" + packet_id.to_bytes(2, "big") + b"\x00")
+    evidence["idle_ms"] = 350
+    evidence["disconnect_packet"] = recv_packet(conn)
+    conn.close()
+
+
 def qos0_publish(topic: str, payload: bytes) -> bytes:
     topic_bytes = topic.encode()
     body = len(topic_bytes).to_bytes(2, "big") + topic_bytes + payload
@@ -146,6 +183,9 @@ CASES = {
     "timeout_reconnect": inject_timeout_reconnect,
     "full_inflight_disconnect": inject_full_inflight,
     "partial_suback": inject_partial_suback,
+    "slow_suback_header": inject_slow_suback_header,
+    "slow_suback_body": inject_slow_suback_body,
+    "idle_then_suback": inject_idle_then_suback,
     "slow_consumer_overflow": inject_slow_consumer_overflow,
 }
 
@@ -193,6 +233,8 @@ def run_case(name: str) -> None:
         assert evidence.get("disconnect_packet") == b"\xe0\x00", evidence
     elif name == "partial_suback":
         assert evidence.get("results") == [0, 0x80]
+        assert evidence.get("disconnect_packet") == b"\xe0\x00", evidence
+    elif name in {"slow_suback_header", "slow_suback_body", "idle_then_suback"}:
         assert evidence.get("disconnect_packet") == b"\xe0\x00", evidence
     elif name == "slow_consumer_overflow":
         assert evidence.get("sent") == 3

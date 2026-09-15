@@ -202,17 +202,12 @@ async fn Client::supervise(self : Client) -> Unit {
 ///|
 async fn Client::read_loop(self : Client, session : Session) -> Unit {
   while session.alive {
-    // Read with a bounded wait instead of one unbounded blocking read. Closing
-    // the transport underneath a blocked read surfaces as a cancellation of
-    // this coroutine, and a cancelled task inside a task group poisons the
-    // supervisor's own coroutine through the group's failure bookkeeping. With
-    // a bounded wait the loop instead observes `session.alive` and returns
-    // normally, so a caller-side abort stays a normal generation end.
-    let incoming = @async.with_timeout_opt(100, () => {
-      read_packet(session.reader, self.config.max_packet_size)
-    })
+    // Each bounded operation reads exactly one byte. The frame being assembled
+    // lives outside those cancellable slices, so an idle gap between the fixed
+    // header, Remaining Length, and body cannot discard bytes already consumed.
+    let incoming = read_session_packet(session, self.config.max_packet_size)
     if incoming is None {
-      continue
+      return
     }
     let packet : @codec.Packet = incoming.unwrap()
     let handled : Result[Unit, Error] = try {
@@ -357,4 +352,64 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
   }
 }
 
+///|
+async fn read_session_byte(session : Session) -> Byte? {
+  while session.alive {
+    let incoming = @async.with_timeout_opt(100, () => {
+      session.reader.read_exactly(1)
+    })
+    match incoming {
+      Some(bytes) => return Some(bytes[0])
+      None => ()
+    }
+  }
+  None
+}
+
+///|
+/// Assemble one MQTT frame across any number of 100 ms idle slices. Parser state
+/// stays in this coroutine until the frame is complete or the session is aborted.
+async fn read_session_packet(
+  session : Session,
+  limit : Int,
+) -> @codec.Packet? {
+  let first = match read_session_byte(session) {
+    Some(byte) => byte
+    None => return None
+  }
+  let data : Array[Byte] = [first]
+  let mut size = 0
+  let mut multiplier = 1
+  for index in 0..<4 {
+    let digit = match read_session_byte(session) {
+      Some(byte) => byte
+      None => return None
+    }
+    data.push(digit)
+    size += (digit.to_int() & 127) * multiplier
+    if size + data.length() > limit {
+      raise ProtocolError("incoming packet exceeds limit")
+    }
+    if digit.to_int() < 128 {
+      if index > 0 && digit == 0 {
+        raise ProtocolError("noncanonical remaining length")
+      }
+      break
+    }
+    if index == 3 {
+      raise ProtocolError("malformed remaining length")
+    }
+    multiplier *= 128
+  }
+  for _ in 0..<size {
+    match read_session_byte(session) {
+      Some(byte) => data.push(byte)
+      None => return None
+    }
+  }
+  match @codec.decode_packet(data) {
+    Ok(packet) => Some(packet)
+    Err(reason) => raise ProtocolError(reason)
+  }
+}
 

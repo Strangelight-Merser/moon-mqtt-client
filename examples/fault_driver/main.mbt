@@ -82,6 +82,31 @@ async fn partial_suback() -> Unit {
 }
 
 ///|
+async fn single_suback() -> Unit {
+  @mqtt.with_client(config(), async fn(client) {
+    let results = client.subscribe([
+      { topic: "fault/slow", qos: @mqtt.AtMostOnce, },
+    ])
+    guard results == [@mqtt.Granted(@mqtt.AtMostOnce)] else {
+      fail("slow SUBACK result was not preserved")
+    }
+  })
+}
+
+///|
+async fn idle_then_suback() -> Unit {
+  @mqtt.with_client(config(), async fn(client) {
+    @async.sleep(350)
+    let results = client.subscribe([
+      { topic: "fault/idle", qos: @mqtt.AtMostOnce, },
+    ])
+    guard results == [@mqtt.Granted(@mqtt.AtMostOnce)] else {
+      fail("SUBACK after idle period was not preserved")
+    }
+  })
+}
+
+///|
 async fn slow_consumer_overflow() -> Unit {
   let mut saw_backpressure = false
   @mqtt.with_client(config(receive_capacity=2), async fn(_) {
@@ -104,6 +129,8 @@ async fn main {
       "timeout_reconnect" => timeout_reconnect()
       "full_inflight_disconnect" => full_inflight_disconnect()
       "partial_suback" => partial_suback()
+      "slow_suback_header" | "slow_suback_body" => single_suback()
+      "idle_then_suback" => idle_then_suback()
       "slow_consumer_overflow" => slow_consumer_overflow()
       _ => fail("unknown fault case")
     }

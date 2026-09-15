@@ -18,10 +18,10 @@ group body parked on `Cond::wait`, and the read loop had been changed to swallow
 its transport error and return normally, so nothing woke the body either.
 
 **Fix.** The read loop again owns the connection lifetime and the body waits on
-its task, so a transport failure propagates directly. The read loop uses a
-bounded read (100 ms slices) instead of one unbounded blocking read, so a
-caller-side abort is observed as a normal generation end rather than as a
-cancellation of the read.
+its task, so a transport failure propagates directly. It reads one byte per
+bounded operation and preserves the partially assembled MQTT frame across
+100 ms idle slices, so a caller-side abort can be observed without discarding
+bytes already consumed from the socket.
 
 **Verification.** `tests/protocol_faults.py` case `timeout_reconnect` passes
 again (late ACK after close, new connection, reused identifier 1, real
@@ -115,10 +115,28 @@ library's unbuffered stdout writer, and the harness uses a plain pipe.
 
 **Verification.** All 10 integration methods pass without a pty.
 
+## D8 — a slow fragmented packet lost its header
+
+**Problem.** If a peer sent the first byte of a SUBACK and delayed the remaining
+bytes for more than 100 ms, the read slice was cancelled after consuming that
+byte. The next slice interpreted Remaining Length as a new fixed header and the
+operation ended as `OutcomeUnknown` even though the complete SUBACK arrived
+inside its 250 ms budget.
+
+**Cause.** The 100 ms timeout wrapped `read_packet`, whose parser state was local
+to the cancelled coroutine and could not be reconstructed from the socket.
+
+**Fix.** Only a single-byte read is cancellable. Frame header, Remaining Length,
+and body state stay in the read-loop coroutine across any number of idle slices.
+
+**Verification.** Protocol fault cases delay after the fixed header by 150 ms,
+delay twice inside the body by 110 ms, and keep an otherwise healthy connection
+idle across three read slices before sending a valid SUBACK.
+
 ## Advisories left in place
 
-- The read loop's `with_timeout_opt` slice means a shutdown can take up to
-  100 ms to be observed; this is a deliberate latency/robustness tradeoff.
+- The read loop checks session shutdown between bounded one-byte reads, so an
+  idle connection can take up to 100 ms to observe an abort.
 - Clean sessions mean an offline client loses messages; the library still does
   not promise durable delivery.
 - The distribution checks (Mooncakes install, public asset checksums, EMQX

@@ -65,13 +65,12 @@ idempotent request.
 
 ## Connection lifetime, timeouts and cancellation
 
-The read loop owns the connection lifetime. It reads with a bounded wait so it
-can always observe a caller-side abort and end the generation normally; closing
-the transport underneath an unbounded blocking read would surface as a
-coroutine cancellation, and a cancelled task inside a task group would poison
-the supervisor coroutine and silently stop reconnection. The supervisor is
-therefore never cancelled by its own children, and every generation end is
-reported as a normal disconnect or a transport error that it can classify.
+The read loop owns the connection lifetime. It assembles each MQTT frame with
+bounded one-byte reads, preserving the partially assembled frame between idle
+slices. This lets it observe a caller-side abort without cancelling a read that
+has already consumed part of a packet. The supervisor is therefore never
+cancelled by its own children, and every generation end is reported as a normal
+disconnect or a transport error that it can classify.
 
 ## Cancellation
 
