@@ -102,6 +102,32 @@ a driver that exits 0 after draining with zero pending requests and zero queued
 work. A run on a machine that permits `ps` or exposes `/proc` will populate the
 resource section automatically.
 
+## Release acceptance recheck (2026-09-15)
+
+The source archive generated from tag `v0.2.0` (`85bc0a5`) was extracted into
+a clean temporary directory. `scripts/check.sh` passed there: 26 unit tests,
+12 Mosquitto/Paho integration methods, 10 protocol fault cases, the scenario
+smoke and the separate consumer module. The four state-sync demo scenarios also
+passed. `tests/consumer_smoke.py --registry` then installed `@0.2.0` into a fresh
+temporary module and completed the QoS 1 round trip.
+
+The source archive SHA-256 is
+`0c0dbfb24328d803695d53f139a25cde017af835c49c24c959f92b95a9ee71f7`.
+The original 30-minute soak and EMQX evidence above was retained; those longer
+checks were not repeated for the documentation and CI-installation update.
+
+Fresh branch and tag workflows initially stopped before tests because the
+old installer downloaded the rolling `latest` archives. The fixed installer now
+uses the official `0.10.12+1634b282e` path (without a leading `v`), verifies the
+original platform hashes and core SHA-256
+`784a12ce4e204a3a98a0b704a021f747b916412efacd4dfe2f4e5c27ae183ac1`, and installs
+those verified bytes. A clean macOS installation passed core bundling and the
+exact `moon`/`moonc` version checks. See D11 in `docs/FINDINGS.md`.
+
+Local acceptance and installation logs are under the ignored
+`_build/release-v0.2.0/` directory; the public CI and asset records are linked
+from `docs/RELEASE-NOTES-v0.2.0.md`.
+
 ## Reproduce
 
 ```sh

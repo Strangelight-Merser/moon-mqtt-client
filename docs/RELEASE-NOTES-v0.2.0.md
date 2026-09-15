@@ -1,10 +1,9 @@
 # v0.2.0 release record
 
-Status: **published to Mooncakes on 2026-09-15.** The GitHub Release, the
-`main` merge and the archive checksums attached to a GitHub asset are still
-open; see the bottom of this file. The `main` merge and the push itself could
-not be performed from this environment because no Git credential is available
-here.
+Status: **published to Mooncakes on 2026-09-15.** The development branch and
+`v0.2.0` tag have also been pushed. GitHub authentication is available in the
+current environment; the GitHub Release and `main` merge are being completed
+after the fixed-toolchain CI check. The release tag remains at `85bc0a5`.
 
 ## Published artifact
 
@@ -78,7 +77,7 @@ Details and evidence paths are in `docs/VALIDATION.md`.
 
 | Item | State |
 |---|---|
-| Push `codex/mqtt-client` and the `v0.2.0` tag | Blocked: no Git credential in this environment (`could not read Username for 'https://github.com'`). |
-| Advance `main` to the v0.2.0 tree | Not done; `main` is still at the 0.1.0 commit `9bd3813`. A fast-forward or merge decision is still required. |
+| Push `codex/mqtt-client` and the `v0.2.0` tag | Done on 2026-09-15; the tag points to `85bc0a5`. |
+| Advance `main` to the v0.2.0 tree | Pull-request merge after Linux/macOS CI, preserving the development commits. |
 | GitHub Release | Not created; no hosted asset exists yet. |
 | GitHub asset checksums | Only the Mooncakes package checksum exists. If a source archive is attached to a GitHub Release, compute and record its checksum here as well. |

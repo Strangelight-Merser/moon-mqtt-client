@@ -181,6 +181,28 @@ zeros as measurements. The RSS growth check only runs when real samples exist.
 `resource_evidence_available: false` with the underlying `PermissionError`
 instead of a silent gap.
 
+## D11 — the fixed CI baseline still downloaded the latest toolchain
+
+**Problem.** The 2026-09-15 branch and tag workflows stopped at toolchain
+installation before executing tests. The official `latest` archives had changed,
+so the recorded SHA-256 checks correctly rejected them.
+
+**Cause.** The install script pinned hashes but used the rolling download URL.
+The official version path uses `0.10.12+1634b282e`, without a leading `v`;
+the compiler version, rather than the build tool's date, identifies the bundle.
+
+**Fix.** The fixed install now downloads that version's binary and core bundles,
+checks their recorded hashes, installs the actual verified bytes into an empty
+`MOON_HOME`, and verifies both `moon` and `moonc`. New stable releases no longer
+change the fixed baseline. The optional latest-compatibility job remains separate.
+Download and installation conventions follow the
+[official installer](https://cli.moonbitlang.com/install/unix.sh) and
+[binary verification instructions](https://www.moonbitlang.com/download#verifying-binaries).
+
+**Verification.** The versioned macOS and Linux archive checksums match the
+previously recorded baseline. Current installation and hosted checks are recorded
+in `docs/VALIDATION.md`.
+
 ## Advisories left in place
 
 - The read loop checks session shutdown between bounded one-byte reads, so an
@@ -193,6 +215,6 @@ instead of a silent gap.
 - Mooncakes publication, public asset checksums and the final `main` merge are
   release gates documented in `RELEASE.md`; they are not claimed as executed by
   this document.
-- The pinned CI toolchain digest must be re-recorded when MoonBit publishes a new
-  stable release; the job is designed to fail closed until then.
-
+- Updating the fixed CI baseline requires choosing a new explicit compiler/core
+  version, recording its hashes and rerunning validation; it is independent of
+  the optional rolling-stable compatibility check.

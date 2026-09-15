@@ -1,61 +1,24 @@
 # moon-mqtt-client
 
-[![native client](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml/badge.svg)](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml)
+[![原生客户端检查](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml)
 
-A native asynchronous MQTT 3.1.1 client for MoonBit. Connect to an existing MQTT
-broker, subscribe to device or application events, and publish commands and
-state without writing a socket loop for each application.
+面向 MoonBit 的原生异步 MQTT 3.1.1 客户端。连接现有 MQTT 消息服务器（broker），
+订阅设备或应用事件，发布命令与状态，无需为每个应用单独编写 socket 收发循环。
 
-The packet codec is provided by **zbhzs1/moonbit-mqtt**; this package supplies the
-connection lifecycle, TLS transport, request tracking, heartbeat and clean-session
-reconnection on top of **moonbitlang/async**. It is an early implementation, not
-a certified MQTT conformance implementation.
+本项目复用 **zbhzs1/moonbit-mqtt** 的报文编解码，在 **moonbitlang/async** 之上实现
+连接生命周期、TLS 传输、请求跟踪、心跳和 clean session 断线重连。
+目前属于早期实现，尚未通过 MQTT 协议一致性认证。
 
-## Start with the state-sync demo
+## 安装与构建
 
-The primary demonstration is a controller process and an **independent simulated
-device** process (no hardware; the device is a simulation and is labelled as one)
-talking to a real broker:
+已发布版本：**0.2.0**。在 MoonBit 项目中添加依赖：
 
 ```sh
-./scripts/moon.sh build --target native
-.venv/bin/python examples/mqtt_demo/demo.py
+moon add Strangelight-Merser/moon-mqtt-client
 ```
 
-Four reproducible scenarios run in sequence: normal ON/OFF, a lost PUBACK whose
-command the device still executes, a broker restart, and a controller restart
-while the device stays ON. Every line of output keeps three things apart:
-`desired` (what hysteresis wants), `result` (`sent`/`not_sent`/`unknown`), and
-`reported` (what the device actually says, correlated by id). See
-[docs/SCENARIOS.md](docs/SCENARIOS.md) for the topics and rules.
-
-A thin publish/subscribe CLI reuses the public API:
-
-```sh
-./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
-  publish --host 127.0.0.1 -t lab/state -m ON --qos 1 --retain --stats
-./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
-  subscribe --host 127.0.0.1 -t 'lab/#' --count 1 --timeout-ms 3000
-```
-
-## Scope
-
-- Native TCP and server-authenticated TLS (system roots or a custom PEM CA).
-- MQTT 3.1.1, QoS 0 and 1, retained messages, Last Will, username/password.
-- Subscribe and unsubscribe acknowledgements, including per-topic rejection.
-- Bounded send queue, event queue, packet size and concurrent requests.
-- CleanSession=true only: reconnect creates a new session and restores confirmed
-  subscriptions. A `Connected(generation)` event follows subscription restoration.
-- Callback-scoped tasks and sockets. Normal callback return or `disconnect()` sends
-  DISCONNECT; callback failure or cancellation closes the transport abruptly.
-
-No QoS 2, MQTT 5, persistent sessions, offline queue, cross-connection retransmit,
-client-certificate authentication, WebSocket, browser or microcontroller target.
-
-## Build from source
-
-Use the native MoonBit toolchain; this checkout was developed with
-`moon 0.1.20260904` and `moonc v0.10.12+1634b282e` (2026-09-07).
+需要从源码运行示例或测试时，使用支持 native 目标的 MoonBit 工具链。
+已验证版本为 `moon 0.1.20260904` 和 `moonc v0.10.12+1634b282e`（2026-09-07）。
 
 ```sh
 moon update
@@ -64,21 +27,60 @@ moon test --target native
 moon build --target native
 ```
 
-`scripts/moon.sh` uses a local `.tools/moon` installation or `MOON_HOME` when
-provided. Toolchains and build outputs are not part of the source distribution.
-For registry releases, install the package with:
+仓库中的 `scripts/moon.sh` 优先使用显式配置的 `MOON_HOME`，其次使用本地
+`.tools/moon`，否则使用 PATH 中的 `moon`。工具链和构建产物不随源码分发。
+版本、发布附件及校验值见 [GitHub Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)。
+
+## 先运行状态同步演示
+
+主演示由控制器进程和**独立的模拟设备进程**组成，通过真实 broker 通信。
+设备由软件模拟，没有使用实际硬件。
+
+先通过系统包管理器安装 Mosquitto 和 OpenSSL，再准备 Python 测试依赖：
 
 ```sh
-moon add Strangelight-Merser/moon-mqtt-client
+python3 -m venv .venv
+.venv/bin/pip install -r tests/integration/requirements.txt
+./scripts/moon.sh build --target native
+.venv/bin/python examples/mqtt_demo/demo.py
 ```
 
-See [GitHub Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)
-for available versions and their verification results.
+演示依次运行四种可复现情形：正常开关、设备执行命令但 PUBACK 丢失、broker 重启，
+以及设备保持开启时控制器重启。输出分别展示：
 
-## API
+- `desired`：带回差的温控规则所期望的状态。
+- `result`：发送结果，取值为 `sent`、`not_sent` 或 `unknown`。
+- `reported`：设备实际反馈的状态，通过 ID 与本次命令或查询关联。
 
-The following is the callback shape used by the runnable examples. Import this
-package as `@mqtt` and `moonbitlang/core/encoding/utf8` as `@utf8`.
+主题和业务规则见[使用场景](docs/SCENARIOS.md)。
+
+发布/订阅命令行工具直接使用本库公开 API；以下命令需要已有 broker 监听本机 1883 端口：
+
+```sh
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  publish --host 127.0.0.1 -t lab/state -m ON --qos 1 --retain --stats
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  subscribe --host 127.0.0.1 -t 'lab/#' --count 1 --timeout-ms 3000
+```
+
+## 支持范围
+
+- 原生 TCP，以及验证服务器身份的 TLS；支持系统根证书或自定义 PEM CA。
+- MQTT 3.1.1、QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
+- 订阅与取消订阅确认，包括逐主题的订阅拒绝结果。
+- 有上限的发送队列、事件队列、报文大小和并发请求数。
+- 仅支持 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
+  `Connected(generation)` 事件。
+- 任务和 socket 的生命周期由回调作用域管理。回调正常返回或调用 `disconnect()` 时
+  发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
+
+暂不支持 QoS 2、MQTT 5、持久会话、离线队列、跨连接重传、客户端证书认证、
+WebSocket，以及浏览器和微控制器目标。
+
+## API 示例
+
+以下示例展示可运行程序使用的回调形式。将本库导入为 `@mqtt`，将
+`moonbitlang/core/encoding/utf8` 导入为 `@utf8`。
 
 ```moonbit
 async fn main {
@@ -91,113 +93,112 @@ async fn main {
       client.publish("lab/status", @utf8.encode("ready"),
         qos=@mqtt.AtLeastOnce, retain=true)
     }
-    // Consume Connected, Disconnected and MessageReceived events here.
-    // A long-running subscriber must continually drain next_event().
+    // 在这里处理 Connected、Disconnected 和 MessageReceived 事件。
+    // 长期运行的订阅者必须持续调用 next_event() 消费事件。
   })
 }
 ```
 
-`with_client` waits for the first successful connection before invoking the
-callback. An initial connection/CONNACK/TLS failure is returned to the caller.
-After a connection has been established, failures trigger bounded retries.
-`wait_connected()` can wait through a reconnect; publish/subscribe/unsubscribe
-while disconnected fail with `NotConnected`, rather than entering an offline queue.
+`with_client` 在首次连接成功后调用回调；首次连接、CONNACK 或 TLS 失败会直接返回给调用方。
+连接曾经建立后发生的故障会触发有次数上限的重试。`wait_connected()` 可等待重连完成；
+断线期间调用发布、订阅或取消订阅会返回 `NotConnected`，请求不会进入离线队列。
 
-Use `TlsMode::SystemRoots` with port 8883 for public trust or
-`TlsMode::CustomCA("path/to/ca.pem")` for a private CA. The configured host is also
-the verified TLS hostname. There is no option to disable verification.
+公共 CA 证书可配合端口 8883 和 `TlsMode::SystemRoots` 使用；私有 CA 使用
+`TlsMode::CustomCA("path/to/ca.pem")`。连接配置中的主机名也是 TLS 验证使用的主机名，
+没有关闭证书验证的选项。
 
-## Delivery and failure semantics
+## 投递结果与失败语义
 
-The normative description of timeouts, queueing, cancellation and failure
-classification is [docs/API-CONTRACT.md](docs/API-CONTRACT.md). In short:
+超时、排队、取消和失败分类的完整约定见[运行时契约](docs/API-CONTRACT.md)。
 
-| Result | What it establishes |
+| 结果 | 能确认什么 |
 |---|---|
-| QoS 0 publish returns | The transport write completed; no broker acknowledgement exists. |
-| QoS 1 publish returns | A matching PUBACK arrived on that connection. It does not establish downstream processing or a physical action. |
-| `NotSent` | A queued request failed before its write started. |
-| `OutcomeUnknown` | A write began but the operation was not confirmed. Partial writes and lost ACKs are included. |
-| `Backpressure` from a request | The send or inflight limit prevented accepting that request. |
-| Event/control queue overflow | The client terminates with an error instead of silently dropping messages. |
+| QoS 0 发布正常返回 | 传输写入完成；没有 broker 确认。 |
+| QoS 1 发布正常返回 | 本次连接收到匹配的 PUBACK；不能据此确认下游处理完成或设备执行了动作。 |
+| `NotSent` | 请求在开始写入前失败。 |
+| `OutcomeUnknown` | 写入已经开始，但操作结果未确认，包括部分写入和确认丢失。 |
+| 请求返回 `Backpressure` | 发送队列或在途请求达到上限，无法接受本次请求。 |
+| 事件队列或控制队列溢出 | 客户端报错并终止连接。 |
 
-The whole operation is budgeted by `operation_timeout_ms` (default 5000 ms),
-covering queue time, the write and the wait for the acknowledgement. A single
-socket write is separately bounded by `write_timeout_ms`, and PINGRESP is
-timed from the *completed* PINGREQ write. An expired operation budget closes the
-connection and ends **all** pending requests; old identifiers never cross into
-the new connection. The application chooses whether to retry an uncertain
-operation; use idempotent state-setting commands or application command IDs where
-appropriate.
+`operation_timeout_ms` 限制整个操作的耗时，默认 5000 ms，包含排队、写入和等待确认。
+单次 socket 写入另受 `write_timeout_ms` 限制；PINGRESP 的等待时间从 PINGREQ
+**写入完成**后开始计算。操作超时会关闭连接并结束**所有**待完成请求，旧请求标识不会带入新连接。
+是否重试结果不确定的操作由应用决定；适合重试的业务可使用幂等状态设置命令或应用级命令 ID。
 
-Protocol control packets (PUBACK, PINGREQ, DISCONNECT) use reserved bounded slots
-and are never blocked behind a full business queue. If the control slots
-themselves run out, the client terminates loudly instead of dropping one.
+PUBACK、PINGREQ、DISCONNECT 等协议控制报文使用预留且有上限的槽位，业务发送队列已满时
+仍可提交控制报文；控制槽位也耗尽时，客户端报错终止连接。
 
-Incoming QoS 1 is acknowledged after acceptance into the bounded event queue,
-not after application processing. The queue is volatile. QoS 1 duplicates are
-possible. Reconnection with a clean session can lose messages during the gap;
-a broker may replay retained state on resubscription. The library does not promise
-exactly-once processing, durable delivery or uninterrupted subscriptions.
+收到的 QoS 1 消息进入有界事件队列后即被确认，此时应用可能尚未处理。
+事件队列仅保存在内存中，QoS 1 可能产生重复消息。clean session 重连间隙可能丢失消息，
+重新订阅时 broker 也可能再次投递保留状态。本库不保证恰好处理一次、持久投递或订阅无中断。
 
-Default limits: 64 queued business sends, 16 reserved control slots, 128 queued
-events, 32 pending operations, 65,536 bytes per packet, 5-second connect,
-operation, write and PINGRESP timeouts, 30-second keepalive, 10 consecutive
-reconnect attempts with a delay growing from 250 ms to 5 seconds plus per-client
-jitter. `Client::set_reconnect_seed` pins that jitter for tests. Confirmed
-subscription filters remain in memory until unsubscribed; keep their set bounded
-in the application.
+默认限制：
 
-`Client::stats()` returns a read-only snapshot: generation, connection state,
-business/control/event queue occupancy, pending requests, reconnects, disconnects,
-unknown outcomes and the most recent disconnect reason. It contains no
-credentials and no message bodies and needs no monitoring service.
+| 配置 | 默认值 |
+|---|---|
+| 业务发送队列 / 控制槽位 / 事件队列 | 64 / 16 / 128 |
+| 待完成操作数 / 单个报文大小 | 32 / 65,536 字节 |
+| 连接、操作、写入、PINGRESP 超时 | 各 5 秒 |
+| keepalive | 30 秒 |
+| 连续重连次数 | 最多 10 次 |
+| 重连间隔 | 从 250 ms 增长至 5 秒，并加入每个客户端独立的随机抖动 |
 
-## Runnable scenarios
+`Client::set_reconnect_seed` 可在测试中固定重连抖动。已确认的订阅过滤器会一直保存在内存中，
+直至取消订阅；应用应控制订阅集合的大小。
 
-中文入口：[从这里开始](docs/START_HERE.zh-CN.md)。
+`Client::stats()` 返回只读快照：连接代次与状态、业务/控制/事件队列占用、待完成请求数、
+重连和断线次数、结果未知次数及最近一次断线原因。快照不包含凭据和消息正文，也不依赖监控服务。
 
-See [docs/SCENARIOS.md](docs/SCENARIOS.md) for complete inputs, rules, outputs and
-failure boundaries for three intended uses:
+## 更多使用场景
 
-1. Temperature control with hysteresis, retained state and availability.
-2. A bounded Frigate event deduplicator which alerts on completed person events.
-3. A ROS bridge JSON/primitive contract with command validation and receipts.
+[从这里开始](docs/START_HERE.zh-CN.md) 提供阅读与运行顺序。
+[使用场景](docs/SCENARIOS.md) 给出以下三类用途的输入、规则、输出和失败边界：
 
-The examples use fixtures. They do not claim a deployed camera, robot or Zigbee
-integration. The Frigate and ROS contracts remain supplementary adapter
-contracts; their tests reject non-finite speeds, empty command ids and
-quote/backslash/control-character payloads, and every emitted payload is JSON.
+1. 带回差、保留状态和在线状态的温度控制。
+2. 有界 Frigate 事件去重，对已结束的人员事件发出提醒。
+3. ROS 桥接的 JSON/基本类型契约，包含命令校验与回执。
 
-## Verification
+示例使用测试数据，没有部署真实摄像头、机器人或 Zigbee 集成。
+Frigate 和 ROS 部分提供补充适配契约：校验非有限速度值和空命令 ID，验证引号、反斜杠及
+控制字符的 JSON 转义，所有输出负载均为 JSON。
+
+## 验证
+
+安装上述依赖后，可单独运行 Mosquitto/Paho 集成测试，或运行本地检查入口：
 
 ```sh
-python3 -m venv .venv
-.venv/bin/pip install -r tests/integration/requirements.txt
-# Install Mosquitto and OpenSSL using your OS package manager, then:
 PYTHON=.venv/bin/python ./tests/integration/run.sh
+./scripts/check.sh
 ```
 
-Run every local check with `./scripts/check.sh`. Two heavier harnesses are run
-separately and are recorded in [docs/VALIDATION.md](docs/VALIDATION.md):
+`scripts/check.sh` 包含类型检查、单元测试、构建、集成测试、协议故障测试、
+场景冒烟和独立消费模块验证。四场景演示、注册表安装验证、EMQX 和长时间压力测试单独运行：
 
 ```sh
-# Pinned official EMQX image: send/receive, subscription denial, restart recovery
+# 独立模拟设备的四种状态同步场景
+.venv/bin/python examples/mqtt_demo/demo.py
+
+# 从 Mooncakes 安装到全新的临时模块，并完成 QoS 1 消息往返
+.venv/bin/python tests/consumer_smoke.py --registry
+
+# 固定版本的官方 EMQX 镜像：收发、拒绝订阅、重启恢复；需要 Docker
 ./tests/emqx.sh
 
-# 30-minute restart soak: 1 KiB QoS 1, concurrency 16, 100 disconnect cycles.
-# The broker log is quiet by default and capped, so the run leaves bounded evidence.
+# 30 分钟重启压力测试：1 KiB QoS 1、16 个并发任务、100 次断线恢复
+# broker 默认仅记录警告和错误，日志大小有上限
 MOONBIT_ASYNC_CHECK_FD_LEAK=1 .venv/bin/python tests/soak.py \
   --duration 1800 --cycles 100 --artifacts tests/integration/artifacts/soak
 ```
 
-The integration suite uses independent Mosquitto and Eclipse Paho processes,
-loopback-only listeners, temporary certificates and packet fault injection.
-See [docs/VALIDATION.md](docs/VALIDATION.md) for the actual executed results and
-remaining gaps. A workflow definition is not evidence of a completed hosted CI run.
+已记录的验证包括 26 项单元测试、12 项集成测试、10 项协议故障测试、4 个状态同步场景、
+EMQX 互操作，以及 30 分钟、100 次断线恢复的压力测试。长测的 RSS/FD 资源采样不可用，
+尚不能据此确认持续负载下没有资源泄漏。
 
-## License and upstream work
+集成测试使用独立的 Mosquitto 和 Eclipse Paho 进程、仅监听回环地址的端口、临时证书及
+报文故障注入。具体实测结果、对应 CI 提交与证据限制见[验证记录](docs/VALIDATION.md)。
 
-Apache-2.0. See [NOTICE](NOTICE). The dependencies remain separate packages with
-their own attribution and licenses; this project does not claim authorship of
-MQTT wire encoding, the async runtime or TLS implementation.
+## 许可证与上游归属
+
+采用 Apache-2.0，详见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
+依赖保持为独立软件包，各自保留原有署名和许可证；MQTT 报文编解码、异步运行时及 TLS
+实现的贡献归属于对应上游项目。

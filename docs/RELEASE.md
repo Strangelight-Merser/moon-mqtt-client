@@ -20,9 +20,10 @@ not claimed as complete.
 | License and attribution | Done | Apache-2.0, `NOTICE`, separate pinned codec and async dependencies. |
 | Public repository | Done | https://github.com/Strangelight-Merser/moon-mqtt-client |
 | Hosted Linux/macOS CI | Done | Linux and macOS passed for commit `fe2ef4c`; the fixed-toolchain check and the rolling-stable compatibility job are separate in `.github/workflows/check.yml`. Re-check the Actions page if the branch moves. |
-| Pinned toolchain | Done, fail-closed caveat | `scripts/install-moonbit-ci.sh fixed` checks both the published and the downloaded SHA-256 against a recorded digest and verifies the exact `moon 0.1.20260904` version string. The official CDN only serves immutable-looking versioned paths as `latest` archives, so a new MoonBit release makes this job fail closed until the digest is re-recorded. That is deliberate; do not weaken it to a moving digest. |
+| Pinned toolchain | Fixed version and checksums | `scripts/install-moonbit-ci.sh fixed` uses the official `0.10.12+1634b282e` version path, checks the recorded binary and core archive SHA-256 values, installs those verified bytes, and checks both `moon` and `moonc` versions. It does not depend on the moving `latest` alias. |
 | Mooncakes release and install test | Done | `Strangelight-Merser/moon-mqtt-client@0.2.0` published 2026-09-15T08:35:55Z; `moon publish` returned `200 OK` after re-checking the extracted package. `tests/consumer_smoke.py --registry` resolved `@0.2.0` in a clean temporary module and completed a QoS 1 round trip. Package sha256 `ee5af2a2…b76b`. |
-| Push tag/branch, GitHub Release and asset checksums | Blocked locally | Mooncakes is published, but no Git credential is available in this environment (`could not read Username for 'https://github.com'`). Push `codex/mqtt-client` plus tag `v0.2.0`, then create the GitHub Release. Record any GitHub source-archive checksum in `docs/RELEASE-NOTES-v0.2.0.md`; the Mooncakes package checksum is already recorded there. |
+| Push tag/branch | Done | `codex/mqtt-client` and `v0.2.0` were pushed on 2026-09-15. The tag remains on the published tree `85bc0a5`. |
+| GitHub Release and asset checksums | In progress | The verified Mooncakes ZIP and a source archive from `v0.2.0` are prepared; publication follows the current CI checks. |
 | EMQX interoperability | Done | Pinned official `emqx/emqx:5.8.8` image (digests in `tests/emqx_interop.py`): QoS 1 both directions, subscription denial and restart recovery passed. |
 | Soak test | Done | 30 minutes, 1 KiB QoS 1, concurrency 16, 100 disconnect/recovery cycles. All gates met: 10,828,581 acknowledged, 10,405,797 observer messages with 0 corrupt, `pending/business/control/event_queue/active_workers` all 0, 100/100 recoveries, exit 0. Recovery p95 0.351 s. Resource sampling was unavailable in this sandbox and is recorded as such. Evidence: `tests/integration/artifacts/soak-v0.2.0/summary.json`. |
 
@@ -31,11 +32,12 @@ not claimed as complete.
 | Requirement | State | Action |
 |---|---|---|
 | Meaningful commits | 17 on `codex/mqtt-client` | Real fix/verification work only, no padding. The organizer's judgment of which commits count has not been obtained; treat the count as a submission fact, not an approval. |
-| Registration and group join | Participant action | Not technically verifiable here. |
+| Registration | Done (participant confirmed) | The participant confirmed registration on 2026-09-15. |
+| Group join | Participant confirmation pending | Registration is confirmed; group membership has not been confirmed. |
 | Integrity declaration | Participant action | Must be signed by the participant. |
 | Participant-written one-page statement | Participant action | `docs/FINDINGS.md`, `docs/SCENARIOS.md` and `docs/VALIDATION.md` provide the engineering basis; the statement itself must be written and understood by the participant. |
-| Mooncakes publication requirement | Blocked on release | Re-read the charter's submission section before submitting; do not assume the requirement from earlier notes. |
-| Main branch at v0.2.0 | Open (needs push access) | `main` is still at the 0.1.0 commit `9bd3813`; the v0.2.0 work is on `codex/mqtt-client` at `85bc0a5`. Decide the fast-forward/merge and push once a credential is available. |
+| Mooncakes publication | Done | `Strangelight-Merser/moon-mqtt-client@0.2.0` is published and the registry install acceptance passed. Confirm the final submission requirements against the organizer's notices. |
+| Main branch at v0.2.0 | Merge in progress | Merge `codex/mqtt-client` into `main` through a pull request after the Linux/macOS checks pass, retaining the development commit history. |
 
 ## Before tagging v0.2.0
 
