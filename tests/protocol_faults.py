@@ -159,6 +159,24 @@ def inject_idle_then_suback(listener: socket.socket, evidence: dict) -> None:
     conn.close()
 
 
+def inject_cancel_reconnect(listener: socket.socket, evidence: dict) -> None:
+    first = accept_client(listener)
+    first_packet = recv_packet(first)
+    evidence["first_id"] = publish_id(first_packet)
+    try:
+        evidence["closed"] = first.recv(1) == b""
+    except ConnectionResetError:
+        evidence["closed"] = True
+    first.close()
+    second = accept_client(listener)
+    second_packet = recv_packet(second)
+    evidence["second_id"] = publish_id(second_packet)
+    second.sendall(b"\x40\x02" + evidence["second_id"].to_bytes(2, "big"))
+    assert recv_packet(second) == b"\xe0\x00"
+    evidence["disconnect"] = True
+    second.close()
+
+
 def qos0_publish(topic: str, payload: bytes) -> bytes:
     topic_bytes = topic.encode()
     body = len(topic_bytes).to_bytes(2, "big") + topic_bytes + payload
@@ -186,6 +204,7 @@ CASES = {
     "slow_suback_header": inject_slow_suback_header,
     "slow_suback_body": inject_slow_suback_body,
     "idle_then_suback": inject_idle_then_suback,
+    "cancel_reconnect": inject_cancel_reconnect,
     "slow_consumer_overflow": inject_slow_consumer_overflow,
 }
 
@@ -236,6 +255,9 @@ def run_case(name: str) -> None:
         assert evidence.get("disconnect_packet") == b"\xe0\x00", evidence
     elif name in {"slow_suback_header", "slow_suback_body", "idle_then_suback"}:
         assert evidence.get("disconnect_packet") == b"\xe0\x00", evidence
+    elif name == "cancel_reconnect":
+        assert evidence.get("closed"), evidence
+        assert evidence.get("disconnect"), evidence
     elif name == "slow_consumer_overflow":
         assert evidence.get("sent") == 3
         assert evidence.get("closed"), evidence

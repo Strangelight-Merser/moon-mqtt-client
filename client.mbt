@@ -231,33 +231,23 @@ async fn Session::request(
   // Budget the whole operation, including the time it spent queued.
   //
   // Deliberately not `@async.with_timeout`: that helper implements its timer as
-  // a task-group child that *fails* when it fires, cancelling the waiter and
-  // leaving the caller's coroutine in a cancelled state. That state leaked out
-  // of a timed-out request and broke the caller's next asynchronous operation,
-  // which is what stalled reconnection. This watchdog only marks the request
-  // timed out and aborts the session, so waiting stays cancellation-free.
+  // a failing task-group child. This watchdog returns normally and only wakes
+  // the condition variable; the request coroutine owns deadline classification
+  // and session abort, so its cancellation state remains clean.
   let deadline = request.queued_at + config.operation_timeout_ms.to_int64()
-  let timed_out = try {
-    @async.with_task_group(group => {
-      group.spawn_bg(no_wait=true, () => {
-        @async.sleep(config.operation_timeout_ms)
-        raise OperationTimeout("operation_timeout_ms expired")
-      })
-      while request.result is None {
-        request.changed.wait()
+  @async.with_task_group(group => {
+    group.spawn_bg(no_wait=true, () => {
+      let remaining = deadline - @async.now()
+      if remaining > 0 {
+        @async.sleep(remaining.to_int())
       }
+      request.changed.broadcast()
     })
-    false
-  } catch {
-    OperationTimeout(_) => true
-    error =>
-      if @async.is_cancellation_error(error) {
-        raise error
-      } else {
-        true
-      }
-  }
-  if request.result is None && (timed_out || @async.now() >= deadline) {
+    while request.result is None && @async.now() < deadline {
+      request.changed.wait()
+    }
+  })
+  if request.result is None && @async.now() >= deadline {
     // The caller-side budget expired. Aborting settles this request and every
     // other pending request exactly once.
     abort_session("operation_timeout_ms=\{config.operation_timeout_ms} expired")

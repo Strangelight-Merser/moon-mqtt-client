@@ -33,18 +33,21 @@ again (late ACK after close, new connection, reused identifier 1, real
 asynchronous operation failed immediately with `Cancelled`, which also broke the
 reconnect path above.
 
-**Cause.** `@async.with_timeout` implements its timer as a task-group child that
-*fails* when it fires; that cancels the waiting coroutine and leaves it in a
-cancelled state, which persists after the timeout error is caught.
+**Cause.** In `moonbitlang/async@0.21.3`, a task-group child spawned with the
+default `allow_failure=false` changes the group to `Fail` when it raises and
+cancels every sibling, including the group body. The request watchdog still
+raised `OperationTimeout`, so catching that error outside the group did not make
+the waiter's cancellation state clean.
 
 **Fix.** Request waiting uses a watchdog task plus a deadline loop. The watchdog
-only marks the request timed out and aborts the session; the waiter itself never
-runs inside a failing sub-group. The deadline is still enforced exactly, starting
-from the moment the request was accepted (queue time included).
+sleeps and broadcasts the request condition normally; it never raises. The
+request coroutine checks the monotonic deadline and aborts the session itself.
+The deadline still starts when the request is accepted, including queue time.
 
-**Verification.** `docs/API-CONTRACT.md` documents the rule; the fault injector
-and all four demo scenarios pass; a unit probe confirmed that a caller can
-publish successfully immediately after an unknown-outcome publish.
+**Verification.** The `timeout_reconnect` fault case times out a written publish,
+waits for reconnection in the same caller coroutine, and successfully publishes
+again. `cancel_reconnect` cancels a written request, observes the old connection
+close, then successfully publishes on the next generation.
 
 ## D3 — closing a queue failed the write loop
 

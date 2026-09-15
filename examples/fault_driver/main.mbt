@@ -107,6 +107,22 @@ async fn idle_then_suback() -> Unit {
 }
 
 ///|
+async fn cancel_reconnect() -> Unit {
+  @mqtt.with_client(config(), async fn(client) {
+    @async.with_task_group(group => {
+      let first = group.spawn(no_wait=true, allow_failure=true, () => {
+        client.publish("fault/cancelled", b"first", qos=@mqtt.AtLeastOnce)
+      })
+      @async.sleep(40)
+      first.cancel()
+      first.wait() catch { _ => () }
+      client.wait_connected()
+      client.publish("fault/after-cancel", b"second", qos=@mqtt.AtLeastOnce)
+    })
+  })
+}
+
+///|
 async fn slow_consumer_overflow() -> Unit {
   let mut saw_backpressure = false
   @mqtt.with_client(config(receive_capacity=2), async fn(_) {
@@ -131,6 +147,7 @@ async fn main {
       "partial_suback" => partial_suback()
       "slow_suback_header" | "slow_suback_body" => single_suback()
       "idle_then_suback" => idle_then_suback()
+      "cancel_reconnect" => cancel_reconnect()
       "slow_consumer_overflow" => slow_consumer_overflow()
       _ => fail("unknown fault case")
     }

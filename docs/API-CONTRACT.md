@@ -17,6 +17,9 @@ Three independent budgets, all in milliseconds, all defaulting to 5000:
 `operation_timeout_ms` deliberately includes queueing time. A request that waits
 in the send queue for longer than the budget is never written: it finishes as
 `NotSent` so a caller can safely retry a request that was definitely not sent.
+The deadline watchdog wakes the request condition normally; it does not raise
+from a task-group child. The request coroutine performs the deadline check and
+session abort, so a caught timeout cannot poison the caller's next async call.
 
 There is no legacy `ack_timeout_ms` field and no compatibility shim; the old name
 described only the final phase, and callers that meant "total budget" were
