@@ -38,6 +38,11 @@ fn config(
     } else {
       @mqtt.Plain
     },
+    username=@env.get_env_var("MQTT_TEST_USERNAME"),
+    password=match @env.get_env_var("MQTT_TEST_PASSWORD") {
+      Some(value) => Some(@utf8.encode(value))
+      None => None
+    },
     will~,
     keep_alive_secs~,
     operation_timeout_ms~,
@@ -45,6 +50,40 @@ fn config(
     max_reconnect_delay_ms=500,
     reconnect_attempts=20,
   )
+}
+
+///|
+async fn auth_acl_case() -> Unit {
+  @mqtt.with_client(config(), async fn(client) {
+    match client.next_event() {
+      @mqtt.Connected(_) => ()
+      event => fail("expected authenticated connection, got \{@debug.to_string(event)}")
+    }
+    let results = client.subscribe([
+      { topic: "allowed/read", qos: @mqtt.AtLeastOnce, },
+      { topic: "denied/read", qos: @mqtt.AtLeastOnce, },
+    ])
+    // Mosquitto deliberately acknowledges syntactically valid subscriptions
+    // even when its ACL suppresses delivery. The Python oracle verifies the
+    // denied topic remains silent after this readiness event.
+    guard results == [
+      @mqtt.Granted(@mqtt.AtLeastOnce),
+      @mqtt.Granted(@mqtt.AtLeastOnce),
+    ] else {
+      fail("unexpected authenticated ACL SUBACK \{@debug.to_string(results)}")
+    }
+    client.publish(
+      "allowed/write",
+      b"authenticated",
+      qos=@mqtt.AtLeastOnce,
+    )
+    log_line("{\"event\":\"auth_acl_ready\"}")
+    match @async.with_timeout_opt(700, () => client.next_event()) {
+      None => log_line("{\"event\":\"acl_denied_delivery\"}")
+      Some(event) => fail("ACL-denied message arrived: \{@debug.to_string(event)}")
+    }
+    client.disconnect()
+  })
 }
 
 ///|
@@ -306,6 +345,7 @@ async fn main {
       "retained_clear" => retained_case(true)
       "unsubscribe" => unsubscribe_case()
       "stats" => stats_case()
+      "auth_acl" => auth_acl_case()
       scenario => fail("unknown MQTT_TEST_SCENARIO \{scenario}")
     }
   })

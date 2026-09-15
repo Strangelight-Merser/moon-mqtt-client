@@ -16,7 +16,9 @@ the Python oracle with `python3 -m pip install -r tests/integration/requirements
 The suite currently covers plain TCP QoS 0/1 in both directions, custom-CA TLS
 including hostname and trust rejection, broker restart with resubscription, and
 a lost-PUBACK request that must never be reported as successful. It also checks
-fragmented packets, heartbeat failure, Will behavior, retained delivery and
+correct and incorrect username/password authentication, an ACL-denied
+subscription, fragmented packets, heartbeat failure, Will behavior, retained
+delivery and
 clearing, and UNSUBACK followed by an independent no-delivery window. It is an
 integration suite, not an MQTT conformance claim.
 
