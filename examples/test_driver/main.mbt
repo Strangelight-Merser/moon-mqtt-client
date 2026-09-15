@@ -87,6 +87,25 @@ async fn auth_acl_case() -> Unit {
 }
 
 ///|
+async fn suback_rejection_case() -> Unit {
+  @mqtt.with_client(config(), async fn(client) {
+    match client.next_event() {
+      @mqtt.Connected(_) => ()
+      event => fail("expected connection, got \{@debug.to_string(event)}")
+    }
+    let results = client.subscribe([
+      { topic: "allowed/read", qos: @mqtt.AtLeastOnce, },
+      { topic: "denied/read", qos: @mqtt.AtLeastOnce, },
+    ])
+    guard results == [@mqtt.Granted(@mqtt.AtLeastOnce), @mqtt.Rejected] else {
+      fail("broker did not return the expected partial SUBACK: \{@debug.to_string(results)}")
+    }
+    log_line("{\"event\":\"suback_rejection_verified\"}")
+    client.disconnect()
+  })
+}
+
+///|
 async fn connected_case() -> Unit {
   @mqtt.with_client(config(), async fn(client) {
     log_line("{\"event\":\"connected\"}")
@@ -346,6 +365,7 @@ async fn main {
       "unsubscribe" => unsubscribe_case()
       "stats" => stats_case()
       "auth_acl" => auth_acl_case()
+      "suback_rejection" => suback_rejection_case()
       scenario => fail("unknown MQTT_TEST_SCENARIO \{scenario}")
     }
   })
