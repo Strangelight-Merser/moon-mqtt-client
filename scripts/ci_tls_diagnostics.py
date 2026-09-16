@@ -21,30 +21,16 @@ for scenario in ("mtls_dual", "mtls_repeat"):
             env["MQTT_TEST_KEY_" + suffix] = str(broker.temp / (cert + ".key"))
     else:
         env.update(MQTT_TEST_CERT=str(broker.temp / "client.pem"), MQTT_TEST_KEY=str(broker.temp / "client.key"))
-    driver = h.Driver(scenario, broker.port, host="localhost", **env)
+    binary = root / "_build/native/debug/build/Strangelight-Merser/moon-mqtt-client/examples/test_driver/test_driver.exe"
+    child_env = {**os.environ, "MQTT_TEST_SCENARIO": scenario, "MQTT_TEST_HOST": "localhost", "MQTT_TEST_PORT": str(broker.port), **env}
     try:
-        start = time.monotonic()
-        for _ in range(12):
-            time.sleep(1)
-            print(scenario, round(time.monotonic() - start, 3), driver.process.poll(), driver.drain_events(), flush=True)
-            if driver.process.poll() is not None:
-                break
-        print("BROKER", (broker.temp / "broker.log").read_text(), flush=True)
-        subprocess.run(["ps", "-e", "-o", "pid,ppid,stat,wchan:30,args", "--forest"], check=False)
-        if driver.process.poll() is None:
-            descendants = [driver.process.pid]
-            for pid in descendants:
-                children = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True)
-                descendants.extend(int(x) for x in children.stdout.split())
-            for pid in descendants:
-                print("PROCESS", pid, flush=True)
-                subprocess.run(["sudo", "ls", "-l", f"/proc/{pid}/fd"], check=False)
-                subprocess.run(["sudo", "gdb", "-batch", "-ex", "set pagination off", "-ex", "thread apply all bt", "-p", str(pid)], timeout=20, check=False)
-            if driver.process.stderr:
-                os.set_blocking(driver.process.stderr.fileno(), False)
-                print("LIVE STDERR", os.read(driver.process.stderr.fileno(), 65536), flush=True)
-        else:
-            print("STDERR", driver.stderr(), flush=True)
+        subprocess.run([
+            "gdb", "-batch", "-ex", "set pagination off",
+            "-ex", "handle SIGUSR1 nostop noprint pass",
+            "-ex", "handle SIGUSR2 nostop noprint pass",
+            "-ex", "run", "-ex", "thread apply all bt",
+            "--args", str(binary),
+        ], env=child_env, timeout=40, check=False)
     finally:
-        driver.close()
+        print("BROKER", (broker.temp / "broker.log").read_text(), flush=True)
         broker.close()
