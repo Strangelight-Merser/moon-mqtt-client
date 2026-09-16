@@ -574,7 +574,10 @@ pub async fn[Inner : @io.Reader + @io.Writer] Tls::server(
 ///|
 #cfg(not(platform="windows"))
 pub impl @io.Reader for Tls with fn _direct_read(self, buf, offset~, max_len~) {
-  let n = while self.ssl.read(buf, offset, max_len) is ret {
+  // A suspended read can resume after its owner has closed this wrapper.
+  // Never call OpenSSL with an SSL pointer that close() already released.
+  let n = while !self.closed {
+    let ret = self.ssl.read(buf, offset, max_len)
     if ret > 0 {
       break ret
     }
@@ -594,7 +597,7 @@ pub impl @io.Reader for Tls with fn _direct_read(self, buf, offset~, max_len~) {
     }
     self.handle_error(err)
   } nobreak {
-    0
+    raise ConnectionClosed
   }
   // imposible
   self.transport.flush_write()
@@ -610,13 +613,14 @@ pub impl @io.Reader for Tls with fn _get_internal_buffer(self) {
 ///|
 #cfg(not(platform="windows"))
 pub impl @io.Writer for Tls with fn write_once(self, buf, offset~, len~) {
-  let n = while self.ssl.write(buf, offset, len) is ret {
+  let n = while !self.closed {
+    let ret = self.ssl.write(buf, offset, len)
     if ret > 0 {
       break ret
     }
     self.handle_error(self.ssl.get_error(ret))
   } nobreak {
-    0
+    raise ConnectionClosed
   }
   // imposible
   self.transport.flush_write()
