@@ -17,6 +17,9 @@ struct Client {
   mut unknown_outcomes : Int
   mut last_disconnect : String?
   mut backoff : ReconnectBackoff
+  /// Set when the supervisor ends because a connect-phase or terminal error
+  /// should reach waiters. Normal shutdown leaves this empty so they see Closed.
+  mut stop_reason : ClientError?
 }
 
 ///|
@@ -66,6 +69,7 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     unknown_outcomes: 0,
     last_disconnect: None,
     backoff: ReconnectBackoff::new(0),
+    stop_reason: None,
   }
   @async.with_task_group(group => {
     let worker = group.spawn(() => client.supervise())
@@ -121,10 +125,52 @@ pub fn Client::stats(self : Client) -> ClientStats {
 }
 
 ///|
+fn client_error_of(error : Error) -> ClientError {
+  try {
+    raise error
+  } catch {
+    InvalidConfig(msg) => InvalidConfig(msg)
+    ProtocolError(msg) => ProtocolError(msg)
+    NotConnected => NotConnected
+    Closed => Closed
+    Backpressure(msg) => Backpressure(msg)
+    NotSent(msg) => NotSent(msg)
+    OutcomeUnknown(msg) => OutcomeUnknown(msg)
+    ConnectionRefused(msg) => ConnectionRefused(msg)
+    ReconnectExhausted(msg) => ReconnectExhausted(msg)
+    OperationTimeout(msg) => OperationTimeout(msg)
+    WriteTimeout(msg) => WriteTimeout(msg)
+    PingResponseTimeout(msg) => PingResponseTimeout(msg)
+    TlsFailure(msg) => TlsFailure(msg)
+    // A TLS 1.3 server can reject the client identity after the local handshake
+    // call has already returned: the alert then surfaces on the first MQTT
+    // CONNECT write or the CONNACK read. Keep the TLS category instead of
+    // degrading it to the generic ProtocolError fallback.
+    @tls.TlsError(msg) => TlsFailure(msg)
+    _ => ProtocolError(error.to_string())
+  }
+}
+
+///|
+fn Client::record_stop(self : Client, error : Error) -> Unit {
+  if self.stop_reason is None {
+    self.stop_reason = Some(client_error_of(error))
+  }
+}
+
+///|
+fn Client::close_reason(self : Client) -> ClientError {
+  match self.stop_reason {
+    Some(err) => err
+    None => Closed
+  }
+}
+
+///|
 pub async fn Client::wait_connected(self : Client) -> Unit {
   while !self.ready || !(self.session is Some(session) && session.alive) {
     if self.stopped {
-      raise Closed
+      raise self.close_reason()
     }
     self.changed.wait()
   }
@@ -159,7 +205,7 @@ fn Client::emit(self : Client, event : Event) -> Unit raise {
 ///|
 fn Client::active(self : Client) -> Session raise ClientError {
   if self.stopped {
-    raise Closed
+    raise self.close_reason()
   }
   match self.session {
     Some(session) if self.ready && session.alive => session

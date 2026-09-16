@@ -61,6 +61,13 @@ best-effort and does not claim cross-field atomicity.
 | `PingResponseTimeout` | A written PINGREQ was never answered | Yes |
 | `ConnectionRefused` / `ProtocolError` | Connect-phase rejection or protocol violation | n/a |
 | `ReconnectExhausted` | Retries after a previously working connection were exhausted | n/a |
+| `InvalidConfig` | Identity files missing, encrypted, malformed, or mismatched; or `Plain` plus a client identity | n/a |
+| `TlsFailure` | TLS handshake or server-certificate verification failed after a valid config | n/a |
+| `Closed` | The client was shut down normally (`disconnect` or `with_client` scope end) | n/a |
+
+A failed first connection raises the classified error to `wait_connected` and to
+`with_client`. `Closed` is reserved for a normal stop; it does not replace
+`InvalidConfig` or `TlsFailure`.
 
 `OutcomeUnknown` is the only result that requires application-level recovery.
 Recovery must not assume success or failure: query the peer or resend an

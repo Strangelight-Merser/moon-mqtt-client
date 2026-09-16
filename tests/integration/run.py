@@ -14,6 +14,7 @@ from pathlib import Path
 import queue
 import shutil
 import socket
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -36,6 +37,144 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+def openssl(*args: str) -> None:
+    subprocess.run(
+        ["openssl", *args], check=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def sign_expired_cert(directory: Path, name: str, ca: str) -> None:
+    """Issue an already-expired leaf. OpenSSL 3.0 `x509 -req` has no -not_before."""
+    work = Path(tempfile.mkdtemp(prefix="moon-mqtt-ca-"))
+    try:
+        (work / "newcerts").mkdir()
+        (work / "index.txt").write_text("")
+        (work / "serial").write_text("01\n")
+        (work / "ca.cnf").write_text(
+            "[ ca ]\n"
+            "default_ca = CA_default\n"
+            "[ CA_default ]\n"
+            f"dir = {work}\n"
+            "database = $dir/index.txt\n"
+            "serial = $dir/serial\n"
+            "new_certs_dir = $dir/newcerts\n"
+            "default_md = sha256\n"
+            "policy = policy_any\n"
+            "x509_extensions = usr_cert\n"
+            "unique_subject = no\n"
+            "email_in_dn = no\n"
+            "[ policy_any ]\n"
+            "commonName = supplied\n"
+            "[ usr_cert ]\n"
+            "basicConstraints = CA:FALSE\n"
+            "extendedKeyUsage = clientAuth\n"
+        )
+        subprocess.run(
+            [
+                "openssl", "ca", "-batch", "-notext",
+                "-config", str(work / "ca.cnf"),
+                "-cert", str(directory / f"{ca}.pem"),
+                "-keyfile", str(directory / f"{ca}.key"),
+                "-in", str(directory / f"{name}.csr"),
+                "-out", str(directory / f"{name}.pem"),
+                "-startdate", "20010101000000Z",
+                "-enddate", "20010102000000Z",
+            ],
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        still_valid = subprocess.run(
+            ["openssl", "x509", "-in", str(directory / f"{name}.pem"), "-checkend", "0"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        if still_valid.returncode == 0:
+            raise RuntimeError(f"{name}.pem is not expired")
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def write_pki(directory: Path, *, mtls: bool = False) -> None:
+    """Write a throwaway PKI into `directory`. Server CA and client CA are separate."""
+    for name, cn in (("ca", "moon-mqtt-test-ca"), ("unrelated-ca", "unrelated-test-ca")):
+        openssl(
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(directory / f"{name}.key"),
+            "-out", str(directory / f"{name}.pem"), "-days", "1",
+            "-subj", f"/CN={cn}",
+            "-addext", "basicConstraints=critical,CA:TRUE",
+        )
+    openssl(
+        "req", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(directory / "server.key"),
+        "-out", str(directory / "server.csr"), "-subj", "/CN=localhost",
+        "-addext", "subjectAltName=DNS:localhost",
+    )
+    (directory / "server.ext").write_text("subjectAltName=DNS:localhost\n")
+    openssl(
+        "x509", "-req", "-in", str(directory / "server.csr"),
+        "-CA", str(directory / "ca.pem"), "-CAkey", str(directory / "ca.key"),
+        "-CAcreateserial", "-out", str(directory / "server.pem"), "-days", "1",
+        "-extfile", str(directory / "server.ext"),
+    )
+    if not mtls:
+        return
+    openssl(
+        "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(directory / "client-ca.key"),
+        "-out", str(directory / "client-ca.pem"), "-days", "1",
+        "-subj", "/CN=moon-mqtt-client-ca",
+        "-addext", "basicConstraints=critical,CA:TRUE",
+    )
+    openssl(
+        "req", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(directory / "client-int.key"),
+        "-out", str(directory / "client-int.csr"), "-subj", "/CN=moon-mqtt-client-int",
+    )
+    (directory / "client-int.ext").write_text(
+        "basicConstraints=critical,CA:TRUE,pathlen:0\nkeyUsage=critical,keyCertSign,cRLSign\n"
+    )
+    openssl(
+        "x509", "-req", "-in", str(directory / "client-int.csr"),
+        "-CA", str(directory / "client-ca.pem"), "-CAkey", str(directory / "client-ca.key"),
+        "-CAcreateserial", "-out", str(directory / "client-int.pem"), "-days", "1",
+        "-extfile", str(directory / "client-int.ext"),
+    )
+
+    def sign_leaf(name: str, cn: str, ca: str) -> None:
+        openssl(
+            "req", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(directory / f"{name}.key"),
+            "-out", str(directory / f"{name}.csr"), "-subj", f"/CN={cn}",
+        )
+        openssl(
+            "x509", "-req", "-in", str(directory / f"{name}.csr"),
+            "-CA", str(directory / f"{ca}.pem"), "-CAkey", str(directory / f"{ca}.key"),
+            "-CAcreateserial", "-out", str(directory / f"{name}.pem"), "-days", "1",
+        )
+
+    for name in ("client", "paho-client", "device-a", "device-b"):
+        sign_leaf(name, name, "client-ca")
+    sign_leaf("client-unrelated", "client-unrelated", "unrelated-ca")
+    sign_leaf("client-via-int", "client-via-int", "client-int")
+    (directory / "client-chain.pem").write_bytes(
+        (directory / "client-via-int.pem").read_bytes()
+        + (directory / "client-int.pem").read_bytes()
+    )
+    openssl(
+        "req", "-newkey", "rsa:2048", "-nodes",
+        "-keyout", str(directory / "client-expired.key"),
+        "-out", str(directory / "client-expired.csr"), "-subj", "/CN=client-expired",
+    )
+    sign_expired_cert(directory, "client-expired", "client-ca")
+    openssl("genrsa", "-out", str(directory / "client-mismatch.key"), "2048")
+    openssl(
+        "pkcs8", "-topk8", "-in", str(directory / "client.key"),
+        "-out", str(directory / "client-encrypted.key"),
+        "-v2", "aes-256-cbc", "-passout", "pass:secret",
+    )
+    (directory / "corrupt.pem").write_text("this is not a pem certificate\n")
+
+
 def wait_port(port: int, deadline: float = 3.0) -> None:
     end = time.monotonic() + deadline
     while time.monotonic() < end:
@@ -48,11 +187,15 @@ def wait_port(port: int, deadline: float = 3.0) -> None:
 
 
 class Broker:
-    def __init__(self, *, tls: bool = False, authenticated: bool = False,
-                 port: int | None = None):
+    def __init__(self, *, tls: bool = False, mtls: bool = False,
+                 cert_acl: bool = False, authenticated: bool = False,
+                 tls_version: str | None = None, port: int | None = None):
         self.port = port or free_port()
-        self.tls = tls
+        self.mtls = mtls or cert_acl
+        self.tls = tls or self.mtls
+        self.cert_acl = cert_acl
         self.authenticated = authenticated
+        self.tls_version = tls_version
         self.temp = Path(tempfile.mkdtemp(prefix="moon-mqtt-it-"))
         self.process: subprocess.Popen[str] | None = None
 
@@ -77,6 +220,26 @@ class Broker:
             if not (self.temp / "ca.pem").exists():
                 self._certificates()
             lines += [f"certfile {self.temp / 'server.pem'}", f"keyfile {self.temp / 'server.key'}"]
+            if self.tls_version:
+                lines.append(f"tls_version {self.tls_version}")
+            if self.mtls:
+                lines += [
+                    f"cafile {self.temp / 'client-ca.pem'}",
+                    "require_certificate true",
+                ]
+                if self.cert_acl:
+                    acl_file = self.temp / "cert.acl"
+                    acl_file.write_text(
+                        "user device-a\n"
+                        "topic readwrite device-a/#\n"
+                        "user device-b\n"
+                        "topic readwrite device-b/#\n"
+                    )
+                    acl_file.chmod(0o600)
+                    lines += [
+                        "use_identity_as_username true",
+                        f"acl_file {acl_file}",
+                    ]
         (self.temp / "mosquitto.conf").write_text("\n".join(lines) + "\n")
         self.log = open(self.temp / "broker.log", "a", encoding="utf-8")
         self.process = subprocess.Popen(
@@ -90,26 +253,7 @@ class Broker:
             raise
 
     def _certificates(self) -> None:
-        for name, cn in (("ca", "moon-mqtt-test-ca"), ("unrelated-ca", "unrelated-test-ca")):
-            subprocess.run([
-                "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-                "-keyout", str(self.temp / f"{name}.key"),
-                "-out", str(self.temp / f"{name}.pem"), "-days", "1",
-                "-subj", f"/CN={cn}",
-            ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run([
-            "openssl", "req", "-newkey", "rsa:2048", "-nodes",
-            "-keyout", str(self.temp / "server.key"),
-            "-out", str(self.temp / "server.csr"), "-subj", "/CN=localhost",
-            "-addext", "subjectAltName=DNS:localhost",
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        (self.temp / "server.ext").write_text("subjectAltName=DNS:localhost\n")
-        subprocess.run([
-            "openssl", "x509", "-req", "-in", str(self.temp / "server.csr"),
-            "-CA", str(self.temp / "ca.pem"), "-CAkey", str(self.temp / "ca.key"),
-            "-CAcreateserial", "-out", str(self.temp / "server.pem"), "-days", "1",
-            "-extfile", str(self.temp / "server.ext"),
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        write_pki(self.temp, mtls=self.mtls)
 
     def stop(self) -> None:
         if self.process and self.process.poll() is None:
@@ -228,7 +372,8 @@ class Driver:
         assert self.process.stdout
         self.stdout = self.process.stdout
         self.events: queue.Queue[dict] = queue.Queue()
-        threading.Thread(target=self._read, daemon=True).start()
+        self._reader = threading.Thread(target=self._read, daemon=True)
+        self._reader.start()
 
     def _read(self) -> None:
         try:
@@ -257,17 +402,32 @@ class Driver:
         assert self.process.stdin
         self.process.stdin.write(command + "\n"); self.process.stdin.flush()
 
+    def drain_events(self) -> list[dict]:
+        items = []
+        while True:
+            try:
+                items.append(self.events.get_nowait())
+            except queue.Empty:
+                return items
+
     def finish(self, timeout: float = 10.0) -> tuple[int, str]:
         try:
             code = self.process.wait(timeout)
         except subprocess.TimeoutExpired:
             self.process.kill(); self.process.wait()
             raise AssertionError(f"driver timed out; stderr={self.stderr()!r}")
+        self._reader.join(timeout=2)
         stderr = self.stderr()
         for stream in (self.process.stdin, self.stdout, self.process.stderr):
             if stream:
                 stream.close()
         return code, stderr
+
+    def client_error_type(self) -> str | None:
+        for item in self.drain_events():
+            if item.get("event") == "client_error":
+                return item.get("type")
+        return None
 
     def close(self) -> None:
         if self.process.poll() is None:
@@ -282,10 +442,35 @@ class Driver:
 
 
 class IntegrationTest(unittest.TestCase):
-    def run_broker(self, *, tls: bool = False, authenticated: bool = False) -> Broker:
-        broker = Broker(tls=tls, authenticated=authenticated); broker.start()
+    def run_broker(self, *, tls: bool = False, mtls: bool = False,
+                   cert_acl: bool = False, authenticated: bool = False,
+                   tls_version: str | None = None) -> Broker:
+        broker = Broker(tls=tls, mtls=mtls, cert_acl=cert_acl,
+                        authenticated=authenticated, tls_version=tls_version)
+        broker.start()
         self.addCleanup(broker.close)
         return broker
+
+    def mtls_env(self, broker: Broker, cert: str = "client", **extra: str) -> dict[str, str]:
+        return {
+            "host": "localhost",
+            "MQTT_TEST_CA": str(broker.temp / "ca.pem"),
+            "MQTT_TEST_CERT": str(broker.temp / f"{cert}.pem"),
+            "MQTT_TEST_KEY": str(broker.temp / f"{cert}.key"),
+            **extra,
+        }
+
+    def assert_mtls_rejected(self, broker: Broker, error: str | None = None,
+                             **env: str) -> None:
+        driver = Driver("tls", broker.port, **self.mtls_env(broker, **env))
+        self.addCleanup(driver.close)
+        code, stderr = driver.finish()
+        self.assertNotEqual(code, 0, stderr)
+        if error is not None:
+            self.assertEqual(
+                driver.client_error_type(), error,
+                f"expected {error}; stderr={stderr}",
+            )
 
     def test_tcp_qos0_qos1_and_subscription(self) -> None:
         broker = self.run_broker()
@@ -350,8 +535,360 @@ class IntegrationTest(unittest.TestCase):
         for host, ca in (("127.0.0.1", broker.temp / "ca.pem"), ("localhost", broker.temp / "unrelated-ca.pem")):
             bad = Driver("tls_reject", broker.port, host=host, MQTT_TEST_CA=str(ca))
             self.addCleanup(bad.close)
-            code, _ = bad.finish()
+            code, stderr = bad.finish()
             self.assertNotEqual(code, 0, f"TLS unexpectedly accepted host={host}, ca={ca}")
+            self.assertEqual(
+                bad.client_error_type(), "TlsFailure",
+                f"host={host} ca={ca} stderr={stderr}",
+            )
+
+    def test_mtls_qos1_roundtrip(self) -> None:
+        broker = self.run_broker(mtls=True)
+        received: list[tuple[str, bytes, int]] = []
+        ready = threading.Event()
+        oracle = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-mtls-oracle")
+        oracle.tls_set(
+            ca_certs=str(broker.temp / "ca.pem"),
+            certfile=str(broker.temp / "paho-client.pem"),
+            keyfile=str(broker.temp / "paho-client.key"),
+        )
+        oracle.on_connect = lambda c, u, f, r, p: c.subscribe("it/from-moon/mtls", 1)
+        oracle.on_subscribe = lambda *args: ready.set()
+        oracle.on_message = lambda c, u, m: received.append((m.topic, m.payload, m.qos))
+        oracle.connect("localhost", broker.port)
+        oracle.loop_start()
+        self.addCleanup(lambda: (oracle.disconnect(), oracle.loop_stop()))
+        self.assertTrue(ready.wait(3))
+        driver = Driver(
+            "mtls", broker.port, host="localhost",
+            MQTT_TEST_CA=str(broker.temp / "ca.pem"),
+            MQTT_TEST_CERT=str(broker.temp / "client.pem"),
+            MQTT_TEST_KEY=str(broker.temp / "client.key"),
+        )
+        self.addCleanup(driver.close)
+        driver.expect("subscribed")
+        oracle.publish("it/to-moon/mtls", b"paho-mtls", qos=1).wait_for_publish(3)
+        driver.expect("received_mtls")
+        code, stderr = driver.finish()
+        self.assertEqual(code, 0, stderr)
+        end = time.monotonic() + 3
+        while not received and time.monotonic() < end:
+            time.sleep(.025)
+        self.assertEqual(received, [("it/from-moon/mtls", b"moon-mtls", 1)])
+
+        missing = Driver(
+            "tls", broker.port, host="localhost",
+            MQTT_TEST_CA=str(broker.temp / "ca.pem"),
+        )
+        self.addCleanup(missing.close)
+        self.assertNotEqual(missing.finish()[0], 0, "broker accepted a client without a certificate")
+
+    def test_mtls_intermediate_chain(self) -> None:
+        broker = self.run_broker(mtls=True)
+        driver = Driver(
+            "tls", broker.port,
+            **self.mtls_env(broker, cert="client-via-int",
+                            MQTT_TEST_CERT=str(broker.temp / "client-chain.pem"),
+                            MQTT_TEST_KEY=str(broker.temp / "client-via-int.key")),
+        )
+        self.addCleanup(driver.close)
+        driver.expect("connected")
+        self.assertEqual(driver.finish()[0], 0)
+
+    def test_mtls_rejection_matrix(self) -> None:
+        broker = self.run_broker(mtls=True)
+        self.assert_mtls_rejected(
+            broker, cert="client-via-int",
+            MQTT_TEST_CERT=str(broker.temp / "client-via-int.pem"),
+            MQTT_TEST_KEY=str(broker.temp / "client-via-int.key"),
+        )
+        self.assert_mtls_rejected(broker, cert="client-unrelated")
+        self.assert_mtls_rejected(broker, cert="client-expired")
+        self.assert_mtls_rejected(
+            broker, MQTT_TEST_CERT=str(broker.temp / "client.pem"),
+            MQTT_TEST_KEY=str(broker.temp / "client-mismatch.key"),
+            error="InvalidConfig",
+        )
+        self.assert_mtls_rejected(
+            broker, MQTT_TEST_CERT=str(broker.temp / "corrupt.pem"),
+            MQTT_TEST_KEY=str(broker.temp / "client.key"),
+            error="InvalidConfig",
+        )
+        self.assert_mtls_rejected(
+            broker, MQTT_TEST_CERT=str(broker.temp / "client.pem"),
+            MQTT_TEST_KEY=str(broker.temp / "client-encrypted.key"),
+            error="InvalidConfig",
+        )
+        self.assert_mtls_rejected(
+            broker, MQTT_TEST_CA=str(broker.temp / "unrelated-ca.pem"),
+            error="TlsFailure",
+        )
+        self.assert_mtls_rejected(broker, host="127.0.0.1", error="TlsFailure")
+        self.assert_mtls_rejected(
+            broker, MQTT_TEST_KEY=str(broker.temp / "no-such-key.pem"),
+            error="InvalidConfig",
+        )
+
+    def test_mtls_tls13_only_qos1_roundtrip(self) -> None:
+        broker = self.run_broker(mtls=True, tls_version="tlsv1.3")
+        received: list[tuple[str, bytes, int]] = []
+        ready = threading.Event()
+        oracle = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-tls13")
+        oracle.tls_set(
+            ca_certs=str(broker.temp / "ca.pem"),
+            certfile=str(broker.temp / "paho-client.pem"),
+            keyfile=str(broker.temp / "paho-client.key"),
+        )
+        oracle.on_connect = lambda c, u, f, r, p: c.subscribe("it/from-moon/mtls", 1)
+        oracle.on_subscribe = lambda *args: ready.set()
+        oracle.on_message = lambda c, u, m: received.append((m.topic, m.payload, m.qos))
+        oracle.connect("localhost", broker.port)
+        oracle.loop_start()
+        self.addCleanup(lambda: (oracle.disconnect(), oracle.loop_stop()))
+        self.assertTrue(ready.wait(3))
+        driver = Driver("mtls", broker.port, **self.mtls_env(broker))
+        self.addCleanup(driver.close)
+        driver.expect("subscribed")
+        oracle.publish("it/to-moon/mtls", b"paho-mtls", qos=1).wait_for_publish(3)
+        driver.expect("received_mtls")
+        self.assertEqual(driver.finish()[0], 0)
+        end = time.monotonic() + 3
+        while not received and time.monotonic() < end:
+            time.sleep(.025)
+        self.assertEqual(received, [("it/from-moon/mtls", b"moon-mtls", 1)])
+        self.assert_mtls_rejected(broker, cert="client-unrelated", error="TlsFailure")
+
+    def test_mtls_tls13_only_identity_rejection_error_types(self) -> None:
+        """TLS 1.3 rejects a client identity after the local handshake returns.
+
+        The server can only announce the rejection on the first MQTT read or
+        write, so the public error must still be the TLS category instead of the
+        generic ProtocolError fallback.
+        """
+        broker = self.run_broker(mtls=True, tls_version="tlsv1.3")
+        driver = Driver(
+            "tls", broker.port, host="localhost",
+            MQTT_TEST_CA=str(broker.temp / "ca.pem"),
+        )
+        self.addCleanup(driver.close)
+        code, stderr = driver.finish()
+        self.assertNotEqual(code, 0, stderr)
+        self.assertEqual(driver.client_error_type(), "TlsFailure", stderr)
+        self.assert_mtls_rejected(broker, cert="client-unrelated", error="TlsFailure")
+        self.assert_mtls_rejected(broker, cert="client-expired", error="TlsFailure")
+
+    def test_tls_clean_close_without_alert_is_tls_failure(self) -> None:
+        """A clean TLS transport close must keep the public TlsFailure category.
+
+        A TLS 1.3 peer can reject the client after its local handshake returned
+        and signal it only by shutting the transport down (close_notify, no
+        fatal alert). That used to surface as the generic ProtocolError fallback
+        via a closed reader rather than as a TLS failure.
+        """
+        certs = Path(tempfile.mkdtemp(prefix="moon-mqtt-clean-close-"))
+        self.addCleanup(shutil.rmtree, certs, True)
+        write_pki(certs)
+        port = free_port()
+        listening = threading.Event()
+
+        def serve() -> None:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_3
+            context.load_cert_chain(certs / "server.pem", certs / "server.key")
+            with socket.socket() as listener:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listener.bind(("127.0.0.1", port))
+                listener.listen(1)
+                listening.set()
+                connection, _ = listener.accept()
+                with context.wrap_socket(connection, server_side=True) as tls:
+                    try:
+                        tls.recv(1)
+                    except OSError:
+                        pass
+                    # Send close_notify. The peer need not answer, so a short
+                    # read timeout keeps this helper from hanging.
+                    tls.settimeout(0.5)
+                    try:
+                        tls.unwrap()
+                    except (OSError, ssl.SSLError):
+                        pass
+
+        thread = threading.Thread(target=serve, daemon=True)
+        thread.start()
+        self.assertTrue(listening.wait(3), "TLS helper server did not start")
+        driver = Driver(
+            "tls", port, host="localhost", MQTT_TEST_CA=str(certs / "ca.pem"),
+        )
+        self.addCleanup(driver.close)
+        code, stderr = driver.finish()
+        self.assertNotEqual(code, 0, stderr)
+        self.assertEqual(driver.client_error_type(), "TlsFailure", stderr)
+
+    def test_mtls_concurrent_identities(self) -> None:
+        broker = self.run_broker(mtls=True)
+        alice = Driver(
+            "tls", broker.port,
+            **self.mtls_env(broker, cert="device-a", MQTT_TEST_CLIENT_ID="device-a"),
+        )
+        bob = Driver(
+            "tls", broker.port,
+            **self.mtls_env(broker, cert="device-b", MQTT_TEST_CLIENT_ID="device-b"),
+        )
+        self.addCleanup(alice.close)
+        self.addCleanup(bob.close)
+        alice.expect("connected")
+        bob.expect("connected")
+        self.assertEqual(alice.finish()[0], 0)
+        self.assertEqual(bob.finish()[0], 0)
+
+    def test_mtls_in_process_dual_identity(self) -> None:
+        broker = self.run_broker(mtls=True)
+        driver = Driver(
+            "mtls_dual", broker.port, host="localhost",
+            MQTT_TEST_CA=str(broker.temp / "ca.pem"),
+            MQTT_TEST_CERT_A=str(broker.temp / "device-a.pem"),
+            MQTT_TEST_KEY_A=str(broker.temp / "device-a.key"),
+            MQTT_TEST_CERT_B=str(broker.temp / "device-b.pem"),
+            MQTT_TEST_KEY_B=str(broker.temp / "device-b.key"),
+        )
+        self.addCleanup(driver.close)
+        driver.expect("dual_subscribed")
+        driver.expect("dual_exchanged")
+        self.assertEqual(driver.finish()[0], 0)
+
+    def test_mtls_cert_acl_isolation(self) -> None:
+        broker = self.run_broker(cert_acl=True)
+        holder = Driver(
+            "mtls_acl_listener", broker.port,
+            **self.mtls_env(
+                broker, cert="device-b", MQTT_TEST_CLIENT_ID="device-b",
+                MQTT_TEST_SUB_TOPIC="device-b/#",
+                MQTT_TEST_PUB_TOPIC="device-b/own",
+                MQTT_TEST_PAYLOAD="only-b",
+            ),
+        )
+        self.addCleanup(holder.close)
+        holder.expect("acl_own_received")
+        intruder = Driver(
+            "mtls_acl_intruder", broker.port,
+            **self.mtls_env(
+                broker, cert="device-a", MQTT_TEST_CLIENT_ID="device-a",
+                MQTT_TEST_PUB_TOPIC="device-b/secret",
+                MQTT_TEST_PAYLOAD="from-a",
+            ),
+        )
+        self.addCleanup(intruder.close)
+        intruder.expect("acl_intruder_published")
+        self.assertEqual(intruder.finish()[0], 0)
+        end = time.monotonic() + 1.0
+        while time.monotonic() < end:
+            try:
+                item = holder.events.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            self.assertNotEqual(item.get("event"), "acl_foreign", item)
+            self.assertNotEqual(item.get("event"), "client_error", item)
+
+    def test_mtls_reconnect_and_resubscribe(self) -> None:
+        broker = self.run_broker(mtls=True)
+        driver = Driver("reconnect", broker.port, **self.mtls_env(broker))
+        self.addCleanup(driver.close)
+        first = driver.expect("connected")
+        self.assertEqual(first.get("generation"), 1)
+        broker.stop()
+        driver.expect("disconnected")
+        broker.start()
+        second = driver.expect("connected", 12)
+        self.assertGreater(second.get("generation", 0), 1)
+        publisher = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-mtls-reconnect")
+        publisher.tls_set(
+            ca_certs=str(broker.temp / "ca.pem"),
+            certfile=str(broker.temp / "paho-client.pem"),
+            keyfile=str(broker.temp / "paho-client.key"),
+        )
+        publisher.connect("localhost", broker.port)
+        publisher.loop_start()
+        publisher.publish("it/reconnect", b"after-restart", qos=1).wait_for_publish(3)
+        publisher.disconnect()
+        publisher.loop_stop()
+        driver.expect("message_after_reconnect")
+        self.assertEqual(driver.finish()[0], 0)
+
+    def test_mtls_handshake_timeout_then_new_client(self) -> None:
+        broker = self.run_broker(mtls=True)
+        stall = socket.socket()
+        stall.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        stall.bind(("127.0.0.1", 0))
+        stall.listen()
+        stall_port = stall.getsockname()[1]
+        held: list[socket.socket] = []
+
+        def accept() -> None:
+            try:
+                conn, _ = stall.accept()
+                held.append(conn)
+                time.sleep(8)
+            except OSError:
+                return
+
+        threading.Thread(target=accept, daemon=True).start()
+        def close_stall() -> None:
+            stall.close()
+            for conn in held:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+        self.addCleanup(close_stall)
+        timed_out = Driver(
+            "tls", stall_port, **self.mtls_env(
+                broker, MQTT_TEST_CONNECT_TIMEOUT_MS="800",
+            ),
+        )
+        self.addCleanup(timed_out.close)
+        started = time.monotonic()
+        code, _ = timed_out.finish()
+        self.assertNotEqual(code, 0)
+        self.assertLess(time.monotonic() - started, 4)
+        fresh = Driver("tls", broker.port, **self.mtls_env(broker))
+        self.addCleanup(fresh.close)
+        fresh.expect("connected")
+        self.assertEqual(fresh.finish()[0], 0)
+
+    def test_mtls_repeat_connections(self) -> None:
+        broker = self.run_broker(mtls=True)
+        driver = Driver("mtls_repeat", broker.port, **self.mtls_env(broker))
+        self.addCleanup(driver.close)
+        driver.expect("mtls_repeat_done", 20)
+        self.assertEqual(driver.finish()[0], 0)
+
+    def test_cli_identity_flags(self) -> None:
+        def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [str(MOON), "run", "examples/mqtt_demo/cli", "--target", "native",
+                 "--", *args],
+                cwd=ROOT, text=True, capture_output=True, timeout=20,
+            )
+
+        cert_only = run_cli("publish", "-t", "lab/x", "--cert", "a.pem")
+        self.assertNotEqual(cert_only.returncode, 0)
+        self.assertIn("--cert requires --key", cert_only.stderr + cert_only.stdout)
+        key_only = run_cli("publish", "-t", "lab/x", "--key", "a.pem")
+        self.assertNotEqual(key_only.returncode, 0)
+        self.assertIn("--key requires --cert", key_only.stderr + key_only.stdout)
+        no_tls = run_cli("publish", "-t", "lab/x", "--cert", "a.pem", "--key", "b.pem")
+        self.assertNotEqual(no_tls.returncode, 0)
+        self.assertIn("--cert/--key require --tls", no_tls.stderr + no_tls.stdout)
+        broker = self.run_broker(mtls=True)
+        encrypted = run_cli(
+            "publish", "-t", "lab/x", "-m", "hi", "--tls", "--qos", "1",
+            "--host", "localhost", "--port", str(broker.port),
+            "--ca", str(broker.temp / "ca.pem"),
+            "--cert", str(broker.temp / "client.pem"),
+            "--key", str(broker.temp / "client-encrypted.key"),
+        )
+        self.assertNotEqual(encrypted.returncode, 0)
 
     def test_reconnect_and_resubscribe(self) -> None:
         broker = self.run_broker()

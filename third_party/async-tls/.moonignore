@@ -1,0 +1,5 @@
+testdata/
+scripts/
+src/testdata
+src/identity_test.mbt
+src/examples/

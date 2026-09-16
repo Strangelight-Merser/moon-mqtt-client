@@ -20,8 +20,10 @@ a lost-PUBACK request that must never be reported as successful. It also checks
 correct and incorrect username/password authentication, an ACL-denied
 subscription, fragmented and slow packets, heartbeat failure, Will behavior,
 retained delivery and clearing, UNSUBACK followed by an independent no-delivery
-window, and the reconnect counters in `Client::stats()`. It is an integration
-suite, not an MQTT conformance claim.
+window, and the reconnect counters in `Client::stats()`. mTLS cases assert
+public `ClientError` variants (`InvalidConfig` vs `TlsFailure` vs `Closed`),
+TLS 1.3-only QoS 1, in-process dual identities, and MoonBit certificate ACL
+isolation. It is an integration suite, not an MQTT conformance claim.
 
 On failure the temporary broker directory is printed and retained. Successful
 runs clean it up.

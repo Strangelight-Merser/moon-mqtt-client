@@ -14,7 +14,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
     steps:
@@ -48,6 +48,9 @@ jobs:
           MOON="$(command -v moon)" python tests/protocol_faults.py
           MOON="$(command -v moon)" python tests/scenario_smoke.py
           MOON="$(command -v moon)" python tests/consumer_smoke.py
+      - name: EMQX interoperability
+        if: runner.os == 'Linux'
+        run: MOON="$(command -v moon)" python tests/emqx_interop.py
 
   latest-compatibility:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'

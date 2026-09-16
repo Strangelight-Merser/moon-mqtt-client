@@ -12,6 +12,16 @@ pub(all) enum TlsMode {
 } derive(@debug.Debug)
 
 ///|
+/// PEM client certificate presented during a TLS handshake.
+/// `certificate_chain_file` is the leaf followed by any intermediates.
+/// `private_key_file` must be an unencrypted PEM key. Files are re-read on
+/// every new connection and never logged.
+pub(all) struct ClientIdentity {
+  certificate_chain_file : String
+  private_key_file : String
+}
+
+///|
 pub(all) struct Will {
   topic : String
   payload : Bytes
@@ -67,6 +77,8 @@ pub(all) suberror ClientError {
   /// PINGREQ completed its write but no PINGRESP arrived within
   /// `ping_response_timeout_ms`.
   PingResponseTimeout(String)
+  /// TLS handshake or certificate verification failed after a valid config.
+  TlsFailure(String)
 } derive(@debug.Debug)
 
 ///|
@@ -102,6 +114,7 @@ pub(all) struct Config {
   port : Int
   client_id : String
   tls : TlsMode
+  client_identity : ClientIdentity?
   username : String?
   password : Bytes?
   will : Will?
@@ -132,6 +145,7 @@ pub fn Config::new(
   client_id : String,
   port? : Int = 1883,
   tls? : TlsMode = Plain,
+  client_identity? : ClientIdentity? = None,
   username? : String? = None,
   password? : Bytes? = None,
   will? : Will? = None,
@@ -154,6 +168,7 @@ pub fn Config::new(
     port,
     client_id,
     tls,
+    client_identity,
     username,
     password,
     will,
@@ -225,5 +240,8 @@ fn Config::validate(self : Config) -> Unit raise ClientError {
   }
   if self.password is Some(_) && self.username is None {
     raise InvalidConfig("password requires username")
+  }
+  if self.client_identity is Some(_) && self.tls is Plain {
+    raise InvalidConfig("client identity requires TLS")
   }
 }

@@ -1,0 +1,464 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "moon-mqtt-client 运行时架构",
+    "output": "docs/architecture/runtime-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/Strangelight-Merser/moon-mqtt-client",
+      "revision": "9a7815a5e675519abc3abe7c81541e50345ef7f2"
+    }
+  },
+  "components": [
+    {
+      "id": "app",
+      "type": "frontend",
+      "label": "应用任务",
+      "sublabel": "with_client 回调作用域",
+      "pos": [
+        50,
+        300
+      ],
+      "size": [
+        140,
+        66
+      ],
+      "sources": [
+        {
+          "path": "client.mbt",
+          "line": 50,
+          "label": "with_client"
+        },
+        {
+          "path": "examples/mqtt_demo/controller/main.mbt",
+          "line": 30,
+          "label": "controller"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "客户端 API",
+      "sublabel": "publish · subscribe · stats",
+      "pos": [
+        330,
+        300
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "client.mbt",
+          "line": 292,
+          "label": "publish"
+        },
+        {
+          "path": "client.mbt",
+          "line": 100,
+          "label": "stats"
+        }
+      ]
+    },
+    {
+      "id": "supervisor",
+      "type": "backend",
+      "label": "监督任务",
+      "sublabel": "dial · 重连 · generation",
+      "pos": [
+        660,
+        110
+      ],
+      "size": [
+        190,
+        68
+      ],
+      "sources": [
+        {
+          "path": "runtime.mbt",
+          "line": 79,
+          "label": "supervise"
+        }
+      ]
+    },
+    {
+      "id": "heartbeat",
+      "type": "backend",
+      "label": "心跳任务",
+      "sublabel": "PINGREQ / PINGRESP 计时",
+      "pos": [
+        1000,
+        118
+      ],
+      "size": [
+        170,
+        60
+      ],
+      "sources": [
+        {
+          "path": "session.mbt",
+          "line": 290,
+          "label": "heartbeat"
+        }
+      ]
+    },
+    {
+      "id": "session",
+      "type": "backend",
+      "label": "会话与请求表",
+      "sublabel": "发送队列 + 控制队列",
+      "pos": [
+        660,
+        292
+      ],
+      "size": [
+        190,
+        82
+      ],
+      "sources": [
+        {
+          "path": "session.mbt",
+          "line": 39,
+          "label": "Session"
+        },
+        {
+          "path": "client.mbt",
+          "line": 171,
+          "label": "request"
+        }
+      ]
+    },
+    {
+      "id": "write_loop",
+      "type": "backend",
+      "label": "写循环",
+      "sublabel": "控制包优先出队",
+      "pos": [
+        1030,
+        300
+      ],
+      "size": [
+        160,
+        66
+      ],
+      "sources": [
+        {
+          "path": "session.mbt",
+          "line": 270,
+          "label": "write_loop"
+        }
+      ]
+    },
+    {
+      "id": "transport",
+      "type": "security",
+      "label": "TCP + TLS 传输",
+      "sublabel": "仅服务端认证，不可关闭",
+      "pos": [
+        1370,
+        300
+      ],
+      "size": [
+        150,
+        66
+      ],
+      "sources": [
+        {
+          "path": "runtime.mbt",
+          "line": 2,
+          "label": "dial"
+        }
+      ]
+    },
+    {
+      "id": "broker",
+      "type": "external",
+      "label": "MQTT Broker",
+      "sublabel": "3.1.1 · QoS 0/1",
+      "pos": [
+        1700,
+        300
+      ],
+      "size": [
+        150,
+        66
+      ]
+    },
+    {
+      "id": "read_loop",
+      "type": "backend",
+      "label": "读循环",
+      "sublabel": "分帧装配器",
+      "pos": [
+        1240,
+        520
+      ],
+      "size": [
+        180,
+        66
+      ],
+      "sources": [
+        {
+          "path": "runtime.mbt",
+          "line": 203,
+          "label": "read_loop"
+        },
+        {
+          "path": "runtime.mbt",
+          "line": 390,
+          "label": "read_session_packet"
+        }
+      ]
+    },
+    {
+      "id": "events",
+      "type": "messagebus",
+      "label": "事件队列",
+      "sublabel": "Connected · Disconnected · Message",
+      "pos": [
+        50,
+        690
+      ],
+      "size": [
+        190,
+        66
+      ],
+      "sources": [
+        {
+          "path": "client.mbt",
+          "line": 134,
+          "label": "next_event"
+        },
+        {
+          "path": "client.mbt",
+          "line": 143,
+          "label": "emit"
+        }
+      ]
+    },
+    {
+      "id": "codec",
+      "type": "external",
+      "label": "zbhzs1/moonbit-mqtt",
+      "sublabel": "报文编解码",
+      "tag": "第三方包",
+      "pos": [
+        660,
+        520
+      ],
+      "size": [
+        190,
+        64
+      ],
+      "sources": [
+        {
+          "path": "wire.mbt",
+          "line": 2,
+          "label": "encode"
+        },
+        {
+          "path": "wire.mbt",
+          "line": 22,
+          "label": "read_packet"
+        }
+      ]
+    },
+    {
+      "id": "asyncrt",
+      "type": "external",
+      "label": "moonbitlang/async",
+      "sublabel": "任务组 · aqueue · cond_var",
+      "tag": "第三方包",
+      "pos": [
+        280,
+        110
+      ],
+      "size": [
+        200,
+        68
+      ],
+      "sources": [
+        {
+          "path": "client.mbt",
+          "line": 70,
+          "label": "with_task_group"
+        },
+        {
+          "path": "moon.pkg",
+          "line": 2,
+          "label": "moonbitlang/async"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "客户端进程（native 二进制，含静态链接的第三方包）",
+      "wraps": [
+        "app",
+        "api",
+        "supervisor",
+        "heartbeat",
+        "session",
+        "write_loop",
+        "transport",
+        "read_loop",
+        "events",
+        "codec",
+        "asyncrt"
+      ]
+    },
+    {
+      "kind": "security-group",
+      "label": "Broker 信任域",
+      "wraps": [
+        "broker"
+      ],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    {
+      "from": "app",
+      "to": "api",
+      "label": "publish · subscribe",
+      "variant": "emphasis"
+    },
+    {
+      "from": "api",
+      "to": "session",
+      "label": "request + 超时预算",
+      "variant": "emphasis"
+    },
+    {
+      "from": "session",
+      "to": "write_loop",
+      "label": "有界发送队列",
+      "variant": "emphasis"
+    },
+    {
+      "from": "write_loop",
+      "to": "transport",
+      "label": "write_timeout_ms 单次写",
+      "variant": "emphasis"
+    },
+    {
+      "from": "transport",
+      "to": "broker",
+      "label": "MQTT 3.1.1 over TLS",
+      "variant": "emphasis"
+    },
+    {
+      "from": "supervisor",
+      "to": "session",
+      "label": "dial · CONNACK",
+      "labelDy": 40
+    },
+    {
+      "from": "supervisor",
+      "to": "heartbeat",
+      "label": "每代派生"
+    },
+    {
+      "from": "heartbeat",
+      "to": "session",
+      "label": "PINGREQ 走保留槽位",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "transport",
+      "to": "read_loop",
+      "label": "入站字节流",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "read_loop",
+      "to": "session",
+      "label": "PUBACK · SUBACK · PINGRESP",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "from": "read_loop",
+      "to": "events",
+      "label": "MessageReceived",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "events",
+      "to": "app",
+      "label": "next_event()",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "from": "session",
+      "to": "codec",
+      "label": "encode",
+      "labelDy": 40,
+      "labelDx": -45
+    },
+    {
+      "from": "read_loop",
+      "to": "codec",
+      "label": "decode_packet",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelDx": -170
+    },
+    {
+      "from": "asyncrt",
+      "to": "supervisor",
+      "label": "任务组 · 队列 · 定时"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "请求与失败语义",
+      "items": [
+        "operation_timeout_ms 覆盖排队、写入与等待 ACK",
+        "截止看门狗只唤醒条件变量，请求协程负责中止",
+        "NotSent：字节从未进入 socket 写调用",
+        "OutcomeUnknown：写已开始但未获确认"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "背压与控制通道",
+      "items": [
+        "控制包独占 control_capacity 保留槽位",
+        "写循环先发控制包，PUBACK/PINGREQ 不被业务堵住",
+        "控制队列耗尽即 ProtocolError 中止，绝不丢包",
+        "会话 abort 时每个 pending 恰好结算一次"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "重连与会话恢复",
+      "items": [
+        "仅 CleanSession=true，每次 CONNACK 递增 generation",
+        "先恢复已确认订阅，再发 Connected(generation)",
+        "有界指数退避加每客户端 xorshift 抖动",
+        "QoS 0 写完即返回，QoS 1 需匹配 PUBACK"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "信任边界与范围",
+      "items": [
+        "TLS 只做服务端认证：SystemRoots / CustomCA",
+        "无关闭校验的开关；password 必须配 username",
+        "ClientStats 只含计数与队列占用",
+        "无 QoS 2、MQTT 5、离线队列与 WebSocket"
+      ]
+    }
+  ]
+}

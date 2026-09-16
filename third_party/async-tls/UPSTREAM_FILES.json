@@ -1,0 +1,32 @@
+[
+  {
+    "file": "tls.mbt",
+    "upstream_sha256": "82a17d0ce86b487e89b21560db2bd0ffe0785115755aa3a34b01f9d0ba40d32a",
+    "bytes": 3266
+  },
+  {
+    "file": "openssl.mbt",
+    "upstream_sha256": "9d15e9813bc2aa5a573f9cc6d460eab24e2041d7dbcd3af96e38c563500d4e30",
+    "bytes": 20018
+  },
+  {
+    "file": "openssl.c",
+    "upstream_sha256": "d20f09c5dd84e7a132d7c66cafb881099d3a6007ea45ecb9c05c0018152ae925",
+    "bytes": 12574
+  },
+  {
+    "file": "openssl_loader.mbt",
+    "upstream_sha256": "5a823cf171f2cf6c9ec3cf6be938db959c450c7cf102196fbfb7695bb96e3002",
+    "bytes": 2174
+  },
+  {
+    "file": "transport.mbt",
+    "upstream_sha256": "ec31971e4e228b9ead00fcda32b4b1a5858970ab8337b0636fe3249d6db3ca14",
+    "bytes": 2522
+  },
+  {
+    "file": "crypto_util.mbt",
+    "upstream_sha256": "802c49402819a5bfab15c70703312634440768da8656f968a422536132f03bbd",
+    "bytes": 2692
+  }
+]

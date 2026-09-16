@@ -15,6 +15,8 @@ priv struct Options {
   client_id : String
   tls : Bool
   ca_file : String?
+  cert_file : String?
+  key_file : String?
   topic : String
   payload : String
   qos : @mqtt.QoS
@@ -29,7 +31,7 @@ priv struct Options {
 fn usage() -> String {
   "usage: mqtt-cli publish   -t <topic> -m <payload> [--qos 0|1] [--retain]\n" +
   "       mqtt-cli subscribe -t <filter> [--count N] [--timeout-ms N]\n" +
-  "options: --host H --port N --client-id ID --tls --ca FILE --stats --verbose\n" +
+  "options: --host H --port N --client-id ID --tls --ca FILE --cert FILE --key FILE --stats --verbose\n" +
   "credentials: MQTT_DEMO_USERNAME / MQTT_DEMO_PASSWORD environment variables"
 }
 
@@ -42,6 +44,8 @@ fn parse_args(args : ArrayView[String]) -> Options raise {
   let mut client_id = "moon-mqtt-cli"
   let mut tls = false
   let mut ca_file : String? = None
+  let mut cert_file : String? = None
+  let mut key_file : String? = None
   let mut topic = ""
   let mut payload = ""
   let mut qos = @mqtt.AtMostOnce
@@ -66,6 +70,8 @@ fn parse_args(args : ArrayView[String]) -> Options raise {
       "--client-id" => client_id = next()
       "--tls" => tls = true
       "--ca" => ca_file = Some(next())
+      "--cert" => cert_file = Some(next())
+      "--key" => key_file = Some(next())
       "-t" | "--topic" => topic = next()
       "-m" | "--payload" => payload = next()
       "--qos" =>
@@ -87,12 +93,23 @@ fn parse_args(args : ArrayView[String]) -> Options raise {
   if topic.is_empty() {
     fail("a topic is required\n\{usage()}")
   }
+  if cert_file is Some(_) && key_file is None {
+    fail("--cert requires --key\n\{usage()}")
+  }
+  if key_file is Some(_) && cert_file is None {
+    fail("--key requires --cert\n\{usage()}")
+  }
+  if (cert_file is Some(_) || key_file is Some(_)) && !tls {
+    fail("--cert/--key require --tls\n\{usage()}")
+  }
   {
     host,
     port,
     client_id,
     tls,
     ca_file,
+    cert_file,
+    key_file,
     topic,
     payload,
     qos,
@@ -117,6 +134,11 @@ fn Options::mqtt_config(self : Options) -> @mqtt.Config {
       }
     } else {
       @mqtt.Plain
+    },
+    client_identity=match (self.cert_file, self.key_file) {
+      (Some(certificate_chain_file), Some(private_key_file)) =>
+        Some({ certificate_chain_file, private_key_file })
+      _ => None
     },
     username=@env.get_env_var("MQTT_DEMO_USERNAME"),
     password=match @env.get_env_var("MQTT_DEMO_PASSWORD") {

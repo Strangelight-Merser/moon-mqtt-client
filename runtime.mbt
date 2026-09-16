@@ -18,7 +18,29 @@ async fn Client::dial(self : Client) -> Session {
           CustomCA(path) => @tls.CustomPemFile(path)
           Plain => @tls.SystemRoot
         }
-        let tls = @tls.Tls::client(tcp, host=self.config.host, trust~)
+        let tls = try {
+          match self.config.client_identity {
+            Some(id) =>
+              @tls.Tls::client(
+                tcp,
+                host=self.config.host,
+                trust~,
+                identity={
+                  certificate_chain_file: id.certificate_chain_file,
+                  private_key_file: id.private_key_file,
+                },
+              )
+            None => @tls.Tls::client(tcp, host=self.config.host, trust~)
+          }
+        } catch {
+          err => {
+            let msg = @tls.describe_tls_error(err)
+            if msg.contains("client identity:") {
+              raise InvalidConfig(msg)
+            }
+            raise TlsFailure(msg)
+          }
+        }
         (
           tls,
           tls,
@@ -30,10 +52,32 @@ async fn Client::dial(self : Client) -> Session {
       }
     }
     errdefer close_transport()
-    writer.write(
-      encode(self.config.connect_packet(), self.config.max_packet_size),
-    )
-    match read_packet(reader, self.config.max_packet_size) {
+    // A TLS 1.3 peer may reject the client identity only after `Tls::client` has
+    // returned. Mosquitto reports that as a fatal alert (a `TlsError`), which
+    // `client_error_of` keeps as `TlsFailure`; a peer that instead closes the
+    // transport cleanly surfaces as a closed reader. Both are TLS transport
+    // failures, so classify them here rather than letting the closed-reader case
+    // degrade to a generic protocol error.
+    let response : @codec.Packet = try {
+      writer.write(
+        encode(self.config.connect_packet(), self.config.max_packet_size),
+      )
+      read_packet(reader, self.config.max_packet_size)
+    } catch {
+      error => {
+        if self.config.tls is Plain {
+          raise error
+        }
+        match error {
+          @io.ReaderClosed =>
+            raise TlsFailure("TLS transport closed during MQTT connect")
+          @tls.ConnectionClosed =>
+            raise TlsFailure("TLS transport closed during MQTT connect")
+          _ => raise error
+        }
+      }
+    }
+    match response {
       @codec.ConnackPacket(ack) => {
         if ack.return_code != @codec.ConnectionAccepted {
           raise ConnectionRefused(@debug.to_string(ack.return_code))
@@ -86,7 +130,7 @@ async fn Client::supervise(self : Client) -> Unit {
     if self.session is Some(session) {
       session.abort("worker ended")
     }
-    self.events.close(error=Closed)
+    self.events.close(error=self.close_reason())
     self.changed.broadcast()
   }
   while !self.stopped {
@@ -176,16 +220,22 @@ async fn Client::supervise(self : Client) -> Unit {
         // Backpressure, a saturated control queue and connect-phase protocol
         // errors are terminal: retrying would hide a defect from the caller.
         match error {
-          Backpressure(_) | ProtocolError(_) | NotConnected => raise error
+          Backpressure(_) | ProtocolError(_) | NotConnected => {
+            self.record_stop(error)
+            raise error
+          }
           _ => ()
         }
         if !ever_ready {
+          self.record_stop(error)
           raise error
         }
         self.emit(Disconnected(self.generation, reason))
         attempts += 1
         if attempts > self.config.reconnect_attempts {
-          raise ReconnectExhausted(reason)
+          let exhausted = ReconnectExhausted(reason)
+          self.record_stop(exhausted)
+          raise exhausted
         }
         // Bounded exponential backoff plus per-client jitter. Jitter comes from
         // this client's own xorshift stream, so two clients that lose the same
