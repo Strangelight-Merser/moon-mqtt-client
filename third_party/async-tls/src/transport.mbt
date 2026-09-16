@@ -65,7 +65,11 @@ async fn Transport::read_more(self : Transport) -> Unit {
   let max_len = @cmp.minimum(BUFFER_SIZE, read_buf.buf.length() - end)
   let n = self.reader._direct_read(read_buf.buf, offset=end, max_len~) catch {
     err => {
-      self.state = Error(err)
+      // A caller may cancel an idle read without closing the connection.
+      // Cancellation consumes no socket bytes and must not poison future I/O.
+      if !@async.is_cancellation_error(err) {
+        self.state = Error(err)
+      }
       raise err
     }
   }

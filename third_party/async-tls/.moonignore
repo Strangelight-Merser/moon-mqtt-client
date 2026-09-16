@@ -3,3 +3,4 @@ scripts/
 src/testdata
 src/identity_test.mbt
 src/examples/
+src/cancellation_test.mbt
