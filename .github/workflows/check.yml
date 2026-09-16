@@ -28,6 +28,13 @@ jobs:
       - name: Install broker (macOS)
         if: runner.os == 'macOS'
         run: brew install mosquitto openssl@3
+      - name: Match localhost to the IPv4-only test broker (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          # The test broker listens on 127.0.0.1. Avoid spending three Happy
+          # Eyeballs delays on duplicate ::1 results where no broker listens.
+          echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
+          python -c 'import socket; results=socket.getaddrinfo("localhost", None, 0, 0, 0, socket.AI_ADDRCONFIG); print(results); assert results[0][4][0] == "127.0.0.1"'
       - name: Install verified MoonBit baseline
         run: |
           ./scripts/install-moonbit-ci.sh fixed

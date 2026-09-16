@@ -46,3 +46,9 @@ Identity loading uses OpenSSL `SSL_CTX_use_certificate_chain_file`,
 protocol version. Test-only minimum-version limits use `SSL_CTX_ctrl`
 (`SSL_CTRL_SET_MIN_PROTO_VERSION`); `SSL_CTX_set_max_proto_version` is a
 macro on OpenSSL 3 and is not imported through `dlsym`.
+
+## Release validation fixes (2026-09-16)
+
+- Read cancellation no longer marks the transport permanently failed.
+- Closed TLS handles reject reads/writes before calling OpenSSL.
+- Independent regression cases cover idle-read cancellation and closed-handle access.
