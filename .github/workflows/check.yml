@@ -59,12 +59,6 @@ jobs:
         if: runner.os == 'Linux'
         run: MOON="$(command -v moon)" python tests/emqx_interop.py
 
-      - name: Diagnose TLS stalls
-        if: failure() && runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y gdb
-          MOON="$(command -v moon)" python scripts/ci_tls_diagnostics.py
-
   latest-compatibility:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest

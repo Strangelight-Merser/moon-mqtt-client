@@ -673,7 +673,7 @@ pub async fn Tls::shutdown(self : Tls) -> Unit {
     Closed => raise ConnectionClosed
     Error(err) => raise err
   }
-  while self.ssl.shutdown() is ret && ret < 0 {
+  while !self.closed && self.ssl.shutdown() is ret && ret < 0 {
     let err = self.ssl.get_error(ret)
     self.handle_error(err)
   } nobreak {
