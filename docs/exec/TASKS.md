@@ -74,3 +74,11 @@
 - First integrated check passed before formatting restoration. Final `MOONBIT_ASYNC_CHECK_FD_LEAK=1 ./scripts/check.sh` runs after restoration, log `_build/exec-jitter/final-check.log`; only the final result will establish acceptance.
 - Patch `_build/exec-jitter/jitter.patch` SHA256 `513fc3ebdd90d3b32cfa994add708ecc12ce4e85de5daf57df47c3474faf5626`; includes the 4 J1 files, excludes preexisting changes and exec state. Source fingerprints: `_build/exec-jitter/source.sha256.json`.
 - Final integrated command exited 0 after restoration: native 45/45, Mosquitto 25/25, protocol faults 10/10, scenario and separate local-workspace TCP/mTLS consumers passed. Root rechecked source fingerprints and original-file hashes, and `git diff --check` passed. Machine-readable evidence: `_build/exec-jitter/acceptance.json`. Linux/EMQX/registry/hardware/soak not executed; no release claim.
+
+## R2 — Intermittent TLS 1.3 identity rejection classification (in_review; local acceptance passed)
+
+- Base `0a604f478b7d938c9fad73b3c71c30992378f48a`, original `moon-mqtt-client` checkout. Sol `/root/causes`, retained explicit Sol/high request, owns runtime/TLS fix and new regressions; root semantic review.
+- Evidence: final docs-head push run35355783844 macOS job105634673813 fails original missing-certificate assertion `tests/integration/run.py:676` (TlsFailure expected, ProtocolError observed). Do not retry away failure or alter original assertion/timeouts.
+- Investigate first TLS CONNECT write/CONNACK read error path, especially raw socket errors. Preserve malformed-MQTT ProtocolError and cancellation behavior. Require deterministic regression and original failing integration entry, then integrated checks and fresh hosted CI.
+
+- Implemented explicit encrypted CONNECT/CONNACK OSError/TLS/EOF classification; malformed MQTT, plain TCP and timeouts unchanged. Root reviewed actual diff; before mapping regression failed, after fix native58 and full original local check passed. Hosted raw cause remains unknown; no claim to have reproduced the intermittent CI occurrence. New hosted CI pending.

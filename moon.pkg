@@ -5,6 +5,7 @@ import {
   "moonbitlang/async/socket",
   "Strangelight-Merser/async-tls" @tls,
   "moonbitlang/async/io",
+  "moonbitlang/async/os_error",
   "moonbitlang/core/debug",
   "moonbitlang/core/env",
   "moonbitlang/core/ref",

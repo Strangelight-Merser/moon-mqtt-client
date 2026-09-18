@@ -1,4 +1,36 @@
 ///|
+/// Exchange MQTT CONNECT/CONNACK over an established transport. Once TLS is
+/// established, socket EOF/reset and TLS-layer errors during this exchange are
+/// TLS transport failures. MQTT decoding errors, timeouts and cancellation keep
+/// their original type.
+async fn mqtt_connect_exchange(
+  reader : &@io.Reader,
+  writer : &@io.Writer,
+  connect_bytes : Bytes,
+  limit : Int,
+  encrypted : Bool,
+) -> @codec.Packet {
+  try {
+    writer.write(connect_bytes)
+    read_packet(reader, limit)
+  } catch {
+    error => {
+      if !encrypted {
+        raise error
+      }
+      match error {
+        @io.ReaderClosed | @tls.ConnectionClosed =>
+          raise TlsFailure("TLS transport closed during MQTT connect")
+        @tls.TlsError(message) => raise TlsFailure(message)
+        @os_error.OSError(_) =>
+          raise TlsFailure(@tls.describe_tls_error(error))
+        _ => raise error
+      }
+    }
+  }
+}
+
+///|
 async fn Client::dial(self : Client) -> Session {
   @async.with_timeout(self.config.connect_timeout_ms, () => {
     let tcp = @socket.Tcp::connect_to_host(
@@ -52,31 +84,19 @@ async fn Client::dial(self : Client) -> Session {
       }
     }
     errdefer close_transport()
-    // A TLS 1.3 peer may reject the client identity only after `Tls::client` has
-    // returned. Mosquitto reports that as a fatal alert (a `TlsError`), which
-    // `client_error_of` keeps as `TlsFailure`; a peer that instead closes the
-    // transport cleanly surfaces as a closed reader. Both are TLS transport
-    // failures, so classify them here rather than letting the closed-reader case
-    // degrade to a generic protocol error.
-    let response : @codec.Packet = try {
-      writer.write(
-        encode(self.config.connect_packet(), self.config.max_packet_size),
-      )
-      read_packet(reader, self.config.max_packet_size)
-    } catch {
-      error => {
-        if self.config.tls is Plain {
-          raise error
-        }
-        match error {
-          @io.ReaderClosed =>
-            raise TlsFailure("TLS transport closed during MQTT connect")
-          @tls.ConnectionClosed =>
-            raise TlsFailure("TLS transport closed during MQTT connect")
-          _ => raise error
-        }
-      }
-    }
+    // Encode outside the transport classifier so invalid MQTT configuration can
+    // never be mislabeled as a TLS failure.
+    let connect_bytes = encode(
+      self.config.connect_packet(),
+      self.config.max_packet_size,
+    )
+    let response = mqtt_connect_exchange(
+      reader,
+      writer,
+      connect_bytes,
+      self.config.max_packet_size,
+      !(self.config.tls is Plain),
+    )
     match response {
       @codec.ConnackPacket(ack) => {
         if ack.return_code != @codec.ConnectionAccepted {

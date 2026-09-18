@@ -1,6 +1,16 @@
 # Execution state
 
-Updated: 2026-09-18. Status: done for J1, C1, package hygiene and R1 hosted CI.
+Updated: 2026-09-18. Status: R2 fix locally accepted, hosted CI pending; broader software roadmap proceeds in isolated worktree.
+
+## Active CI regression and follow-through
+
+Final documentation-head push run `35355783844` at `0a604f478b7d938c9fad73b3c71c30992378f48a` failed macOS original `test_mtls_tls13_only_identity_rejection_error_types`: missing-certificate case expected TlsFailure, observed ProtocolError. Same-head PR run35355788909 passed. Failure retained, not retried away.
+
+R2 fixes a verified gap: async-tls may propagate raw socket OSError during encrypted CONNECT/CONNACK I/O, which previously became ProtocolError. Exact CI exception is unavailable; reset/EPIPE is an inference, not a reproduced hosted cause. The new production exchange helper maps only OSError, TLS errors and EOF to TlsFailure on encrypted transports; plain transport errors, malformed MQTT, timeouts and cancellation remain unchanged. CONNECT encoding sits outside that classification boundary.
+
+Sol `/root/causes` implemented; root reviewed actual diff and tested the new injected-error regression with the OSError mapping removed (fails) and restored (passes). Original identity-rejection test passed; full `MOONBIT_ASYNC_CHECK_FD_LEAK=1 ./scripts/check.sh` passed: native58, broker25, faults10, scenarios and local TCP/mTLS consumers. Public API unchanged and all51 protected hashes retained. No extra EMQX rerun locally for this classification-only fix; hosted Linux runs it. Evidence `_build/exec-tls-flake/accepted-check.log`, `regression-before.log`, `post-fix-original-test.log`, `api.log`, `acceptance.json`. Fresh hosted verification still required for this patch.
+
+User subsequently expanded scope to completing the preceding software roadmap. Work continues in `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`, branch `codex/roadmap-native`. Its STATE/TASKS own the expanded scope. v0.3 PR remains isolated from new capabilities; merge/publication/hardware remain separate gates.
 
 ## Current baseline and authorization
 
