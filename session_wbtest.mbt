@@ -6,7 +6,6 @@ fn test_session(next_id? : Int = 1) -> Session {
     generation: 1,
     reader,
     writer,
-    finish_transport: None,
     close_transport: () => {
       reader.close()
       raw_writer.close()

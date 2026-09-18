@@ -13,7 +13,8 @@ retained. Cryptographic handshake and masking entropy comes from
 `Strangelight-Merser/async-tls`; entropy failure is propagated.
 
 Normal peer Close frames receive a Close response, and a successful MQTT
-DISCONNECT initiates a graceful WebSocket Close. Once malformed framing is
+DISCONNECT waits for the broker to close the network, bounded by the configured
+write timeout; it does not race queued MQTT frames with an immediate Close. Once malformed framing is
 detected, this MQTT-only fork closes the underlying transport synchronously and
 raises the recorded protocol error. It does not risk an unbounded response write
 to a malformed peer.

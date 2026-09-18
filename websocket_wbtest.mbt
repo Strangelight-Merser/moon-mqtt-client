@@ -76,26 +76,78 @@ test "TCP host validation remains unchanged by HTTP authority rules" {
 }
 
 ///|
-async test "framing shutdown follows completed MQTT disconnect and cannot undo it" {
-  let config = Config::new("localhost", "close-order", write_timeout_ms=100)
+async test "WebSocket disconnect waits for peer closure after MQTT completion" {
+  let config = Config::new(
+    "localhost", "close-order", transport=WebSocket("/mqtt"),
+    write_timeout_ms=200,
+  )
   let client = cause_test_client(config)
-  let called = [false]
-  let base = cause_test_session(SlowCauseWriter::{})
-  let session = {
-    ..base,
-    finish_transport: Some(async fn() {
-      assert_true(!base.pending.contains(0))
-      called[0] = true
-      @async.sleep(1)
-      client.abort_session("peer closed after MQTT DISCONNECT")
-      raise @io.ReaderClosed
-    }),
-  }
+  let session = cause_test_session(SlowCauseWriter::{})
+  let peer_closed = [false]
+  client.session = Some(session)
+  @async.with_task_group(group => {
+    group.spawn_bg(() => session.write_loop(500, 200))
+    group.spawn_bg(async fn() {
+      while !session.pending.contains(0) {
+        @async.sleep(1)
+      }
+      while session.pending.contains(0) {
+        @async.sleep(1)
+      }
+      @async.sleep(5)
+      peer_closed[0] = true
+      client.abort_session("peer processed MQTT DISCONNECT")
+    })
+    client.disconnect()
+    assert_true(peer_closed[0])
+  })
+  assert_true(!session.alive)
+}
+
+///|
+async test "WebSocket disconnect bounds a silent peer and closes resources" {
+  let config = Config::new(
+    "localhost", "silent-close", transport=WebSocket("/mqtt"),
+    write_timeout_ms=100,
+  )
+  let client = cause_test_client(config)
+  let session = cause_test_session(SlowCauseWriter::{})
   client.session = Some(session)
   @async.with_task_group(group => {
     group.spawn_bg(() => session.write_loop(500, 100))
-    client.disconnect()
+    @async.with_timeout(500, () => client.disconnect())
   })
-  assert_true(called[0])
   assert_true(!session.alive)
+}
+
+///|
+priv struct DisconnectOrderWriter {
+  writes : Array[Bytes]
+}
+
+///|
+impl @io.Writer for DisconnectOrderWriter with fn write_once(self, buf, offset~, len~) {
+  self.writes.push(buf[offset:offset + len].to_owned())
+  len
+}
+
+///|
+async test "no queued MQTT packet is written after DISCONNECT" {
+  let writer = DisconnectOrderWriter::{ writes: [] }
+  let session = cause_test_session(writer)
+  defer session.abort("test ended")
+  let request = { ..test_pending(0, Disconnect), queued_at: @async.now() }
+  session.pending[0] = request
+  ignore(session.control_queue.try_put({
+    bytes: b"\xe0\x00", pending: Some(request), is_ping: false,
+  }))
+  ignore(session.control_queue.try_put({
+    bytes: b"\xc0\x00", pending: None, is_ping: true,
+  }))
+  session.control_depth = 2
+  let ended = @async.with_timeout_opt(200, () => session.write_loop(500, 100))
+  assert_true(ended is Some(_))
+  assert_eq(writer.writes.length(), 1)
+  assert_eq(writer.writes[0], b"\xe0\x00")
+  assert_true(request.result is Some(Ok(Done)))
 }

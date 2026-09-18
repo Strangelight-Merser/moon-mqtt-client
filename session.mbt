@@ -41,8 +41,6 @@ priv struct Session {
   reader : &@io.Reader
   writer : &@io.Writer
   close_transport : () -> Unit
-  /// Optional framing shutdown, only after MQTT DISCONNECT has completed.
-  finish_transport : (async () -> Unit)?
   /// Business writes. Bounded by `Config::send_capacity`.
   outgoing : @aqueue.Queue[Outgoing]
   /// Reserved protocol slots. Bounded by `Config::control_capacity` and never
@@ -295,6 +293,11 @@ async fn Session::write_one(
         Publish0 | Disconnect => {
           self.pending.remove(request.id)
           request.finish(Ok(Done))
+          // No MQTT control packet may follow DISCONNECT, including a queued
+          // heartbeat or PUBACK while graceful framing shutdown is pending.
+          if request.kind is Disconnect {
+            return false
+          }
         }
         _ => ()
       }
