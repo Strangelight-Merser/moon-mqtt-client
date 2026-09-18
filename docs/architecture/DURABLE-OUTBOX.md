@@ -1,6 +1,6 @@
 # Single-backend durable outbox decision
 
-Status: planned; SQLite seam verified, integration depends on Q1 acceptance. This decision scopes the beta, not a generic persistence framework. Root owns final approval after reviewing the Q1 implementation seams.
+Status: root-approved for isolated implementation on 2026-09-18 after independent Sol review; integration depends on Q1 acceptance. This decision scopes the beta, not a generic persistence framework.
 
 ## Backend and ownership
 
@@ -16,7 +16,7 @@ The unavoidable duplicate window is PUBACK received but acknowledgement removal 
 
 On restart, recover pending records in order with their packet identifiers and DUP history. If any could already have been sent, automatic retransmission requires the broker's retained logical session. Session loss must quarantine those records for application reconciliation, not silently publish them in a replacement session. Never implement recovery as repeated calls to ordinary publish. Records proven never started may be sent for the first time under an explicitly established new session.
 
-Normal scope closure settles current waiters honestly but preserves durable unresolved records for the next explicit durable scope. Protocol errors, exhausted attempt budgets and session loss preserve an actionable blocked status and cause rather than erase evidence or replay without consent. Any reset/discard operation must be explicit, outside an active delivery scope, and documented as a business decision.
+Normal scope closure settles current waiters honestly but preserves durable unresolved records for the next explicit durable scope. Protocol errors, exhausted attempt budgets and session loss preserve an actionable blocked status and cause rather than erase evidence or replay without consent. Single-row discard is supported only for records proven never started, outside an active scope. Started blocked rows remain quarantined; a force-delete/reset API is out of scope until a safe whole-logical-session reset is specified. A store failure may also prevent persisting a blocked marker: the caller must treat that failure as uncertain and inspect/reconcile before explicitly reopening; no same-scope network retry is allowed.
 
 ## Bounds and expiry
 
@@ -35,3 +35,11 @@ Disk full, read-only, busy and corruption have distinct store errors. Admission 
 - Original transport and Q1 behavior stays verified on the integrated head; API/docs distinguish local transaction tests from actual broker/process evidence.
 
 Sources: [SQLite atomic commit](https://www.sqlite.org/atomiccommit.html), [SQLite PRAGMA reference](https://www.sqlite.org/pragma.html), [binding repository](https://github.com/moonbit-community/sqlite3.mbt). PRAGMA settings must be read back because unknown names are silently ignored. No power-loss durability claim beyond SQLite/OS/filesystem guarantees is inferred from a process-kill test.
+
+## Approved integration API and transition ordering
+
+Use concrete `DurableOutboxOptions` (path, record/payload/page bounds), `with_durable_client`, async `Client::submit_durable_delivery` with caller ID and absolute expiry, and standalone async inspection plus never-started discard. Durable scopes reject the in-memory `submit_delivery` path; ordinary QoS0 remains ephemeral. Do not add a storage trait. A private concrete SqliteOutbox owns the schema and transitions.
+
+Open/validate/lock/load and reserve all durable packet IDs before the supervisor can connect. A first connection after process restart with any possibly-sent row is recovery and requires Session Present; it is not Q1's empty first connection. Persist generation attachment attempts before enqueue and possible-write state before network write. ACK removal commits before releasing ID/payload or notifying handles. Cancellation protection covers COMMIT plus publishing its result into client ownership; uncertain admission is inspectable by stable ID. Queue/generation disappearance after committed admission preserves the admitted row instead of falsely rolling it back. Blocked/expired-started records stop opening a delivery scope rather than silently skipping them.
+
+For the first beta, use rollback journal mode DELETE, synchronous EXTRA, and bounded main-file pages, with read-back verification. Keep exclusive SQLite locking across the owning scope and use zero busy timeout so concurrent ownership fails clearly. Async binding job completion, not a coroutine cancellation claim, determines when statements/connection may be released. Default limits must be explicit and conservative; setup failure must close every statement and connection without deleting an existing database.

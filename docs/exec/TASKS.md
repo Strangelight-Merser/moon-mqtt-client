@@ -75,7 +75,7 @@
 - Patch `_build/exec-jitter/jitter.patch` SHA256 `513fc3ebdd90d3b32cfa994add708ecc12ce4e85de5daf57df47c3474faf5626`; includes the 4 J1 files, excludes preexisting changes and exec state. Source fingerprints: `_build/exec-jitter/source.sha256.json`.
 - Final integrated command exited 0 after restoration: native 45/45, Mosquitto 25/25, protocol faults 10/10, scenario and separate local-workspace TCP/mTLS consumers passed. Root rechecked source fingerprints and original-file hashes, and `git diff --check` passed. Machine-readable evidence: `_build/exec-jitter/acceptance.json`. Linux/EMQX/registry/hardware/soak not executed; no release claim.
 
-## W1 — Native WS/WSS capability (in_review; local acceptance passed)
+## W1 — Native WS/WSS capability (done)
 
 - WHY: next roadmap capability enables brokers exposed through native WebSocket endpoints. Base `0a604f478b7d938c9fad73b3c71c30992378f48a`, branch `codex/roadmap-native`, isolated worktree `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`.
 - Root decides API/ownership; Sol `/root/jitter` requested high performs bounded read-only inspection of pinned async websocket and custom TLS integration before implementation dispatch. No recursion.
@@ -83,11 +83,11 @@
 - Acceptance: native WS/WSS including CLI, independent broker interoperability, malformed handshake/non-binary/fragmentation/close and resource-bound tests, original native/broker checks. No claims from Python-only models.
 - References: bundle ROADMAP P1/v0.4 and ACCEPTANCE_CRITERIA v0.4; OASIS MQTT 3.1.1 section 6; RFC 6455.
 
-## Q1 — Reconnect-resilient QoS 1 (planned)
+## Q1 — Reconnect-resilient QoS 1 (in_progress)
 
 - Depends on reviewed W1. Separate connection generation, logical session and delivery identity; retain outgoing in-flight only when protocol permits, explicit broker-session loss, packet ID and DUP rules, waiter/protocol lifetime separation. Root approves public contract before Sol implementation.
 
-## D1 — Durable outbox beta (planned)
+## D1 — Durable outbox beta (in_progress)
 
 - Depends on Q1 delivery semantics. Evaluate SQLite as single backend; stable ID, restart recovery, bounded storage, expiry, disk-full/corruption, documented duplicate window. No generic storage framework.
 
@@ -162,3 +162,11 @@ Sol owns `tests/emqx_interop.py` startup readiness only: keep ACL/rejection asse
 ### D1 binding seam evidence (done, feature still planned)
 
 Luna requested binding preserved; pinned sqlite3@0.2.2 passes fixed MoonBit check/build/native run, explicit transaction commit/reopen/exact BLOB/rollback, first with resolved async0.21.2 then explicit projectasync0.21.3. No project dependency change. `_build/exec-outbox/sqlite-probe/{compat-*,api-evidence.txt}`. Root reviewed async job cancellation/ownership source; planned concrete contract in `docs/architecture/DURABLE-OUTBOX.md`. Neither probe nor this plan claims durable delivery implemented.
+
+### D1 concrete store implementation card (in_progress)
+
+Owner `/root/causes`, retained explicit Sol/high request; separate worktree `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-outbox-store`, branch `codex/durable-outbox-store`, basee96a682b73e4056f5849369176fcafeed3e7f1f2. Independent bounded storage work can proceed alongside Q1 queue/watchdog fixes without sharing files; root integrates. Read approved DURABLE-OUTBOX decision and verified SQLite probe. Own new concrete store source/tests plus sqlite dependency/import declarations; no client/runtime/session/Q1, CI, global exec, release or recursive agents. No generic backend framework.
+
+Deliver native async SQLite lifecycle, explicit schema/identity/ownership, records with persistent packet/DUP/attempt/expiry/order/blocked state, transactional admission/attach/may-write/ACK/block/never-started-discard, record/byte/page bounds, typed store errors and non-destructive corruption behavior. Do not claim network durability yet. Tests must cover reopen exact bytes, rollback/admission limits, expired-unsent versus quarantine-started, concurrent ownership/identity mismatch, SQLite Full and corrupt input, and resource cleanup. Root alone wires this concrete store into accepted Q1 after semantic review.
+
+W1 accepted: e96a682b73e4056f5849369176fcafeed3e7f1f2, hosted35363101797 bothplatformspassed, includingUbuntuEMQX4/WS4. Rootverifiedhead/conclusions. Q1 firstcandidate858a90b reviewed: rootrequestedboundedpre-writequeuebudget, accuratecapacity1occupancy, cheapoversizeadmissionrejection, overflow-safeattemptbudget andtypedterminalcauseonhandle; Solfixinginitsisolatedworktree. D1concretestoreproceedsindependentlywithoutnetworkintegration.
