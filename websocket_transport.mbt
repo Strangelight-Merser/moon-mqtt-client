@@ -116,16 +116,6 @@ impl @io.Writer for WebSocketWriter with fn write_once(
       raise ProtocolError("WebSocket protocol error: \{reason}")
     error => raise error
   }
-  // A successful MQTT DISCONNECT is followed by a best-effort RFC 6455 Close.
-  // It runs inside the existing write timeout. Transport errors after the MQTT
-  // bytes were sent do not change DISCONNECT completion; cancellation still
-  // propagates so teardown cannot outlive its owner.
-  if bytes == b"\xe0\x00" {
-    self.conn.send_close() catch {
-      error if @async.is_cancellation_error(error) => raise error
-      _ => ()
-    }
-  }
   len
 }
 

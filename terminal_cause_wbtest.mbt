@@ -48,6 +48,7 @@ fn cause_test_session(writer : &@io.Writer) -> Session {
     generation: 1,
     reader,
     writer,
+    finish_transport: None,
     close_transport: () => {
       reader.close()
       pipe_writer.close()
@@ -164,6 +165,7 @@ async test "malformed frame gives started QoS1 the actual unknown reason" {
     generation: 1,
     reader,
     writer: pipe_writer,
+    finish_transport: None,
     close_transport: () => {
       reader.close()
       pipe_writer.close()

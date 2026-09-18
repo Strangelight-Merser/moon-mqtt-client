@@ -74,3 +74,28 @@ test "TCP host validation remains unchanged by HTTP authority rules" {
   let config = Config::new("用户.example", "tcp-non-ascii")
   config.validate()
 }
+
+///|
+async test "framing shutdown follows completed MQTT disconnect and cannot undo it" {
+  let config = Config::new("localhost", "close-order", write_timeout_ms=100)
+  let client = cause_test_client(config)
+  let called = [false]
+  let base = cause_test_session(SlowCauseWriter::{})
+  let session = {
+    ..base,
+    finish_transport: Some(async fn() {
+      assert_true(!base.pending.contains(0))
+      called[0] = true
+      @async.sleep(1)
+      client.abort_session("peer closed after MQTT DISCONNECT")
+      raise @io.ReaderClosed
+    }),
+  }
+  client.session = Some(session)
+  @async.with_task_group(group => {
+    group.spawn_bg(() => session.write_loop(500, 100))
+    client.disconnect()
+  })
+  assert_true(called[0])
+  assert_true(!session.alive)
+}

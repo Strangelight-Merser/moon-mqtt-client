@@ -41,6 +41,8 @@ priv struct Session {
   reader : &@io.Reader
   writer : &@io.Writer
   close_transport : () -> Unit
+  /// Optional framing shutdown, only after MQTT DISCONNECT has completed.
+  finish_transport : (async () -> Unit)?
   /// Business writes. Bounded by `Config::send_capacity`.
   outgoing : @aqueue.Queue[Outgoing]
   /// Reserved protocol slots. Bounded by `Config::control_capacity` and never

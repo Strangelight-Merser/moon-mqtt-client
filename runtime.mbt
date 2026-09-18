@@ -99,12 +99,13 @@ async fn Client::dial(self : Client) -> Session {
       }
     }
     errdefer close_stream()
-    let (reader, writer, close_transport) : (
+    let (reader, writer, close_transport, finish_transport) : (
       &@io.Reader,
       &@io.Writer,
       () -> Unit,
+      (async () -> Unit)?,
     ) = match self.config.transport {
-      Tcp => (stream_reader, stream_writer, close_stream)
+      Tcp => (stream_reader, stream_writer, close_stream, None)
       WebSocket(path) => {
         let stream : WebSocketStream = {
           reader: stream_reader,
@@ -124,7 +125,12 @@ async fn Client::dial(self : Client) -> Session {
         }
         let ws_reader = WebSocketReader::new(websocket)
         let ws_writer : WebSocketWriter = { conn: websocket, }
-        (ws_reader, ws_writer, () => websocket.close())
+        (
+          ws_reader,
+          ws_writer,
+          () => websocket.close(),
+          Some(async fn() { websocket.send_close() }),
+        )
       }
     }
     errdefer close_transport()
@@ -158,6 +164,7 @@ async fn Client::dial(self : Client) -> Session {
       reader,
       writer,
       close_transport,
+      finish_transport,
       outgoing: @aqueue.Queue(kind=@aqueue.Blocking(self.config.send_capacity)),
       control_queue: @aqueue.Queue(
         kind=@aqueue.Blocking(self.config.control_capacity),

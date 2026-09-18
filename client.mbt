@@ -471,6 +471,15 @@ pub async fn Client::disconnect(self : Client) -> Unit {
         reason => self.abort_session(reason),
       ),
     )
+    // MQTT completion is final before optional transport-framing shutdown.
+    // A peer may close immediately after receiving DISCONNECT; that must not
+    // replace its successful completion with an unknown outcome.
+    if session.finish_transport is Some(finish) {
+      @async.with_timeout(self.config.write_timeout_ms, finish) catch {
+        error if @async.is_cancellation_error(error) => raise error
+        _ => ()
+      }
+    }
   }
   if self.session is Some(session) {
     session.abort("client disconnected")
