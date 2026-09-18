@@ -1,6 +1,6 @@
 # Execution state
 
-Updated: 2026-09-18. Status: W1 locally accepted and awaiting hosted CI; expanded roadmap remains in_progress. J1/C1/R2 done.
+Updated: 2026-09-18. Status: W1 in_review with a hosted Linux WSS blocker; expanded roadmap remains in_progress. J1/C1/R2 done.
 
 ## Expanded scope and active checkout
 
@@ -14,7 +14,7 @@ Final local evidence `_build/exec-ws/integrated-check.log`: native71, original b
 
 Earlier failures are retained: external-consumer copier omitted new source packages; normal-scenario process-liveness check let a command precede device SUBACK. Root corrected only those fixture setup/copy blocks under routine follow-through authorization, with original application assertions/timeouts unchanged. Tests are not claimed wholly byte-unchanged: those two fixture files and the CLI are the disclosed exceptions; other protected originals remain unchanged. See TASKS for exact wire evidence.
 
-Sol implementation/review were separate sessions; reviewer approved binary protocol changes subject to guarded-writer regression, now passing with a mutation counterexample. Root chose synchronous fail-close for detected malformed frames so cleanup cannot mask protocol errors. Final hosted CI for this W1 commit remains pending. Next planned capability is explicit reconnect-resilient QoS1 delivery, keeping ordinary publish semantics.
+Sol implementation/review were separate sessions; reviewer approved binary protocol changes subject to guarded-writer regression, now passing with a mutation counterexample. Root chose synchronous fail-close for detected malformed frames so cleanup cannot mask protocol errors. W1 commit `799575004fc3624d7875c42b452b49b068fde512` passed hosted macOS but run35359571920 failed Linux WSS subscriber reception after SUBACK; WS and WSS publishing passed. Full failed logs retained `_build/exec-ws/ci-first-failed.log`. This is an unresolved acceptance blocker, not an approved flaky retry. Root is adding stdout/stderr/broker diagnostics and Sol independently investigates. Next planned capability is explicit reconnect-resilient QoS1 delivery, keeping ordinary publish semantics.
 
 
 ## R2 hosted regression resolved

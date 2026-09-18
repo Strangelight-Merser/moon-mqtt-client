@@ -69,32 +69,61 @@ class WsInterop(unittest.TestCase):
         proc = subprocess.Popen(self.command('subscribe', secure=secure, topic=topic,
                                 qos=1, count=1, timeout_ms=5000), cwd=ROOT,
                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        lines = queue.Queue()
+        output, errors = [], []
+        def drain_stdout():
+            for line in proc.stdout:
+                output.append(line)
+                lines.put(line)
+            lines.put(None)
+        def drain_stderr():
+            errors.extend(proc.stderr)
+        workers = [threading.Thread(target=drain_stdout, daemon=True),
+                   threading.Thread(target=drain_stderr, daemon=True)]
+        for worker in workers:
+            worker.start()
         def cleanup():
             if proc.poll() is None:
                 proc.kill()
-            proc.communicate(timeout=5)
+            proc.wait(timeout=5)
+            for worker in workers:
+                worker.join(timeout=2)
+            proc.stdout.close()
+            proc.stderr.close()
         self.addCleanup(cleanup)
-        lines = queue.Queue()
-        def drain():
-            for line in proc.stdout:
-                lines.put(line)
-        worker = threading.Thread(target=drain, daemon=True)
-        worker.start()
-        while True:
-            line = lines.get(timeout=10)
-            if json.loads(line).get('event') == 'subscribed':
-                break
-        oracle.publish(topic, b'oracle-to-native', qos=1).wait_for_publish(timeout=5)
-        events = []
-        while True:
-            event = json.loads(lines.get(timeout=10))
-            events.append(event)
-            if event.get('event') == 'message':
-                self.assertEqual(event['payload'], 'oracle-to-native')
-                self.assertEqual(event['qos'], '1')
-                break
-        self.assertEqual(proc.wait(timeout=10), 0, proc.stderr.read())
-        worker.join(timeout=2)
+        def next_event():
+            try:
+                line = lines.get(timeout=10)
+            except queue.Empty:
+                self.fail('native subscriber produced no event within 10s')
+            if line is None:
+                self.fail('native subscriber closed stdout before expected event')
+            event = json.loads(line)
+            self.assertNotEqual(event.get('event'), 'timeout',
+                                'native subscriber reached its operation timeout')
+            return event
+        try:
+            while next_event().get('event') != 'subscribed':
+                pass
+            publication = oracle.publish(topic, b'oracle-to-native', qos=1)
+            publication.wait_for_publish(timeout=5)
+            self.assertTrue(publication.is_published(), 'oracle PUBACK')
+            while True:
+                event = next_event()
+                if event.get('event') == 'message':
+                    self.assertEqual(event['payload'], 'oracle-to-native')
+                    self.assertEqual(event['qos'], '1')
+                    break
+            self.assertEqual(proc.wait(timeout=10), 0)
+        except Exception:
+            cleanup()
+            print(f'native subscriber exit={proc.returncode}; stdout={output!r}; stderr={errors!r}',
+                  flush=True)
+            self.broker._retain_failure_log()
+            result = subprocess.run(['docker', 'logs', self.broker.name],
+                                    text=True, capture_output=True)
+            print(result.stdout + result.stderr, flush=True)
+            raise
 
     def test_ws_native_qos0_qos1_both_directions(self):
         self.roundtrip(False)
