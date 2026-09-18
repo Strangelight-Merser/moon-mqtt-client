@@ -27,19 +27,23 @@
 
 - Owner: `/root/jitter`, retained explicit Sol/high session, independent of C1 implementer `/root/causes`; actual runtime model metadata unconfirmed. Read-only, no builds/source edits.
 - Review latest actual runtime/session diff and new terminal-cause tests: restoration-induced OutcomeUnknown must not mask terminal causes; generic teardown must not replace direct protocol/heartbeat errors; cancellation and pending classification unchanged; original transport reconnect preserved. Root integrates findings and final checks.
-- Independent review: main type/retry logic correct. P2 direct framing/heartbeat errors still gave pending requests generic cleanup reasons, despite correct supervisor type. Root chose to fix pending diagnostic fidelity within C1; Sol follow-up active. Writer raw-cause test proves storage, not full writer-to-reconnect path; test name/claims must stay narrow. No original tests may change.
-- Follow-up: Sol recorded read/framing and heartbeat failures before cleanup, added pending-reason tests, narrowed writer test name and propagated finite peer-handler assertion failures. Independent reviewer found a stale heartbeat timeout after caller abort could replace the synthetic cause. Root added a Cond-synchronized regression: before guard exit 2 (1 failed), after `!self.alive` guard exit 0 (1 passed). Evidence `_build/exec-causes/heartbeat-race-before.log` and `heartbeat-race-after.log`. Root reviewed this minimal guard; final integrated revalidation follows.
+- Independent review: main type/retry logic correct. P2 direct framing/heartbeat errors still gave pending requests generic cleanup reasons, despite correct supervisor type. Root chose to fix pending diagnostic fidelity within C1; Sol follow-up completed. Writer raw-cause test proves storage, not full writer-to-reconnect path; test name/claims must stay narrow. No original tests may change.
+- Follow-up: Sol recorded read/framing and heartbeat failures before cleanup, added pending-reason tests, narrowed writer test name and propagated finite peer-handler assertion failures. Independent reviewer found a stale heartbeat timeout after caller abort could replace the synthetic cause. Root added a Cond-synchronized regression: before guard exit 2 (1 failed), after `!self.alive` guard exit 0 (1 passed). Evidence `_build/exec-causes/heartbeat-race-before.log` and `heartbeat-race-after.log`. Root reviewed this minimal guard; final integrated revalidation passed (C3 and R1).
 
 ## P1 — Local package hygiene (done)
 
 - Owner: root. Local `moon package --list` exposed Python `__pycache__/*.pyc` in archive despite Git ignoring them. Add only cache exclusion patterns to `.moonignore`, repackage and inspect actual ZIP. No publication, dependency changes or original file deletion. Root already ran `moon info . --target native`; generated public API is unchanged.
 - Actual ZIP inspected after exclusion: zero Python cache entries, new native tests included. Final archive and checksum recorded by `_build/exec-causes/acceptance.json`; no registry-install claim.
 
-## R1 — Hosted CI handoff (in_progress; authorized)
+## R1 — Hosted CI handoff (done)
 
 - Proposed action: commit/push reviewed J1+C1+package/contract changes plus the specifically disclosed preexisting EMQX fixture/doc patch to PR #2; run hosted CI only. Do not merge, tag, publish or operate hardware.
 - Review artifacts: `_build/exec-causes/implementation.patch` (SHA256 `11d6a5975a2b449d17c3f066145748ab023faa2c624c04b919f3e6292514f81c`) and `_build/exec-jitter/preexisting.patch`. Existing user prompt explicitly prohibits remote push without authorization; continued local autonomy does not silently lift that boundary.
 - User subsequently explicitly authorized this proposed commit/push, including the existing EMQX changes, and delegated routine reversible follow-through. Do not ask again for the same operation. No merge or release authorized. Pre-commit source/protected hashes rechecked against accepted manifests.
+
+- Delivered commit: `d61eb67482f7bc947cf0b1eab3b2931e8ec993ec`, pushed normally to `codex/v0.3-mtls`. Accepted source bytes rechecked against the committed tree.
+- Hosted [PR CI](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35354946801) and [push CI](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35354944159) both passed on that exact commit: Ubuntu/macOS native 54, broker 25, faults/scenarios/consumers; Ubuntu EMQX 4. Conditional macOS EMQX/latest-compatibility skips remain distinguished. Luna retrieved logs and root independently verified results.
+- Evidence: `_build/exec-ci/summary.md` and per-run final JSON/logs. PR remains OPEN; merge/release/registry install not performed. Closing state/release-note update is documentation only.
 
 ## J1 — Default reconnect jitter (done)
 

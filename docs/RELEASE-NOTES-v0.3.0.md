@@ -16,7 +16,7 @@
 
 ## 验证
 
-2026-09-18 本地追加复验：集成默认重连种子与类型化断线原因修复后，macOS ARM 通过 54 项 native 测试、25 项 Mosquitto 集成测试、10 项协议故障注入、场景冒烟和独立 TCP/mTLS 本地 workspace 消费者，启用 FD 泄漏检查。固定 EMQX 5.8.8 的 4 项互操作测试通过，测试容器已清理。此结果不代表当前补丁已通过 Linux 客户端 CI 或注册表安装。当前完整状态与证据见 [执行状态](exec/STATE.md)。
+2026-09-18 本地追加复验：集成默认重连种子与类型化断线原因修复后，macOS ARM 通过 54 项 native 测试、25 项 Mosquitto 集成测试、10 项协议故障注入、场景冒烟和独立 TCP/mTLS 本地 workspace 消费者，启用 FD 泄漏检查。固定 EMQX 5.8.8 的 4 项互操作测试通过，测试容器已清理。随后提交 `d61eb67482f7bc947cf0b1eab3b2931e8ec993ec` 的 [PR CI](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35354946801) 和 [push CI](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35354944159) 均通过：Ubuntu/macOS 客户端检查通过，Ubuntu EMQX 4/4 通过。注册表干净安装尚未执行。当前完整状态与证据见 [执行状态](exec/STATE.md)。
 
 此前本地复验：macOS ARM 与 Ubuntu 24.04 x86_64 仿真均通过 39 项单元测试、25 项集成测试、10 项协议故障注入、独立 TCP/mTLS 消费者及四个演示场景，启用 FD 泄漏检查。
 
@@ -34,4 +34,4 @@ Linux CI 的 broker 仅监听 IPv4，因此回环解析优先选择 127.0.0.1。
 
 ## 发布记录
 
-发布流程进行中：远端 CI、合并、Mooncakes 两个模块发布、注册表干净安装及附件校验完成后记录结果。v0.2.0 标签保持原位。
+远端 CI 已通过，PR #2 仍开放，尚未合并或发布。合并、Mooncakes 两个模块发布、注册表干净安装及发布附件校验仍待授权与执行。v0.2.0 标签保持原位。
