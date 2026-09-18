@@ -73,6 +73,57 @@ A failed first connection raises the classified error to `wait_connected` and to
 Recovery must not assume success or failure: query the peer or resend an
 idempotent request.
 
+## Recoverable QoS 1 delivery
+
+`Config.session_policy` defaults to `CleanSession`, which preserves the
+ordinary request behavior described above. `ResumeSession` sends
+`CleanSession=false` and enables `Client::submit_delivery`. This explicit API
+admits one in-memory QoS 1 delivery and returns a stable `DeliveryHandle`.
+Ordinary QoS 1 `publish` is rejected under `ResumeSession`; QoS 0 remains an
+ephemeral ordinary request.
+
+Admission is connected-only, atomic and nonblocking. It uses the existing
+`max_inflight` and `send_capacity` limits and requires a caller-provided,
+nonempty UTF-8 delivery ID of at most 128 encoded bytes. Active IDs cannot be
+reused. The ID is application identity for this process scope; it is not a
+durable deduplication record.
+
+The handle reports `Queued`, `AwaitingAck`, `AwaitingReconnect`,
+`Acknowledged`, `TerminalNotSent`, or `TerminalOutcomeUnknown`, plus its MQTT
+packet ID, connection-attempt count and current generation. Cancelling or
+timing out `DeliveryHandle::wait` only stops that wait. The admitted protocol
+operation continues and may be observed again through the same handle.
+
+After a transport loss, a reconnect with `Session Present=true` reattaches
+unresolved deliveries in admission order with their original packet IDs. A
+delivery whose socket write began is retransmitted with `DUP=1`; one that never
+started remains a first send. Packet IDs stay reserved across generations and
+ordinary request allocation skips them. Resume reconnect does not duplicate
+SUBSCRIBE because the broker retained the session.
+
+`Session Present=false` on a Resume reconnect ends the logical scope with
+`BrokerSessionLost`; deliveries that never began a write become
+`TerminalNotSent`, while deliveries that may have reached the broker become
+`TerminalOutcomeUnknown`. The first Resume connection accepts either Session
+Present value and only tracks admissions made in the current process scope.
+Applications must use exclusive client-ID ownership; this library does not
+recover work from a previous process.
+
+For recoverable delivery, `operation_timeout_ms` is a per-attempt PUBACK
+watchdog that starts after the complete PUBLISH write. It does not inherit time
+spent waiting in an earlier generation. Expiry reconnects while attachment
+budget remains. A delivery may attach to at most `reconnect_attempts + 1`
+generations, counting a generation lost before writing; exhaustion ends the
+logical scope with `DeliveryAttemptsExhausted`. Transport reconnect exhaustion
+remains `ReconnectExhausted`. Replay uses the bounded send queue rather than an
+unbounded offline queue.
+
+PUBACK completes the delivery. It does not prove downstream processing,
+device execution, or exactly-once application delivery. MQTT QoS 1 replay can
+produce duplicate application messages. Completion and terminal failure remove
+the active payload and packet-ID reservation; callers may retain the small
+terminal handle snapshot.
+
 ## Connection lifetime, timeouts and cancellation
 
 The read loop owns the connection lifetime. It assembles each MQTT frame with
@@ -84,8 +135,9 @@ disconnect or a transport error that it can classify.
 
 ## Cancellation
 
-This version keeps the conservative rule: **cancelling an unfinished request
-aborts the current connection.** After the write may have reached the peer, the
+Ordinary `publish`, `subscribe`, and `unsubscribe` keep the conservative rule:
+**cancelling an unfinished request aborts the current connection.** After the
+write may have reached the peer, the
 client cannot know whether the request was executed, so it ends the generation
 rather than leaving an ambiguous request alive while a new request reuses the
 identifier space. Consequences:
@@ -102,8 +154,11 @@ identifier space. Consequences:
 
 ## Reconnection
 
-- `CleanSession=true` only. Every reconnect is a new session that restores
-  confirmed subscriptions before `Connected(generation)` is emitted.
+- `CleanSession` is the default. Every reconnect is a new broker session that
+  restores confirmed subscriptions before `Connected(generation)` is emitted.
+- `ResumeSession` retains unresolved explicit deliveries in memory and requires
+  `Session Present=true` before replay on a reconnect. It relies on the broker's
+  persistent session and skips duplicate subscription restoration.
 - Backoff is bounded exponential (`reconnect_delay_ms` growing by 1.5x up to
   `max_reconnect_delay_ms`) plus jitter drawn from a **per-client** xorshift
   stream. On native targets, each default stream is seeded from four bytes of

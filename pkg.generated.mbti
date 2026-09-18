@@ -19,6 +19,9 @@ pub(all) suberror ClientError {
   OutcomeUnknown(String)
   ConnectionRefused(String)
   ReconnectExhausted(String)
+  DeliveryRejected(String)
+  BrokerSessionLost(String)
+  DeliveryAttemptsExhausted(String)
   OperationTimeout(String)
   WriteTimeout(String)
   PingResponseTimeout(String)
@@ -32,6 +35,7 @@ pub async fn Client::next_event(Self) -> Event
 pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool) -> Unit
 pub fn Client::set_reconnect_seed(Self, Int) -> Unit
 pub fn Client::stats(Self) -> ClientStats
+pub fn Client::submit_delivery(Self, String, String, Bytes, retain? : Bool) -> DeliveryHandle raise ClientError
 pub async fn Client::subscribe(Self, Array[Subscription]) -> Array[SubscriptionResult]
 pub async fn Client::unsubscribe(Self, Array[String]) -> Unit
 pub async fn Client::wait_connected(Self) -> Unit
@@ -58,6 +62,7 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  session_policy : SessionPolicy
   transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
@@ -78,7 +83,31 @@ pub(all) struct Config {
   reconnect_attempts : Int
   control_capacity : Int
 }
-pub fn Config::new(String, String, port? : Int, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
+pub fn Config::new(String, String, port? : Int, session_policy? : SessionPolicy, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
+
+pub struct DeliveryHandle {
+  // private fields
+}
+pub fn DeliveryHandle::id(Self) -> String
+pub fn DeliveryHandle::status(Self) -> DeliveryStatus
+pub async fn DeliveryHandle::wait(Self) -> DeliveryStatus
+
+pub(all) enum DeliveryPhase {
+  Queued
+  AwaitingAck
+  AwaitingReconnect(String)
+  Acknowledged
+  TerminalNotSent(String)
+  TerminalOutcomeUnknown(String)
+} derive(Eq, @debug.Debug)
+
+pub(all) struct DeliveryStatus {
+  delivery_id : String
+  phase : DeliveryPhase
+  packet_id : Int
+  attempts : Int
+  generation : Int?
+} derive(Eq, @debug.Debug)
 
 pub(all) enum Event {
   Connected(Int)
@@ -103,6 +132,11 @@ pub(all) enum NetworkTransport {
 pub(all) enum QoS {
   AtMostOnce
   AtLeastOnce
+} derive(Eq, @debug.Debug)
+
+pub(all) enum SessionPolicy {
+  CleanSession
+  ResumeSession
 } derive(Eq, @debug.Debug)
 
 pub(all) struct Subscription {

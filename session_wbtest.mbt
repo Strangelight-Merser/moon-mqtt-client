@@ -15,6 +15,10 @@ fn test_session(next_id? : Int = 1) -> Session {
     business_depth: 0,
     control_depth: 0,
     pending: {},
+    deliveries: {},
+    reserved_deliveries: {},
+    delivery_slots: 0,
+    delivery_changed: @cond_var.Cond(),
     next_id,
     alive: true,
     last_write: 0L,
@@ -48,6 +52,7 @@ test "reserved control slots stay usable when the business queue is full" {
       session.outgoing.try_put({
         bytes: b"publish",
         pending: Some(request),
+        delivery: None,
         is_ping: false,
       }),
     )
@@ -58,6 +63,7 @@ test "reserved control slots stay usable when the business queue is full" {
     session.outgoing.try_put({
       bytes: b"overflow",
       pending: None,
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -76,6 +82,7 @@ test "abort zeroes the queue occupancy mirrors" {
     session.outgoing.try_put({
       bytes: b"business",
       pending: None,
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -117,6 +124,7 @@ test "control packets are dequeued before business traffic in FIFO order" {
     session.outgoing.try_put({
       bytes: b"one",
       pending: Some(first),
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -125,6 +133,7 @@ test "control packets are dequeued before business traffic in FIFO order" {
     session.outgoing.try_put({
       bytes: b"two",
       pending: Some(second),
+      delivery: None,
       is_ping: false,
     }),
   )

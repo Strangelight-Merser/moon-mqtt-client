@@ -71,12 +71,13 @@ python3 -m venv .venv
 - MQTT 3.1.1、QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
 - 订阅与取消订阅确认，包括逐主题的订阅拒绝结果。
 - 有上限的发送队列、事件队列、报文大小和并发请求数。
-- 仅支持 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
-  `Connected(generation)` 事件。
+- 默认 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
+  `Connected(generation)` 事件。可显式选择 `ResumeSession`，通过投递句柄在同一
+  进程作用域内恢复未确认的 QoS 1 发布。
 - 任务和 socket 的生命周期由回调作用域管理。回调正常返回或调用 `disconnect()` 时
   发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
 
-暂不支持 QoS 2、MQTT 5、持久会话、离线队列、跨连接重传、加密私钥、
+暂不支持 QoS 2、MQTT 5、离线接收队列、跨进程投递恢复、加密私钥、
 浏览器和微控制器目标。
 
 ## 原生 WebSocket
@@ -121,6 +122,30 @@ async fn main {
   })
 }
 ```
+
+需要对 PUBACK 丢失或短暂断线进行有界恢复时，显式使用持久会话与投递句柄：
+
+```moonbit
+let config = @mqtt.Config::new(
+  "127.0.0.1", "exclusive-stable-client-id",
+  session_policy=@mqtt.ResumeSession,
+)
+@mqtt.with_client(config, async fn(client) {
+  let delivery = client.submit_delivery(
+    "command-20260918-001", "lab/command", @utf8.encode("ON"),
+  )
+  let status = delivery.wait()
+  // Acknowledged means a matching broker PUBACK was received. Reconcile
+  // TerminalOutcomeUnknown with application state before issuing a new command.
+  ignore(status)
+})
+```
+
+`submit_delivery` 只在连接就绪时非阻塞接收，受现有发送队列和 `max_inflight`
+上限约束，不是离线队列。断线后仅在 broker 返回 `Session Present=true` 时，才按原
+packet ID 和顺序重发；已经开始写入的发布设置 `DUP=1`。等待句柄被取消不会取消投递。
+该能力只保存当前进程作用域内已接收的投递，要求稳定 client ID 由单一客户端独占；它不
+恢复进程重启前的内存，也不保证设备执行或应用层恰好一次。
 
 `with_client` 在首次连接成功后调用回调；首次连接、CONNACK 或 TLS 失败会直接返回给调用方。
 连接曾经建立后发生的故障会触发有次数上限的重试。`wait_connected()` 可等待重连完成；

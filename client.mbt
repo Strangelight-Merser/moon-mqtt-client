@@ -4,6 +4,7 @@ struct Client {
   events : @aqueue.Queue[Event]
   changed : @cond_var.Cond
   subscriptions : Map[String, QoS]
+  deliveries : DeliveryBook
   mut session : Session?
   mut ready : Bool
   mut stopped : Bool
@@ -91,6 +92,7 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     events: @aqueue.Queue(kind=@aqueue.Blocking(config.receive_capacity)),
     changed: @cond_var.Cond(),
     subscriptions: {},
+    deliveries: DeliveryBook::new(),
     session: None,
     ready: false,
     stopped: false,
@@ -113,6 +115,7 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
       if client.session is Some(session) {
         session.abort("client scope ended")
       }
+      client.finish_deliveries(SessionLost("client scope ended"))
       worker.cancel()
       client.events.close(error=Closed)
       client.changed.broadcast()
@@ -139,7 +142,7 @@ pub fn Client::stats(self : Client) -> ClientStats {
     Some(session) if session.alive => (
       session.business_depth,
       session.control_depth,
-      session.pending.length(),
+      session.pending.length() + session.delivery_slots,
     )
     _ => (0, 0, 0)
   }
@@ -171,6 +174,9 @@ fn client_error_of(error : Error) -> ClientError {
     OutcomeUnknown(msg) => OutcomeUnknown(msg)
     ConnectionRefused(msg) => ConnectionRefused(msg)
     ReconnectExhausted(msg) => ReconnectExhausted(msg)
+    DeliveryRejected(msg) => DeliveryRejected(msg)
+    BrokerSessionLost(msg) => BrokerSessionLost(msg)
+    DeliveryAttemptsExhausted(msg) => DeliveryAttemptsExhausted(msg)
     OperationTimeout(msg) => OperationTimeout(msg)
     WriteTimeout(msg) => WriteTimeout(msg)
     PingResponseTimeout(msg) => PingResponseTimeout(msg)
@@ -286,6 +292,7 @@ async fn Session::request(
     let accepted = self.outgoing.try_put({
       bytes,
       pending: Some(request),
+      delivery: None,
       is_ping: false,
     }) catch {
       _ => false
@@ -301,7 +308,12 @@ async fn Session::request(
     // DISCONNECT still completes when the business queue is full: the control
     // slots are reserved and never occupied by business traffic.
     try {
-      self.control_queue.put({ bytes, pending: Some(request), is_ping: false })
+      self.control_queue.put({
+        bytes,
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      })
       self.control_depth += 1
     } catch {
       _ => raise NotSent("control queue closed before DISCONNECT was queued")
@@ -375,6 +387,11 @@ pub async fn Client::publish(
   qos? : QoS = AtMostOnce,
   retain? : Bool = false,
 ) -> Unit {
+  if self.config.session_policy is ResumeSession && qos == AtLeastOnce {
+    raise DeliveryRejected(
+      "QoS 1 publish under ResumeSession requires submit_delivery",
+    )
+  }
   let session = self.active()
   if payload.length() > self.config.max_packet_size - 4 {
     raise ProtocolError("outgoing payload exceeds packet limit")
@@ -405,6 +422,85 @@ pub async fn Client::publish(
       on_unknown=() => self.note_unknown(),
     ),
   )
+}
+
+///|
+/// Atomically admit one reconnect-resilient QoS 1 delivery. Admission is
+/// connected-only and never becomes an offline queue.
+pub fn Client::submit_delivery(
+  self : Client,
+  delivery_id : String,
+  topic : String,
+  payload : Bytes,
+  retain? : Bool = false,
+) -> DeliveryHandle raise ClientError {
+  if !(self.config.session_policy is ResumeSession) {
+    raise DeliveryRejected("submit_delivery requires ResumeSession")
+  }
+  if !valid_delivery_id(delivery_id) {
+    raise DeliveryRejected("delivery_id must contain 1..128 UTF-8 bytes")
+  }
+  if self.deliveries.active.contains(delivery_id) {
+    raise DeliveryRejected("duplicate active delivery_id: \{delivery_id}")
+  }
+  let session = self.active()
+  if self.deliveries.active.length() + session.pending.length() >=
+    self.config.max_inflight {
+    raise Backpressure("inflight limit reached")
+  }
+  let packet_id = self.deliveries.allocate_packet_id(session)
+  let record : DeliveryRecord = {
+    delivery_id,
+    packet_id,
+    changed: @cond_var.Cond(),
+    topic: Some(topic),
+    payload: Some(payload),
+    retain,
+    phase: Queued,
+    attempts: 0,
+    generation: None,
+    ever_started: false,
+    ack_deadline: None,
+  }
+  // Encode before mutating ownership so an invalid topic/packet bound leaves no
+  // active ID, packet reservation, or queue entry behind.
+  let bytes = record.packet(self.config.max_packet_size)
+  self.deliveries.active[delivery_id] = record
+  self.deliveries.reserved[packet_id] = record
+  self.deliveries.order.push(record)
+  record.attach(session.generation)
+  session.deliveries[packet_id] = record
+  session.delivery_slots += 1
+  let accepted = session.outgoing.try_put({
+    bytes,
+    pending: None,
+    delivery: Some(record),
+    is_ping: false,
+  }) catch {
+    _ => false
+  }
+  if !accepted {
+    session.deliveries.remove(packet_id)
+    session.delivery_slots -= 1
+    record.rollback_initial_attach()
+    self.deliveries.remove_record(record)
+    raise Backpressure("send queue full")
+  }
+  session.business_depth += 1
+  { record, }
+}
+
+///|
+fn Client::finish_deliveries(self : Client, error : Error) -> Unit {
+  if self.deliveries.active.is_empty() {
+    return
+  }
+  for record in self.deliveries.order {
+    if !record.phase.terminal() && record.ever_started {
+      self.unknown_outcomes += 1
+    }
+  }
+  self.deliveries.finish_all(session_error_reason(error))
 }
 
 ///|
@@ -456,6 +552,7 @@ pub async fn Client::disconnect(self : Client) -> Unit {
     if self.session is Some(session) {
       session.abort("client disconnected")
     }
+    self.finish_deliveries(SessionLost("client disconnected"))
     if self.worker is Some(worker) {
       worker.cancel()
     }

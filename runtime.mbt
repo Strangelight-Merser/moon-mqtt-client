@@ -46,7 +46,7 @@ fn websocket_handshake_error(error : Error, encrypted : Bool) -> Error {
 
 ///|
 ///|
-async fn Client::dial(self : Client) -> Session {
+async fn Client::dial(self : Client) -> (Session, Bool) {
   @async.with_timeout(self.config.connect_timeout_ms, () => {
     let tcp = @socket.Tcp::connect_to_host(
       self.config.host[:],
@@ -141,19 +141,20 @@ async fn Client::dial(self : Client) -> Session {
       self.config.max_packet_size,
       !(self.config.tls is Plain),
     )
-    match response {
+    let session_present = match response {
       @codec.ConnackPacket(ack) => {
         if ack.return_code != @codec.ConnectionAccepted {
           raise ConnectionRefused(@debug.to_string(ack.return_code))
         }
-        if ack.session_present {
+        if self.config.session_policy is CleanSession && ack.session_present {
           raise ProtocolError("CleanSession=true CONNACK set Session Present")
         }
+        ack.session_present
       }
       _ => raise ProtocolError("expected CONNACK")
     }
     self.generation += 1
-    {
+    ({
       generation: self.generation,
       reader,
       writer,
@@ -165,13 +166,17 @@ async fn Client::dial(self : Client) -> Session {
       business_depth: 0,
       control_depth: 0,
       pending: {},
+      deliveries: {},
+      reserved_deliveries: self.deliveries.reserved,
+      delivery_slots: 0,
+      delivery_changed: @cond_var.Cond(),
       next_id: 1,
       alive: true,
       last_write: @async.now(),
       ping_sent: None,
       early_messages: [],
       failure_reason: None,
-    }
+    }, session_present)
   })
 }
 
@@ -181,6 +186,29 @@ async fn Client::dial(self : Client) -> Session {
 /// (a caller-side abort), not because the supervisor was cancelled.
 priv suberror SessionLost {
   SessionLost(String)
+}
+
+///|
+async fn Client::replay_deliveries(
+  self : Client,
+  session : Session,
+) -> Unit {
+  let records = self.deliveries.order.copy()
+  for delivery in records {
+    if delivery.phase.terminal() {
+      continue
+    }
+    if delivery.attempts >= self.config.reconnect_attempts + 1 {
+      raise DeliveryAttemptsExhausted(
+        "delivery \{delivery.delivery_id} exhausted \{delivery.attempts} generation attempts",
+      )
+    }
+    let bytes = delivery.packet(self.config.max_packet_size)
+    delivery.attach(session.generation)
+    session.deliveries[delivery.packet_id] = delivery
+    session.delivery_slots += 1
+    session.enqueue_delivery(delivery, bytes)
+  }
 }
 
 ///|
@@ -221,15 +249,23 @@ async fn Client::supervise(self : Client) -> Unit {
     if self.session is Some(session) {
       session.abort("worker ended")
     }
+    self.finish_deliveries(self.close_reason())
     self.events.close(error=self.close_reason())
     self.changed.broadcast()
   }
   while !self.stopped {
     try {
       let first_connection = !ever_ready
-      let session = self.dial()
+      let (session, session_present) = self.dial()
       self.session = Some(session)
       defer session.abort("connection ended")
+      if self.config.session_policy is ResumeSession &&
+        !first_connection &&
+        !session_present {
+        raise BrokerSessionLost(
+          "broker returned Session Present=false while recoverable state was active",
+        )
+      }
       @async.with_task_group(group => {
         group.spawn_bg(() => {
           session.write_loop(
@@ -238,6 +274,7 @@ async fn Client::supervise(self : Client) -> Unit {
           )
         })
         group.spawn_bg(() => session.heartbeat_task(self.config))
+        group.spawn_bg(() => session.delivery_watchdog(self.config))
         // The read loop drives the connection lifetime. `spawn` instead of
         // `spawn_bg` matters: a failing child cannot wake a group body that is
         // parked on a condition variable, but `task.wait()` propagates the
@@ -249,15 +286,20 @@ async fn Client::supervise(self : Client) -> Unit {
         // point, so the cancellation is swallowed and the generation ends
         // normally; the supervisor decides whether to reconnect.
         let reader = group.spawn(() => self.read_loop(session))
-        let restore = self.subscriptions
-          .iter()
-          .map(pair => { topic: pair.0, qos: pair.1, })
-          .to_array()
-        for subscription in restore {
-          let result = self.subscribe_on(session, [subscription])
-          if result.contains(Rejected) {
-            raise ProtocolError("subscription restore rejected")
+        if self.config.session_policy is CleanSession {
+          let restore = self.subscriptions
+            .iter()
+            .map(pair => { topic: pair.0, qos: pair.1, })
+            .to_array()
+          for subscription in restore {
+            let result = self.subscribe_on(session, [subscription])
+            if result.contains(Rejected) {
+              raise ProtocolError("subscription restore rejected")
+            }
           }
+        }
+        if self.config.session_policy is ResumeSession && !first_connection {
+          self.replay_deliveries(session)
         }
         self.ready = true
         ever_ready = true
@@ -329,14 +371,25 @@ async fn Client::supervise(self : Client) -> Unit {
         // Backpressure, a saturated control queue and connect-phase protocol
         // errors are terminal: retrying would hide a defect from the caller.
         match cause {
+          BrokerSessionLost(_) | DeliveryAttemptsExhausted(_) => {
+            // Recoverable handles must remain observable long enough for the
+            // application callback to reconcile their terminal state. End the
+            // worker normally after recording the typed stop reason instead of
+            // letting task-group failure cancel that callback.
+            self.record_stop(cause)
+            self.finish_deliveries(cause)
+            return
+          }
           Backpressure(_) | ProtocolError(_) | NotConnected => {
             self.record_stop(cause)
+            self.finish_deliveries(cause)
             raise cause
           }
           _ => ()
         }
         if !ever_ready {
           self.record_stop(cause)
+          self.finish_deliveries(cause)
           raise cause
         }
         self.emit(Disconnected(self.generation, reason))
@@ -344,6 +397,7 @@ async fn Client::supervise(self : Client) -> Unit {
         if attempts > self.config.reconnect_attempts {
           let exhausted = ReconnectExhausted(reason)
           self.record_stop(exhausted)
+          self.finish_deliveries(exhausted)
           raise exhausted
         }
         // Bounded exponential backoff plus per-client jitter. Jitter comes from
@@ -437,17 +491,36 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
           }
         }
       }
-      @codec.PubackPacket(ack) =>
-        match session.pending.get(ack.message_id) {
-          Some(request) if request.kind is Publish1 && request.started => {
-            session.pending.remove(ack.message_id)
-            request.finish(Ok(Done))
+      @codec.PubackPacket(ack) => {
+        match session.deliveries.get(ack.message_id) {
+          Some(delivery) => {
+            if delivery.generation != Some(session.generation) ||
+              !(delivery.phase is AwaitingAck) {
+              session.abort_with(
+                ProtocolError("PUBACK arrived before recoverable PUBLISH write"),
+              )
+              return
+            }
+            session.deliveries.remove(ack.message_id)
+            if session.delivery_slots > 0 {
+              session.delivery_slots -= 1
+            }
+            self.deliveries.acknowledge(delivery)
+            session.delivery_changed.broadcast()
           }
-          _ => {
-            session.abort_with(ProtocolError("unexpected PUBACK identifier"))
-            return
-          }
+          None =>
+            match session.pending.get(ack.message_id) {
+              Some(request) if request.kind is Publish1 && request.started => {
+                session.pending.remove(ack.message_id)
+                request.finish(Ok(Done))
+              }
+              _ => {
+                session.abort_with(ProtocolError("unexpected PUBACK identifier"))
+                return
+              }
+            }
         }
+      }
       @codec.SubackPacket(ack) =>
         match session.pending.get(ack.message_id) {
           Some(request) =>

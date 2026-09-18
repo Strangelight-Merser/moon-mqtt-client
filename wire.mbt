@@ -67,7 +67,7 @@ fn Config::connect_packet(self : Config) -> @codec.Packet {
       will_retain: self.will.map(w => w.retain).unwrap_or(false),
       will_qos: self.will.map(w => w.qos.wire()).unwrap_or(@codec.QoS0),
       will_flag: self.will is Some(_),
-      clean_session: true,
+      clean_session: self.session_policy is CleanSession,
     },
   })
 }

@@ -32,6 +32,7 @@ priv struct Pending {
 priv struct Outgoing {
   bytes : Bytes
   pending : Pending?
+  delivery : DeliveryRecord?
   is_ping : Bool
 }
 
@@ -53,6 +54,14 @@ priv struct Session {
   mut business_depth : Int
   mut control_depth : Int
   pending : Map[Int, Pending]
+  /// Recoverable deliveries attached to this physical generation. The client
+  /// owns their lifetime; this map only routes PUBACK and generation teardown.
+  deliveries : Map[Int, DeliveryRecord]
+  /// Shared logical-session reservations, including deliveries detached while
+  /// reconnecting. Ordinary request allocation must always skip them.
+  reserved_deliveries : Map[Int, DeliveryRecord]
+  mut delivery_slots : Int
+  delivery_changed : @cond_var.Cond
   mut next_id : Int
   mut alive : Bool
   mut last_write : Int64
@@ -89,6 +98,10 @@ fn session_error_reason(error : Error) -> String {
     OutcomeUnknown(reason) => reason
     ConnectionRefused(reason) => reason
     ReconnectExhausted(reason) => reason
+    DeliveryRejected(reason) => reason
+    BrokerSessionLost(reason) => reason
+    DeliveryAttemptsExhausted(reason) => reason
+    DeliveryAttemptTimeout(reason) => reason
     OperationTimeout(reason) => reason
     WriteTimeout(reason) => reason
     PingResponseTimeout(reason) => reason
@@ -126,6 +139,12 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
       request.finish(Err(error))
     }
     self.pending.clear()
+    for _, delivery in self.deliveries {
+      delivery.detach(self.generation, reason)
+    }
+    self.deliveries.clear()
+    self.delivery_slots = 0
+    self.delivery_changed.broadcast()
   }
 }
 
@@ -137,13 +156,13 @@ fn Session::allocate(
   if !self.alive {
     raise NotConnected
   }
-  if self.pending.length() >= max_inflight {
+  if self.pending.length() + self.delivery_slots >= max_inflight {
     raise Backpressure("inflight limit reached")
   }
   for _ in 0..<65535 {
     let id = self.next_id
     self.next_id = if id == 65535 { 1 } else { id + 1 }
-    if !self.pending.contains(id) {
+    if !self.pending.contains(id) && !self.reserved_deliveries.contains(id) {
       return id
     }
   }
@@ -167,6 +186,7 @@ fn Session::control(
   let accepted = self.control_queue.try_put({
     bytes: encoded,
     pending: None,
+    delivery: None,
     is_ping,
   }) catch {
     _ => false
@@ -209,6 +229,27 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
     }
     None => None
   }
+}
+
+///|
+/// Queue an already-admitted replay without widening the configured queue.
+async fn Session::enqueue_delivery(
+  self : Session,
+  delivery : DeliveryRecord,
+  bytes : Bytes,
+) -> Unit {
+  self.business_depth += 1
+  errdefer {
+    if self.business_depth > 0 {
+      self.business_depth -= 1
+    }
+  }
+  self.outgoing.put({
+    bytes,
+    pending: None,
+    delivery: Some(delivery),
+    is_ping: false,
+  })
 }
 
 ///|
@@ -257,6 +298,16 @@ async fn Session::write_one(
       }
     None => ()
   }
+  match item.delivery {
+    Some(delivery) => {
+      if delivery.phase.terminal() ||
+        delivery.generation != Some(self.generation) {
+        return true
+      }
+      delivery.mark_started()
+    }
+    None => ()
+  }
   if item.pending is Some(request) {
     mark_started(request)
   }
@@ -283,6 +334,12 @@ async fn Session::write_one(
     }
   }
   self.last_write = @async.now()
+  if item.delivery is Some(delivery) {
+    delivery.mark_written(
+      self.last_write + operation_timeout_ms.to_int64(),
+    )
+    self.delivery_changed.broadcast()
+  }
   if item.is_ping {
     // PINGRESP timer starts here: after the PINGREQ write completed.
     self.ping_sent = Some(self.last_write)
@@ -304,6 +361,34 @@ async fn Session::write_one(
     None => ()
   }
   true
+}
+
+///|
+priv suberror DeliveryAttemptTimeout {
+  DeliveryAttemptTimeout(String)
+}
+
+///|
+/// One watchdog per physical generation. A waiter never owns this timer.
+async fn Session::delivery_watchdog(self : Session, config : Config) -> Unit {
+  let tick = (config.operation_timeout_ms / 4).clamp(min=10, max=250)
+  while self.alive {
+    @async.sleep(tick)
+    let now = @async.now()
+    for _, delivery in self.deliveries {
+      if delivery.ack_deadline is Some(deadline) && now >= deadline {
+        let detail =
+          "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not receive PUBACK in operation_timeout_ms=\{config.operation_timeout_ms} on attempt \{delivery.attempts}"
+        let error : Error = if delivery.attempts >= config.reconnect_attempts + 1 {
+          DeliveryAttemptsExhausted(detail)
+        } else {
+          DeliveryAttemptTimeout(detail)
+        }
+        self.abort_with(error)
+        raise error
+      }
+    }
+  }
 }
 
 ///|

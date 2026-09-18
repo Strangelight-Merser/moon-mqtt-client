@@ -57,6 +57,10 @@ fn cause_test_session(writer : &@io.Writer) -> Session {
     business_depth: 0,
     control_depth: 0,
     pending: {},
+    deliveries: {},
+    reserved_deliveries: {},
+    delivery_slots: 0,
+    delivery_changed: @cond_var.Cond(),
     next_id: 1,
     alive: true,
     last_write: 0L,
@@ -86,7 +90,12 @@ async test "write timeout remains typed and outcome stays unknown" {
   session.pending[request.id] = request
   assert_false(
     session.write_one(
-      { bytes: b"publish", pending: Some(request), is_ping: false, },
+      {
+        bytes: b"publish",
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      },
       100,
       1,
     ),
@@ -111,7 +120,12 @@ async test "writer I/O failure retains its raw stored cause" {
   session.pending[request.id] = request
   assert_false(
     session.write_one(
-      { bytes: b"publish", pending: Some(request), is_ping: false, },
+      {
+        bytes: b"publish",
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      },
       100,
       50,
     ),
@@ -133,6 +147,7 @@ fn cause_test_client(config : Config) -> Client {
     events: @aqueue.Queue(kind=@aqueue.Blocking(config.receive_capacity)),
     changed: @cond_var.Cond(),
     subscriptions: {},
+    deliveries: DeliveryBook::new(),
     session: None,
     ready: true,
     stopped: false,
@@ -173,6 +188,10 @@ async test "malformed frame gives started QoS1 the actual unknown reason" {
     business_depth: 0,
     control_depth: 0,
     pending: {},
+    deliveries: {},
+    reserved_deliveries: client.deliveries.reserved,
+    delivery_slots: 0,
+    delivery_changed: @cond_var.Cond(),
     next_id: 2,
     alive: true,
     last_write: 0L,

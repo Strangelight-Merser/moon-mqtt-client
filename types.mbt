@@ -77,6 +77,9 @@ pub(all) suberror ClientError {
   OutcomeUnknown(String)
   ConnectionRefused(String)
   ReconnectExhausted(String)
+  DeliveryRejected(String)
+  BrokerSessionLost(String)
+  DeliveryAttemptsExhausted(String)
   /// The request's total `operation_timeout_ms` expired. Raised through the
   /// request as `NotSent` (never written) or `OutcomeUnknown` (write started).
   OperationTimeout(String)
@@ -121,6 +124,7 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  session_policy : SessionPolicy
   transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
@@ -153,6 +157,7 @@ pub fn Config::new(
   host : String,
   client_id : String,
   port? : Int = 1883,
+  session_policy? : SessionPolicy = CleanSession,
   transport? : NetworkTransport = Tcp,
   tls? : TlsMode = Plain,
   client_identity? : ClientIdentity? = None,
@@ -177,6 +182,7 @@ pub fn Config::new(
     host,
     port,
     client_id,
+    session_policy,
     transport,
     tls,
     client_identity,
