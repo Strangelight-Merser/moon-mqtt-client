@@ -136,3 +136,29 @@ The next full check passed native71, broker25 and faults10 but failed normal-sce
 - Full original check passed native71/broker25/fault10/scenarios/external TCP+mTLS consumers, then raw WS peers6/6 and real EMQX native WS/WSS4/4. Final logs `integrated-{check,protocol,interop}.log` under `_build/exec-ws`. Earlier failed logs are not overwritten.
 - Cond-controlled post-Close writer regression fails when guards are removed and passes restored; protocol error immediate fail-close tested without a write attempt. Provenance fingerprints verified against pinned0.21.3. Local source package inspected for new code/license inclusion and cache exclusion.
 - Base aligned to accepted R2 `eeb93be40ba19020df1a9effcdd8771c5f132104` while preserving tested source bytes. Branch `codex/roadmap-native` stays separate from v0.3 PR. Hosted CI required before W1 done.
+
+### Q1 approved contract and implementation handoff
+
+Root decision: `docs/architecture/RECOVERABLE-QOS1.md`. Preserve default clean-session publish behavior; opt-in resume mode uses a separate explicit delivery handle API, stable DeliveryId, original packet IDs/DUP, bounded state, waiter-independent lifetime and fail-closed broker-session-loss policy. No disk persistence/offline queue yet. Required raw-peer and real-broker evidence listed in the decision. Code implementation follows W1 hosted acceptance; root owns public contract, integration and final review.
+
+### H1 intake findings (planned, no implementation yet)
+
+Root read the original hardware plan as task material. Its direct-chain diagram and universal onboard-LED suggestion are superseded by current user constraints: all participants communicate through the broker, board/GPIO unknown. Current thermostat controller `ControllerState::next_command_id/next_query_id` restarts at cmd-1/qry-1, so process restart identity collision is a concrete software gap for H1. Preserve existing demo tests while adding stable process/session entropy and explicit expiry/reconciliation coverage in the eventual scoped implementation. Hardware, HA instance access and released-registry-package checks remain separate pending prerequisites.
+
+### Q1 isolated implementation card (in_progress)
+
+Owner `/root/jitter`, retained explicit Sol/high request, actual runtime model metadata unavailable. Workspace `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-qos1`, branch `codex/recoverable-qos1`, base6479bc22c782fb12ad52b80f2a4e2ea2a9f6fb98. Root owns integration and global exec files. WHY: separate delivery lifetime from connection/caller wait, while W1-specific closure and hosted failures are handled independently. W1 must pass before integration acceptance; this changes scheduling, not its gate.
+
+Contract `docs/architecture/RECOVERABLE-QOS1.md` approved with review corrections: client-owned bounded delivery book; generation attachments; packet reservations; Resume subscription matrix; per-attempt ACK timeout and at most reconnect_attempts+1 attachments; terminal session-loss/exhaustion; waiter-independent completion. Preserve ordinary clean-session publish and existing tests. Source ownership: Q1 core client/runtime/session/types/wire, new delivery component/tests/CLI mode and relevant API docs in isolated worktree only. No WS/TLS changes, no dependency upgrades, no global exec edits, no recursive agents, no remote publication.
+
+Acceptance: native deterministic lifetime tests, raw lost-PUBACK peer with same ID/DUP/order/session loss, waiter cancellation then ACK, capacities1, terminal cleanup, actual Mosquitto persistent session recovery, all existing checks; root independent semantic review before integration. Return actual commands/logs, API and commit/diff fingerprint, unresolved behavior. Escalate contract conflicts rather than weakening checks.
+
+### W1 final closure and broker-readiness corrections
+
+Root owns client/session/WebSocket changes; independent Sol `/root/causes` reviewed. Intermediate504a8af CI35361606190 passed, but Linux native delayed-forwarding evidence still showed raw MQTT data discarded by EMQX when immediate WS Close raced packet processing. Final behavior waits boundedly for peer close after MQTT completion, stops further MQTT writes, always closes locally, and preserves caller cancellation. Native peer-close/silent-peer/writer-spy regressions plus Linux before/after WS/WSS4 provide evidence. Original Session fixture literals restored after removing intermediate private hook.
+
+Sol owns `tests/emqx_interop.py` startup readiness only: keep ACL/rejection assertions and timeouts, probe granted authorization and actual routed payload on hidden port, expose TCP gate only afterward and close it over restart. Dedicated listener-enable experiment was ineffective and discarded. Shutdown/join hardened after root resource review. Original4 and reconnect10 passed; root final verification/CI pending. Logs under `_build/exec-ws/` include failed diagnostic and successful corrected paths.
+
+### D1 binding seam evidence (done, feature still planned)
+
+Luna requested binding preserved; pinned sqlite3@0.2.2 passes fixed MoonBit check/build/native run, explicit transaction commit/reopen/exact BLOB/rollback, first with resolved async0.21.2 then explicit projectasync0.21.3. No project dependency change. `_build/exec-outbox/sqlite-probe/{compat-*,api-evidence.txt}`. Root reviewed async job cancellation/ownership source; planned concrete contract in `docs/architecture/DURABLE-OUTBOX.md`. Neither probe nor this plan claims durable delivery implemented.
