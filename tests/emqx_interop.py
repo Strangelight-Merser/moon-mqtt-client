@@ -103,11 +103,22 @@ class Emqx:
             '{deny, all, subscribe, ["denied/#"]}.\n'
             '{deny, all}.\n'
         )
+        # The bind-mounted acl.conf is read by the EMQX container user (uid
+        # 1000); `mkdtemp` creates 0700, which blocks it from traversing the
+        # directory. The file itself is a public authorization rule set.
+        self.temp.chmod(0o755)
+
+    def _remove_container(self) -> None:
+        subprocess.run(["docker", "rm", "--force", self.name], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def start(self) -> None:
         image = IMAGE_BY_ARCH.get(platform.machine())
         if not image:
             raise unittest.SkipTest(f"no pinned EMQX image for {platform.machine()}")
+        # A previous failed start can leave this name behind; drop it first so a
+        # retry is not blocked by a stale container.
+        self._remove_container()
         subprocess.run([
             "docker", "run", "--detach", "--name", self.name,
             "--publish", f"127.0.0.1:{self.port}:1883",
@@ -153,15 +164,17 @@ class Emqx:
         if os.environ.get("MQTT_KEEP_TEST_ARTIFACTS") == "1":
             print(f"EMQX evidence retained in container {self.name} and {self.temp}")
             return
-        subprocess.run(["docker", "rm", "--force", self.name], check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._remove_container()
+        __import__("shutil").rmtree(self.temp, ignore_errors=True)
 
 
 class EmqxInteropTest(unittest.TestCase):
     def setUp(self) -> None:
         self.broker = Emqx()
-        self.broker.start()
+        # Register cleanup before start: a failed start must still remove the
+        # container, otherwise the next run hits a container-name conflict.
         self.addCleanup(self.broker.close)
+        self.broker.start()
 
     def test_qos1_bidirectional_and_acl_suback(self) -> None:
         received = []
@@ -213,13 +226,28 @@ class EmqxMtls:
         self.name = f"moon-mqtt-emqx-mtls-{os.getpid()}"
         self.temp = Path(tempfile.mkdtemp(prefix="moon-mqtt-emqx-mtls-"))
         h.write_pki(self.temp, mtls=True)
-        for name in ("server.key", "client-ca.key", "client.key", "paho-client.key"):
+        # EMQX reads the mounted PKI as its in-container user (uid/gid 1000), so
+        # the certificate directory must be traversable and the server key
+        # readable by that user. `mkdtemp` creates 0700, which blocks the
+        # container user entirely. Only the throwaway server key is exposed;
+        # the client private keys stay host-only (0600). The whole PKI is
+        # generated per test and removed by close().
+        self.temp.chmod(0o755)
+        (self.temp / "server.key").chmod(0o644)
+        for name in ("client-ca.key", "client.key", "paho-client.key"):
             (self.temp / name).chmod(0o600)
+
+    def _remove_container(self) -> None:
+        subprocess.run(["docker", "rm", "--force", self.name], check=False,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def start(self) -> None:
         image = IMAGE_BY_ARCH.get(platform.machine())
         if not image:
             raise unittest.SkipTest(f"no pinned EMQX image for {platform.machine()}")
+        # Drop a container left behind by an earlier failed start so the name
+        # does not conflict.
+        self._remove_container()
         subprocess.run([
             "docker", "run", "--detach", "--name", self.name,
             "--publish", f"127.0.0.1:{self.port}:8883",
@@ -249,8 +277,7 @@ class EmqxMtls:
         raise TimeoutError(f"EMQX mTLS listener {self.name} did not accept MQTT CONNECT")
 
     def close(self) -> None:
-        subprocess.run(["docker", "rm", "--force", self.name], check=False,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self._remove_container()
         if os.environ.get("MQTT_KEEP_TEST_ARTIFACTS") != "1":
             __import__("shutil").rmtree(self.temp, ignore_errors=True)
 
@@ -258,8 +285,8 @@ class EmqxMtls:
 class EmqxMtlsInteropTest(unittest.TestCase):
     def setUp(self) -> None:
         self.broker = EmqxMtls()
-        self.broker.start()
         self.addCleanup(self.broker.close)
+        self.broker.start()
 
     def test_mtls_qos1_bidirectional(self) -> None:
         received = []

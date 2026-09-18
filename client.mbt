@@ -24,17 +24,50 @@ struct Client {
 
 ///|
 /// Bounded exponential backoff with jitter. The jitter comes from a per-client
-/// xorshift stream, so two clients that lose the same broker do not retry in
-/// lockstep (the previous formula depended only on the generation and attempt,
-/// which made every client world-identical).
+/// xorshift stream whose default seed normally comes from operating-system
+/// entropy, avoiding one shared retry schedule for every client.
 priv struct ReconnectBackoff {
   mut seed : Int
+}
+
+///|
+let reconnect_seed_counter : @ref.Ref[UInt64] = @ref.Ref(0UL)
+
+///|
+fn ReconnectBackoff::new_default_with(
+  entropy : Bytes?,
+  now : UInt64,
+  sequence : UInt64,
+) -> ReconnectBackoff {
+  let seed = match entropy {
+    Some(bytes) => {
+      if bytes.length() != 4 {
+        abort("reconnect entropy must be four bytes")
+      }
+      bytes[0].to_int() |
+      (bytes[1].to_int() << 8) |
+      (bytes[2].to_int() << 16) |
+      (bytes[3].to_int() << 24)
+    }
+    None => (now ^ (sequence * 0x9E3779B97F4A7C15UL)).to_int()
+  }
+  ReconnectBackoff::new(seed)
 }
 
 ///|
 fn ReconnectBackoff::new(seed : Int) -> ReconnectBackoff {
   // Zero is a fixed point of xorshift, so replace it with a constant.
   { seed: if seed == 0 { 0x9E3779B9 } else { seed } }
+}
+
+///|
+fn ReconnectBackoff::new_default() -> ReconnectBackoff {
+  reconnect_seed_counter.val += 1UL
+  ReconnectBackoff::new_default_with(
+    @env.rand(4),
+    @env.now(),
+    reconnect_seed_counter.val,
+  )
 }
 
 ///|
@@ -68,7 +101,7 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     disconnects: 0,
     unknown_outcomes: 0,
     last_disconnect: None,
-    backoff: ReconnectBackoff::new(0),
+    backoff: ReconnectBackoff::new_default(),
     stop_reason: None,
   }
   @async.with_task_group(group => {

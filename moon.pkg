@@ -6,6 +6,8 @@ import {
   "Strangelight-Merser/async-tls" @tls,
   "moonbitlang/async/io",
   "moonbitlang/core/debug",
+  "moonbitlang/core/env",
+  "moonbitlang/core/ref",
   "zbhzs1/moonbit-mqtt" @codec,
 }
 

@@ -120,6 +120,33 @@ priv suberror SessionLost {
 }
 
 ///|
+/// Record heartbeat/control failures before task-group cancellation reaches the
+/// reader and outer cleanup. Cancellation itself remains ordinary teardown.
+async fn Session::heartbeat_task(self : Session, config : Config) -> Unit {
+  self.heartbeat(config) catch {
+    PingResponseTimeout(reason) => {
+      // A caller can end the session while heartbeat sleeps. Its stale timer
+      // must not replace the cause that already settled this generation.
+      if !self.alive {
+        return
+      }
+      let error = PingResponseTimeout(reason)
+      self.abort_with(error)
+      raise error
+    }
+    ProtocolError(reason) => {
+      let error = ProtocolError(reason)
+      self.abort_with(error)
+      raise error
+    }
+    // The session may be aborted while heartbeat sleeps. In that race,
+    // `control` observes the already-completed teardown and returns quietly.
+    NotConnected => return
+    error => raise error
+  }
+}
+
+///|
 async fn Client::supervise(self : Client) -> Unit {
   let mut attempts = 0
   let mut delay = self.config.reconnect_delay_ms
@@ -146,7 +173,7 @@ async fn Client::supervise(self : Client) -> Unit {
             self.config.write_timeout_ms,
           )
         })
-        group.spawn_bg(() => session.heartbeat(self.config))
+        group.spawn_bg(() => session.heartbeat_task(self.config))
         // The read loop drives the connection lifetime. `spawn` instead of
         // `spawn_bg` matters: a failing child cannot wake a group body that is
         // parked on a condition variable, but `task.wait()` propagates the
@@ -207,10 +234,28 @@ async fn Client::supervise(self : Client) -> Unit {
       session.abort("session ended")
     } catch {
       error => {
-        let reason = match self.session {
-          Some(session) => session.failure_reason.unwrap_or(error.to_string())
-          None => error.to_string()
+        // The task-group body can observe a pending request's OutcomeUnknown
+        // after another loop already recorded the error that caused it. Preserve
+        // every such concrete first cause. `SessionLost` is synthetic: it only
+        // wins when both the recorded and observed errors are SessionLost, so a
+        // generic cleanup cannot mask a direct heartbeat or task-group error.
+        let cause : Error = match self.session {
+          Some(session) =>
+            match session.failure_reason {
+              Some(recorded) =>
+                match recorded {
+                  SessionLost(_) =>
+                    match error {
+                      SessionLost(_) => recorded
+                      _ => error
+                    }
+                  _ => recorded
+                }
+              None => error
+            }
+          None => error
         }
+        let reason = session_error_reason(cause)
         self.ready = false
         self.session = None
         self.changed.broadcast()
@@ -219,16 +264,16 @@ async fn Client::supervise(self : Client) -> Unit {
         }
         // Backpressure, a saturated control queue and connect-phase protocol
         // errors are terminal: retrying would hide a defect from the caller.
-        match error {
+        match cause {
           Backpressure(_) | ProtocolError(_) | NotConnected => {
-            self.record_stop(error)
-            raise error
+            self.record_stop(cause)
+            raise cause
           }
           _ => ()
         }
         if !ever_ready {
-          self.record_stop(error)
-          raise error
+          self.record_stop(cause)
+          raise cause
         }
         self.emit(Disconnected(self.generation, reason))
         attempts += 1
@@ -255,7 +300,19 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
     // Each bounded operation reads exactly one byte. The frame being assembled
     // lives outside those cancellable slices, so an idle gap between the fixed
     // header, Remaining Length, and body cannot discard bytes already consumed.
-    let incoming = read_session_packet(session, self.config.max_packet_size)
+    let incoming = try {
+      read_session_packet(session, self.config.max_packet_size)
+    } catch {
+      error => {
+        // Preserve the actual framing/I/O cause for pending requests. Never
+        // turn task-group cancellation into a new session failure.
+        if @async.is_cancellation_error(error) {
+          raise error
+        }
+        session.abort_with(error)
+        return
+      }
+    }
     if incoming is None {
       return
     }
@@ -267,7 +324,7 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
           @codec.QoS0 => AtMostOnce
           @codec.QoS1 => AtLeastOnce
           @codec.QoS2 => {
-            session.abort("QoS 2 is not supported")
+            session.abort_with(ProtocolError("QoS 2 is not supported"))
             return
           }
         }
@@ -283,7 +340,11 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
           self.emit(MessageReceived(message))
         } else {
           if session.early_messages.length() >= self.config.receive_capacity {
-            session.abort("messages arrived faster than subscription restoration")
+            session.abort_with(
+              Backpressure(
+                "messages arrived faster than subscription restoration",
+              ),
+            )
             return
           }
           session.early_messages.push(message)
@@ -294,7 +355,7 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
             self.config.max_packet_size,
           ) catch {
             error => {
-              session.abort("cannot acknowledge incoming message: " + @debug.to_string(error))
+              session.abort_with(error)
               return
             }
           }
@@ -307,7 +368,7 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
             request.finish(Ok(Done))
           }
           _ => {
-            session.abort("unexpected PUBACK identifier")
+            session.abort_with(ProtocolError("unexpected PUBACK identifier"))
             return
           }
         }
@@ -324,14 +385,18 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                     @codec.SuccessQoS1 => Granted(AtLeastOnce)
                     @codec.Failure => Rejected
                     @codec.SuccessQoS2 => {
-                      session.abort("SUBACK granted unsupported QoS")
+                      session.abort_with(
+                        ProtocolError("SUBACK granted unsupported QoS"),
+                      )
                       return
                     }
                   }
                   match result {
                     Granted(qos) =>
                       if qos == AtLeastOnce && topics[i].qos == AtMostOnce {
-                        session.abort("SUBACK exceeds requested QoS")
+                        session.abort_with(
+                          ProtocolError("SUBACK exceeds requested QoS"),
+                        )
                         return
                       }
                     Rejected => ()
@@ -348,12 +413,14 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                 request.finish(Ok(Subscriptions(results)))
               }
               _ => {
-                session.abort("SUBACK does not match pending request")
+                session.abort_with(
+                  ProtocolError("SUBACK does not match pending request"),
+                )
                 return
               }
             }
           None => {
-            session.abort("unexpected SUBACK identifier")
+            session.abort_with(ProtocolError("unexpected SUBACK identifier"))
             return
           }
         }
@@ -369,18 +436,22 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                 request.finish(Ok(Done))
               }
               _ => {
-                session.abort("UNSUBACK does not match pending request")
+                session.abort_with(
+                  ProtocolError("UNSUBACK does not match pending request"),
+                )
                 return
               }
             }
           None => {
-            session.abort("unexpected UNSUBACK identifier")
+            session.abort_with(
+              ProtocolError("unexpected UNSUBACK identifier"),
+            )
             return
           }
         }
       @codec.PingrespPacket => session.ping_sent = None
       _ => {
-        session.abort("unexpected server packet")
+        session.abort_with(ProtocolError("unexpected server packet"))
         return
       }
       }
@@ -391,10 +462,10 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
     match handled {
       Ok(_) => ()
       Err(error) => {
-        // A transport or decode failure ends this generation. Recording it on
-        // the session (instead of raising) keeps the supervisor's coroutine
-        // clean and lets the supervisor classify and reconnect.
-        session.abort(error.to_string())
+        // Recording the raw error keeps protocol failures terminal while I/O
+        // failures remain retryable. Returning avoids propagating cancellation
+        // from transport teardown into the supervisor coroutine.
+        session.abort_with(error)
         return
       }
     }
