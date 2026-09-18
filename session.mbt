@@ -60,7 +60,9 @@ priv struct Session {
   /// PINGRESP clock never starts while the ping is still queued.
   mut ping_sent : Int64?
   early_messages : Array[Message]
-  mut failure_reason : String?
+  /// First error that ended this generation. Keeping the typed value lets the
+  /// supervisor distinguish terminal protocol failures from retryable I/O loss.
+  mut failure_reason : Error?
 }
 
 ///|
@@ -73,11 +75,38 @@ fn Pending::finish(self : Pending, result : Result[Reply, ClientError]) -> Unit 
 
 ///|
 fn Session::abort(self : Session, reason : String) -> Unit {
+  self.abort_with(SessionLost(reason))
+}
+
+///|
+fn session_error_reason(error : Error) -> String {
+  match error {
+    SessionLost(reason) => reason
+    InvalidConfig(reason) => reason
+    ProtocolError(reason) => reason
+    Backpressure(reason) => reason
+    NotSent(reason) => reason
+    OutcomeUnknown(reason) => reason
+    ConnectionRefused(reason) => reason
+    ReconnectExhausted(reason) => reason
+    OperationTimeout(reason) => reason
+    WriteTimeout(reason) => reason
+    PingResponseTimeout(reason) => reason
+    TlsFailure(reason) => reason
+    _ => error.to_string()
+  }
+}
+
+///|
+/// End the generation with its original typed cause. Pending operations still
+/// receive the stable string form required by `NotSent`/`OutcomeUnknown`.
+fn Session::abort_with(self : Session, error : Error) -> Unit {
   if self.alive {
     self.alive = false
     if self.failure_reason is None {
-      self.failure_reason = Some(reason)
+      self.failure_reason = Some(error)
     }
+    let reason = session_error_reason(error)
     (self.close_transport)()
     // `clear=true` discards every queued item, so the occupancy mirrors must be
     // zeroed here too. Otherwise `Client::stats` would keep reporting a
@@ -239,9 +268,15 @@ async fn Session::write_one(
         raise error
       }
       if self.alive {
-        self.abort(
-          "socket write exceeded write_timeout_ms=\{write_timeout_ms}",
-        )
+        match error {
+          @async.TimeoutError =>
+            self.abort_with(
+              WriteTimeout(
+                "socket write exceeded write_timeout_ms=\{write_timeout_ms}",
+              ),
+            )
+          _ => self.abort_with(error)
+        }
         return false
       }
       return false

@@ -11,7 +11,7 @@
 
 ## 安装与构建
 
-已发布版本：**0.2.0**。在 MoonBit 项目中添加依赖：
+当前版本：**0.3.0**，支持双向 TLS（mTLS）。在 MoonBit 项目中添加依赖：
 
 ```sh
 moon add Strangelight-Merser/moon-mqtt-client
@@ -66,6 +66,7 @@ python3 -m venv .venv
 ## 支持范围
 
 - 原生 TCP，以及验证服务器身份的 TLS；支持系统根证书或自定义 PEM CA。
+- 可选双向 TLS（mTLS）：PEM 证书链 + 未加密私钥；`Plain` 不能搭配客户端身份。
 - MQTT 3.1.1、QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
 - 订阅与取消订阅确认，包括逐主题的订阅拒绝结果。
 - 有上限的发送队列、事件队列、报文大小和并发请求数。
@@ -74,7 +75,7 @@ python3 -m venv .venv
 - 任务和 socket 的生命周期由回调作用域管理。回调正常返回或调用 `disconnect()` 时
   发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
 
-暂不支持 QoS 2、MQTT 5、持久会话、离线队列、跨连接重传、客户端证书认证、
+暂不支持 QoS 2、MQTT 5、持久会话、离线队列、跨连接重传、加密私钥、
 WebSocket，以及浏览器和微控制器目标。
 
 ## API 示例
@@ -104,8 +105,11 @@ async fn main {
 断线期间调用发布、订阅或取消订阅会返回 `NotConnected`，请求不会进入离线队列。
 
 公共 CA 证书可配合端口 8883 和 `TlsMode::SystemRoots` 使用；私有 CA 使用
-`TlsMode::CustomCA("path/to/ca.pem")`。连接配置中的主机名也是 TLS 验证使用的主机名，
-没有关闭证书验证的选项。
+`TlsMode::CustomCA("path/to/ca.pem")`。设备接入需要客户端证书时传入
+`client_identity`（证书链 PEM 与未加密私钥 PEM）。连接配置中的主机名也是
+TLS 验证使用的主机名，没有关闭证书验证的选项。身份文件在每次新建连接时重新读取。
+文件格式、缺失或证书/私钥不匹配会得到 `InvalidConfig`；握手或服务器证书验证失败会得到
+`TlsFailure`。CLI 使用成对的 `--cert` / `--key`，并且必须同时指定 `--tls`。
 
 ## 投递结果与失败语义
 

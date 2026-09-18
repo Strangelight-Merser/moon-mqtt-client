@@ -3,9 +3,12 @@ import {
   "moonbitlang/async/aqueue",
   "moonbitlang/async/cond_var",
   "moonbitlang/async/socket",
-  "moonbitlang/async/tls",
+  "Strangelight-Merser/async-tls" @tls,
   "moonbitlang/async/io",
+  "moonbitlang/async/os_error",
   "moonbitlang/core/debug",
+  "moonbitlang/core/env",
+  "moonbitlang/core/ref",
   "zbhzs1/moonbit-mqtt" @codec,
 }
 

@@ -24,9 +24,22 @@ fn required_int(name : String) -> Int raise {
 ///|
 fn config() -> @mqtt.Config raise {
   @mqtt.Config::new(
-    "127.0.0.1",
+    @env.get_env_var("MQTT_SOAK_HOST").unwrap_or("127.0.0.1"),
     "moon-soak-driver",
     port=required_int("MQTT_SOAK_PORT"),
+    tls=match @env.get_env_var("MQTT_SOAK_CA") {
+      Some(path) => @mqtt.CustomCA(path)
+      None => @mqtt.Plain
+    },
+    client_identity=match (
+      @env.get_env_var("MQTT_SOAK_CERT"),
+      @env.get_env_var("MQTT_SOAK_KEY"),
+    ) {
+      (Some(certificate_chain_file), Some(private_key_file)) =>
+        Some({ certificate_chain_file, private_key_file })
+      (None, None) => None
+      _ => fail("MQTT_SOAK_CERT and MQTT_SOAK_KEY must be provided together")
+    },
     operation_timeout_ms=5000,
     write_timeout_ms=5000,
     ping_response_timeout_ms=5000,

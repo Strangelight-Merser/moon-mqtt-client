@@ -5,7 +5,9 @@ Licensed under the Apache License, Version 2.0.
 Uses, as separate dependencies:
 - zbhzs1/moonbit-mqtt 0.1.0 (MQTT packet codec), Apache-2.0
   https://github.com/zbhzs1/moonbit-mqtt
-- moonbitlang/async 0.21.3 (async I/O, networking, TLS), Apache-2.0
+- moonbitlang/async 0.21.3 (async I/O, networking), Apache-2.0
   https://github.com/moonbitlang/async
+- Strangelight-Merser/async-tls 0.1.0 (native TLS with mTLS identity), Apache-2.0
+  derived from moonbitlang/async 0.21.3 TLS; linked locally via moon.work until published
 
-No dependency source is vendored in the source distribution.
+No dependency source is vendored in the moon-mqtt-client source distribution.

@@ -1,0 +1,34 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/core/encoding/base64",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/cmp",
+  "moonbitlang/async/io",
+  "moonbitlang/async/semaphore",
+  "moonbitlang/async/os_error",
+  "moonbitlang/async/fs",
+}
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/socket",
+  "moonbitlang/async/tls" @official_tls,
+  "moonbitlang/core/encoding/utf8",
+} for "test"
+
+options(
+  "native-stub": ["openssl.c", "c_buffer.c"],
+  targets: {
+    "c_buffer.mbt": ["native"],
+    "crypto_util.mbt": ["native"],
+    "identity.mbt": ["native"],
+    "io_buffer.mbt": ["native"],
+    "openssl.mbt": ["native"],
+    "openssl_loader.mbt": ["native"],
+    "tls.mbt": ["native"],
+    "transport.mbt": ["native"],
+    "identity_test.mbt": ["native"],
+  },
+)
+
+supported_targets = "+native"

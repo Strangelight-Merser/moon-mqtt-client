@@ -11,7 +11,7 @@ not claimed as complete.
 | Requirement | State | Evidence / remaining action |
 |---|---|---|
 | MoonBit main implementation | Done | Client runtime, contracts and demo processes are MoonBit; Python only provides independent tests. |
-| Version and API | Done | `moon.mod` at 0.2.0; `pkg.generated.mbti` regenerated with `moon info`; contract in `docs/API-CONTRACT.md`. |
+| Version and API | v0.3.0 local RC | `moon.mod` at 0.3.0 on `codex/v0.3-mtls`; `pkg.generated.mbti` includes `ClientIdentity` and `TlsFailure`. Not published. v0.2.0 remains the last registry release. |
 | Reusable scope | Done | Native MQTT 3.1.1 QoS 0/1 client; no application-specific topic coupling in the library. |
 | Primary scenario | Done | `examples/mqtt_demo` + `demo.py`: 4 scenarios, simulated device, Paho observer, one command. |
 | Three complete scenarios | Done | `docs/SCENARIOS.md`: state-sync thermostat, Frigate alert contract, ROS bridge contract. |
@@ -24,8 +24,8 @@ not claimed as complete.
 | Mooncakes release and install test | Done | `Strangelight-Merser/moon-mqtt-client@0.2.0` published 2026-09-15T08:35:55Z; `moon publish` returned `200 OK` after re-checking the extracted package. `tests/consumer_smoke.py --registry` resolved `@0.2.0` in a clean temporary module and completed a QoS 1 round trip. Package sha256 `ee5af2a2…b76b`. |
 | Push tag/branch | Done | `codex/mqtt-client` and `v0.2.0` were pushed on 2026-09-15. The tag remains on the published tree `85bc0a5`. |
 | GitHub Release and asset checksums | Done | [v0.2.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.2.0) was published on 2026-09-15 with the Mooncakes ZIP, tagged source archive and `SHA256SUMS`. All three attachments were downloaded without authentication; both archive hashes and bytes match the verified local files. |
-| EMQX interoperability | Done | Pinned official `emqx/emqx:5.8.8` image (digests in `tests/emqx_interop.py`): QoS 1 both directions, subscription denial and restart recovery passed. |
-| Soak test | Done | 30 minutes, 1 KiB QoS 1, concurrency 16, 100 disconnect/recovery cycles. All gates met: 10,828,581 acknowledged, 10,405,797 observer messages with 0 corrupt, `pending/business/control/event_queue/active_workers` all 0, 100/100 recoveries, exit 0. Recovery p95 0.351 s. Resource sampling was unavailable in this sandbox and is recorded as such. Evidence: `tests/integration/artifacts/soak-v0.2.0/summary.json`. |
+| EMQX interoperability | Done for v0.2.0 and v0.3.0 RC | Pinned official `emqx/emqx:5.8.8`: v0.2.0 QoS 1 / ACL / restart; v0.3.0 also mTLS QoS 1 both ways and missing-cert rejection. |
+| Soak test | Done for v0.2.0; v0.3.0 mTLS soak passed locally | v0.2.0: 30 min / 100 cycles (see prior record). v0.3.0 mTLS: 10 min, 30 restarts, concurrency 4, gate passed, resource samples kept. Evidence: `tests/integration/artifacts/soak-mtls-v0.3/summary.json`. |
 
 ## Competition submission
 

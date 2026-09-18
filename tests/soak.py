@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -178,13 +179,32 @@ def percentile(histogram: dict[int, int], fraction: float) -> int | None:
     raise AssertionError("histogram accounting error")
 
 
+def write_mtls_files(directory: Path) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "mqtt_integration", ROOT / "tests/integration/run.py",
+    )
+    helper = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(helper)
+    helper.write_pki(directory, mtls=True)
+
+
 def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
              downtime: float, artifacts: Path, broker_log: str = "quiet",
-             broker_log_limit_mb: int = 64) -> dict:
+             broker_log_limit_mb: int = 64, mtls: bool = False) -> dict:
     artifacts.mkdir(parents=True, exist_ok=True)
     port = free_port()
     broker = Broker(port, artifacts, log_level=broker_log,
                     log_limit_bytes=broker_log_limit_mb * 1024 * 1024)
+    if mtls:
+        write_mtls_files(artifacts)
+        broker.config.write_text(
+            f"listener {port} 127.0.0.1\nallow_anonymous true\n"
+            f"certfile {artifacts / 'server.pem'}\n"
+            f"keyfile {artifacts / 'server.key'}\n"
+            f"cafile {artifacts / 'client-ca.pem'}\n"
+            "require_certificate true\n"
+            + broker._log_directives()
+        )
     broker.start()
     observed = {"messages": 0, "invalid": 0, "connections": 0}
     oracle_ready = threading.Event()
@@ -207,7 +227,15 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
 
     oracle.on_connect = on_connect
     oracle.on_message = on_message
-    oracle.connect("127.0.0.1", port)
+    if mtls:
+        oracle.tls_set(
+            ca_certs=str(artifacts / "ca.pem"),
+            certfile=str(artifacts / "paho-client.pem"),
+            keyfile=str(artifacts / "paho-client.key"),
+        )
+        oracle.connect("localhost", port)
+    else:
+        oracle.connect("127.0.0.1", port)
     oracle.loop_start()
     if not oracle_ready.wait(4):
         raise TimeoutError("Paho observer did not subscribe")
@@ -222,6 +250,13 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         "MQTT_SOAK_CONCURRENCY": str(concurrency),
         "MQTT_SOAK_PAYLOAD_BYTES": str(payload_bytes),
     }
+    if mtls:
+        env.update({
+            "MQTT_SOAK_HOST": "localhost",
+            "MQTT_SOAK_CA": str(artifacts / "ca.pem"),
+            "MQTT_SOAK_CERT": str(artifacts / "client.pem"),
+            "MQTT_SOAK_KEY": str(artifacts / "client.key"),
+        })
     driver = subprocess.Popen(
         [str(MOON), "run", "examples/soak_driver", "--target", "native"],
         cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=stderr_file,
@@ -445,11 +480,16 @@ def main() -> None:
         "--broker-log-limit-mb", type=int, default=64,
         help="truncate broker.log to this many megabytes (0 disables the cap)",
     )
+    parser.add_argument(
+        "--mtls", action="store_true",
+        help="require client certificates and use a private test PKI",
+    )
     args = parser.parse_args()
     artifacts = args.artifacts or Path(tempfile.mkdtemp(prefix="moon-mqtt-soak-"))
     result = run_soak(
         args.duration, args.cycles, args.payload_bytes, args.concurrency,
         args.downtime, artifacts, args.broker_log, args.broker_log_limit_mb,
+        mtls=args.mtls,
     )
     print(json.dumps(result, indent=2), flush=True)
     print(f"soak evidence: {artifacts}", flush=True)

@@ -61,6 +61,13 @@ best-effort and does not claim cross-field atomicity.
 | `PingResponseTimeout` | A written PINGREQ was never answered | Yes |
 | `ConnectionRefused` / `ProtocolError` | Connect-phase rejection or protocol violation | n/a |
 | `ReconnectExhausted` | Retries after a previously working connection were exhausted | n/a |
+| `InvalidConfig` | Identity files missing, encrypted, malformed, or mismatched; or `Plain` plus a client identity | n/a |
+| `TlsFailure` | TLS handshake or server-certificate verification failed after a valid config | n/a |
+| `Closed` | The client was shut down normally (`disconnect` or `with_client` scope end) | n/a |
+
+A failed first connection raises the classified error to `wait_connected` and to
+`with_client`. `Closed` is reserved for a normal stop; it does not replace
+`InvalidConfig` or `TlsFailure`.
 
 `OutcomeUnknown` is the only result that requires application-level recovery.
 Recovery must not assume success or failure: query the peer or resend an
@@ -99,13 +106,26 @@ identifier space. Consequences:
   confirmed subscriptions before `Connected(generation)` is emitted.
 - Backoff is bounded exponential (`reconnect_delay_ms` growing by 1.5x up to
   `max_reconnect_delay_ms`) plus jitter drawn from a **per-client** xorshift
-  stream. `Client::set_reconnect_seed` pins the stream for deterministic tests.
-  Two clients that lose the same broker no longer retry in lockstep, which the
-  previous generation-indexed formula caused.
+  stream. On native targets, each default stream is seeded from four bytes of
+  operating-system entropy. If that entropy source is unavailable, construction
+  stays available by mixing the current millisecond timestamp with a
+  process-local counter. This fallback varies sequential constructions in one
+  process, but it is weaker than operating-system entropy; 32-bit seed collisions
+  remain possible, especially across processes started in the same millisecond.
+  `Client::set_reconnect_seed` pins the stream for deterministic tests. Clients
+  normally avoid the lockstep retries caused by the previous fixed default seed.
 - Terminal conditions end the client instead of retrying forever:
   `Backpressure` (event queue overflow), `ProtocolError` (including a saturated
   control queue and unexpected server packets), `NotConnected` during the connect
   phase, and `ReconnectExhausted` after the attempts budget.
+- A protocol failure after CONNACK remains terminal, including an invalid ACK
+  during subscription restoration. The session retains the original typed cause
+  until the supervisor classifies it; cleanup and a pending operation's
+  `OutcomeUnknown` do not replace that cause. Pending operations still settle as
+  `NotSent` or `OutcomeUnknown` according to whether their write started.
+- Ordinary transport loss, request cancellation and operation timeout keep their
+  existing reconnect behavior. A socket write timeout is recorded as
+  `WriteTimeout`; other writer errors retain their original I/O cause.
 - State is never inherited across generations: `Client.stats()` resets queue and
   inflight counts when a session ends, and `last_disconnect` records why.
 

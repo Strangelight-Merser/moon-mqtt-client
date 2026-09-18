@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -37,7 +38,11 @@ import time
 import paho.mqtt.client as paho
 
 ROOT = Path(__file__).resolve().parents[2]
-BUILD = ROOT / "_build/native/debug/build/examples/mqtt_demo"
+_paths_spec = importlib.util.spec_from_file_location(
+    "mqtt_build_paths", ROOT / "tests/build_paths.py"
+)
+paths = importlib.util.module_from_spec(_paths_spec)
+_paths_spec.loader.exec_module(paths)
 LOCAL_BROKER = ROOT / ".tools/mosquitto"
 BROKER = Path(
     os.environ.get("MOSQUITTO")
@@ -45,6 +50,11 @@ BROKER = Path(
     or (str(LOCAL_BROKER) if LOCAL_BROKER.is_file() else "mosquitto")
 )
 PREFIX = "moon/demo/thermostat"
+
+
+def demo_exe(package: str) -> Path:
+    """Compiled example executable, resolved for workspace and flat builds."""
+    return paths.demo_binary(ROOT, package)
 
 
 def free_port() -> int:
@@ -339,13 +349,13 @@ def run_scenario(name: str) -> None:
     broker.start()
     device = Proc(
         "device",
-        BUILD / "test_device/test_device.exe",
+        demo_exe("test_device"),
         broker.port,
         MQTT_DEMO_DEVICE_ID="demo-device",
     )
     controller = Proc(
         "controller",
-        BUILD / "controller/controller.exe",
+        demo_exe("controller"),
         broker.port,
         MQTT_DEMO_CONTROLLER_ID="demo-controller",
     )
@@ -421,7 +431,7 @@ def run_scenario(name: str) -> None:
             controller.stop()
             controller = Proc(
                 "controller",
-                BUILD / "controller/controller.exe",
+                demo_exe("controller"),
                 proxy.port,
                 MQTT_DEMO_CONTROLLER_ID="demo-controller-lost",
             )
@@ -532,7 +542,7 @@ def run_scenario(name: str) -> None:
             controller.stop()
             controller = Proc(
                 "controller",
-                BUILD / "controller/controller.exe",
+                demo_exe("controller"),
                 broker.port,
                 MQTT_DEMO_CONTROLLER_ID="demo-controller-restart",
             )
@@ -610,8 +620,8 @@ def main() -> int:
     )
     args = parser.parse_args()
     for exe in (
-        BUILD / "test_device/test_device.exe",
-        BUILD / "controller/controller.exe",
+        demo_exe("test_device"),
+        demo_exe("controller"),
     ):
         if not exe.is_file():
             print(f"missing {exe}; run ./scripts/moon.sh build --target native")

@@ -1,0 +1,40 @@
+# v0.3.0 — 双向 TLS
+
+## 新增与修复
+
+- 新增 `ClientIdentity`：PEM 客户端证书链与未加密私钥，支持双向 TLS。
+- CLI 新增成对的 `--cert` / `--key` 参数，要求启用 TLS。
+- 身份文件加载、格式及密钥不匹配归为 `InvalidConfig`；TLS 握手拒绝、TLS 1.3 延迟告警和首次 MQTT 握手期间的 TLS 关闭归为 `TlsFailure`。
+- 修复空闲读取取消污染 TLS 状态、已关闭 TLS 再次读写访问已释放句柄的问题；新增两个独立回归测试。
+- 修复 TLS 单元测试的 TCP 资源泄漏，以及 workspace 构建后演示程序的路径定位。
+- 默认重连抖动使用系统随机源初始化；取熵不可用时使用时间与进程内计数器，保留可注入的确定性测试种子。
+- 保留会话终止的类型化原因：错误 ACK、订阅恢复中的协议错误和控制队列饱和按契约终止客户端，不再被普通断线或清理错误掩盖；普通网络断开、请求取消和超时仍可重连。
+- 补齐 TLS 建连后首次 MQTT 读写的 socket 错误分类：底层 reset 等 `OSError` 保留为 `TlsFailure`，格式错误的 MQTT 包仍为 `ProtocolError`，取消和超时分类不变。
+- 写入异常区分实际 `WriteTimeout` 与其他 I/O 错误，保留 `NotSent` / `OutcomeUnknown` 的请求完成语义。
+- TLS 传输采用 `Strangelight-Merser/async-tls@0.1.0`，基于官方 async 0.21.3，C 符号独立，可与官方 TLS 同时链接。
+
+范围仍为 native MQTT 3.1.1、QoS 0/1、clean session；不支持 MQTT 5、持久会话、加密私钥或硬件密钥。
+
+## 验证
+
+2026-09-18 本地追加复验：集成默认重连种子与类型化断线原因修复后，macOS ARM 通过 54 项 native 测试、25 项 Mosquitto 集成测试、10 项协议故障注入、场景冒烟和独立 TCP/mTLS 本地 workspace 消费者，启用 FD 泄漏检查。固定 EMQX 5.8.8 的 4 项互操作测试通过，测试容器已清理。随后提交 `d61eb67482f7bc947cf0b1eab3b2931e8ec993ec` 的 [PR CI](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35354946801) 和 [push CI](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35354944159) 均通过：Ubuntu/macOS 客户端检查通过，Ubuntu EMQX 4/4 通过。注册表干净安装尚未执行。当前完整状态与证据见 [执行状态](exec/STATE.md)。
+
+同日收尾提交的 push CI 曾出现一次 TLS 1.3 缺失身份错误分类失败（同提交 PR CI 通过），失败记录保留。随后补齐已证实的底层 socket 错误分类缺口，新增确定性回归，完整本地检查通过（native 58 项）；该补丁的远端验收以执行状态为准。
+
+此前本地复验：macOS ARM 与 Ubuntu 24.04 x86_64 仿真均通过 39 项单元测试、25 项集成测试、10 项协议故障注入、独立 TCP/mTLS 消费者及四个演示场景，启用 FD 泄漏检查。
+
+macOS 心跳和 EMQX 重连各有一次失败，重跑后通过；未确定根因，保留全部失败日志。EMQX 重跑为 4/4。此前 600 秒 mTLS soak 的结果及本轮验证边界见验收报告。
+
+现有错误分类边界：TLS 握手阶段的连接超时分类、不可读 CustomCA 文件分类尚未完全统一；本次未宣称整个错误契约已经收敛。
+
+详见 [新修复验收报告](V0.3-FIX-VERIFICATION-2026-09-16.md)。
+
+## 发布前追加验证
+
+托管 Linux CI 暴露了空闲读取取消及关闭后读取的生命周期问题，已修复；TLS 单元测试增至 14 项，workspace 共 41 项。原验收测试和时限保持原样。
+
+Linux CI 的 broker 仅监听 IPv4，因此回环解析优先选择 127.0.0.1。上游 async 0.21.3 的 Happy Eyeballs 对重复 IPv6 地址逐项等待；此前托管环境的 30 次连接实际全部成功，但总计约 24 秒，超过验收的 20 秒。此环境配置只影响 CI，不改变客户端的 IPv4/IPv6 策略。
+
+## 发布记录
+
+远端 CI 已通过，PR #2 仍开放，尚未合并或发布。合并、Mooncakes 两个模块发布、注册表干净安装及发布附件校验仍待授权与执行。v0.2.0 标签保持原位。

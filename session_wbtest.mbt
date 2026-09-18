@@ -225,6 +225,26 @@ test "packet id allocation enforces inflight limit" {
 }
 
 ///|
+test "client identity is rejected on a plain connection" {
+  let config = Config::new(
+    "localhost",
+    "mtls-plain",
+    client_identity=Some({
+      certificate_chain_file: "client.pem",
+      private_key_file: "client.key",
+    }),
+  )
+  try {
+    config.validate()
+    abort("plain TLS mode must reject a client identity")
+  } catch {
+    InvalidConfig(reason) =>
+      assert_true(reason.contains("client identity requires TLS"))
+    _ => abort("expected InvalidConfig")
+  }
+}
+
+///|
 test "configuration rejects invalid Will topic names" {
   for topic in ["", "devices/+", "devices/#"] {
     let config = Config::new(

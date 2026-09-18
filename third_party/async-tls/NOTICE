@@ -1,0 +1,16 @@
+async-tls
+Copyright 2026 Strangelight-Merser
+Licensed under the Apache License, Version 2.0.
+
+This product includes software derived from moonbitlang/async 0.21.3
+Copyright 2025 International Digital Economy Academy
+Licensed under the Apache License, Version 2.0
+https://github.com/moonbitlang/async
+
+The TLS native client implementation in src/ was copied from
+moonbitlang/async 0.21.3 src/tls and then patched. See THIRD_PARTY.md
+for upstream file hashes and the local patch list.
+
+This module continues to depend on the official moonbitlang/async
+runtime, sockets, and I/O packages at runtime. It does not vendor those
+packages.

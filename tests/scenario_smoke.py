@@ -23,7 +23,12 @@ spec = importlib.util.spec_from_file_location(
 h = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(h)
 
-BUILD = ROOT / "_build/native/debug/build/examples/mqtt_demo"
+paths_spec = importlib.util.spec_from_file_location(
+    "mqtt_build_paths", ROOT / "tests/build_paths.py"
+)
+paths = importlib.util.module_from_spec(paths_spec)
+paths_spec.loader.exec_module(paths)
+
 PREFIX = "moon/demo/thermostat"
 
 
@@ -61,12 +66,12 @@ def main() -> int:
         assert subscribed.wait(3)
 
         device = subprocess.Popen(
-            [str(BUILD / "test_device/test_device.exe")], cwd=ROOT, env=env,
+            [str(paths.demo_binary(ROOT, "test_device"))], cwd=ROOT, env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         until(lambda: device.poll() is None, 2, "device process started")
         controller = subprocess.Popen(
-            [str(BUILD / "controller/controller.exe")], cwd=ROOT, env=env,
+            [str(paths.demo_binary(ROOT, "controller"))], cwd=ROOT, env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         # The controller queries the device on connect before any command.
