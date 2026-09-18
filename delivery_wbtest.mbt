@@ -14,8 +14,26 @@ fn delivery_test_record(
     attempts: 0,
     generation: None,
     ever_started: false,
+    start_deadline: None,
     ack_deadline: None,
+    terminal_cause: None,
   }
+}
+
+///|
+struct DeliverySpyWriter {
+  mut writes : Int
+}
+
+///|
+impl @io.Writer for DeliverySpyWriter with fn write_once(
+  self,
+  _buf,
+  offset~,
+  len~,
+) {
+  self.writes += 1
+  offset + len
 }
 
 ///|
@@ -110,16 +128,30 @@ async test "cancelled handle wait does not cancel its delivery" {
 ///|
 test "terminal state distinguishes never-started and possibly-sent delivery" {
   let unsent = delivery_test_record("unsent", 1)
-  unsent.finish_terminal("scope ended")
+  unsent.finish_terminal(
+    "broker session lost",
+    BrokerSessionLost("broker session lost"),
+  )
   assert_true(
-    unsent.status().phase is TerminalNotSent("scope ended"),
+    unsent.status().phase is TerminalNotSent("broker session lost"),
+  )
+  assert_true(
+    unsent.status().terminal_cause is Some(BrokerSessionLost(_)),
   )
   let started = delivery_test_record("started", 2)
-  started.attach(1)
+  started.attach(1, @async.now() + 1000L)
   started.mark_started()
-  started.finish_terminal("scope ended")
+  started.finish_terminal(
+    "delivery attempts exhausted",
+    DeliveryAttemptsExhausted("delivery attempts exhausted"),
+  )
   assert_true(
-    started.status().phase is TerminalOutcomeUnknown("scope ended"),
+    started.status().phase is TerminalOutcomeUnknown(
+      "delivery attempts exhausted",
+    ),
+  )
+  assert_true(
+    started.status().terminal_cause is Some(DeliveryAttemptsExhausted(_)),
   )
 }
 
@@ -157,6 +189,47 @@ async test "resume admission is bounded and ordinary QoS1 is explicit" {
 }
 
 ///|
+test "resume rejects unrepresentable attachment budget" {
+  let config = Config::new(
+    "127.0.0.1",
+    "q1-budget-overflow",
+    session_policy=ResumeSession,
+    reconnect_attempts=0x7FFFFFFF,
+  )
+  try {
+    config.validate()
+    abort("unrepresentable ResumeSession budget was accepted")
+  } catch {
+    InvalidConfig(reason) => assert_true(reason.contains("too large"))
+    _ => abort("expected InvalidConfig")
+  }
+}
+
+///|
+test "oversized delivery payload is rejected before ownership" {
+  let config = Config::new(
+    "127.0.0.1",
+    "q1-payload-bound",
+    session_policy=ResumeSession,
+    max_packet_size=8,
+  )
+  let client = delivery_test_client(config)
+  try {
+    ignore(client.submit_delivery("too-large", "q1/test", b"12345"))
+    abort("oversized delivery payload was accepted")
+  } catch {
+    ProtocolError(reason) => assert_true(reason.contains("payload exceeds"))
+    _ => abort("expected ProtocolError")
+  }
+  let session = client.session.unwrap()
+  assert_true(client.deliveries.active.is_empty())
+  assert_true(client.deliveries.reserved.is_empty())
+  assert_eq(session.delivery_slots, 0)
+  assert_eq(session.business_depth, 0)
+  session.abort("test complete")
+}
+
+///|
 async test "ACK watchdog exhausts the configured generation budget" {
   let config = Config::new(
     "127.0.0.1",
@@ -167,7 +240,7 @@ async test "ACK watchdog exhausts the configured generation budget" {
   )
   let session = delivery_test_session()
   let delivery = delivery_test_record("expires", 4)
-  delivery.attach(session.generation)
+  delivery.attach(session.generation, @async.now() + 1000L)
   delivery.mark_started()
   delivery.mark_written(@async.now() - 1L)
   session.deliveries[delivery.packet_id] = delivery
@@ -184,6 +257,77 @@ async test "ACK watchdog exhausts the configured generation budget" {
 }
 
 ///|
+async test "queued delivery deadline survives control priority and stays not sent" {
+  let config = Config::new(
+    "127.0.0.1",
+    "q1-queued-deadline",
+    session_policy=ResumeSession,
+    operation_timeout_ms=1,
+    reconnect_attempts=1,
+  )
+  let session = delivery_test_session()
+  let delivery = delivery_test_record("never-started", 5)
+  delivery.attach(session.generation, @async.now() - 1L)
+  session.deliveries[delivery.packet_id] = delivery
+  session.delivery_slots = 1
+  assert_true(
+    session.outgoing.try_put({
+      bytes: delivery.packet(1024),
+      pending: None,
+      delivery: Some(delivery),
+      is_ping: false,
+    }),
+  )
+  session.business_depth = 1
+  session.control(@codec.PingreqPacket, 1024, is_ping=true)
+  let preferred = session.next_outgoing().unwrap()
+  assert_true(preferred.is_ping)
+  assert_eq(session.business_depth, 1)
+  session.control(@codec.PingreqPacket, 1024, is_ping=true)
+  try {
+    @async.with_timeout(100, () => session.delivery_watchdog(config))
+    abort("queued delivery watchdog did not fail")
+  } catch {
+    DeliveryAttemptTimeout(reason) =>
+      assert_true(reason.contains("did not begin its socket write"))
+    @async.TimeoutError => abort("queued delivery had no start deadline")
+    _ => abort("expected DeliveryAttemptTimeout")
+  }
+  assert_false(delivery.ever_started)
+  assert_true(delivery.phase is AwaitingReconnect(_))
+  delivery.finish_terminal("attempt stopped", ReconnectExhausted("attempt stopped"))
+  assert_true(delivery.phase is TerminalNotSent("attempt stopped"))
+  assert_eq(session.business_depth, 0)
+}
+
+///|
+async test "dequeued expired delivery never reaches socket writer" {
+  let writer : DeliverySpyWriter = { writes: 0, }
+  let session = cause_test_session(writer)
+  let delivery = delivery_test_record("expired-before-start", 6)
+  delivery.attach(session.generation, @async.now() - 1L)
+  session.deliveries[delivery.packet_id] = delivery
+  session.delivery_slots = 1
+  assert_false(
+    session.write_one(
+      {
+        bytes: delivery.packet(1024),
+        pending: None,
+        delivery: Some(delivery),
+        is_ping: false,
+      },
+      1,
+      50,
+      1,
+    ),
+  )
+  assert_eq(writer.writes, 0)
+  assert_false(delivery.ever_started)
+  assert_true(session.failure_reason is Some(DeliveryAttemptTimeout(_)))
+  assert_true(delivery.phase is AwaitingReconnect(_))
+}
+
+///|
 async test "replay preserves admission order through a one-slot queue" {
   let config = Config::new(
     "127.0.0.1",
@@ -195,10 +339,10 @@ async test "replay preserves admission order through a one-slot queue" {
   let client = delivery_test_client(config)
   let first = delivery_test_record("first", 9)
   let second = delivery_test_record("second", 10)
-  first.attach(1)
+  first.attach(1, @async.now() + 1000L)
   first.mark_started()
   first.detach(1, "connection lost")
-  second.attach(1)
+  second.attach(1, @async.now() + 1000L)
   second.detach(1, "connection lost")
   for record in [first, second] {
     client.deliveries.active[record.delivery_id] = record
@@ -211,13 +355,15 @@ async test "replay preserves admission order through a one-slot queue" {
   )
   @async.with_task_group(group => {
     let replay = group.spawn(() => client.replay_deliveries(session))
-    while session.business_depth < 2 {
+    while second.generation != Some(2) {
       @async.sleep(1)
     }
+    assert_eq(session.business_depth, 1)
     let first_item = session.next_outgoing().unwrap()
     assert_eq(first_item.delivery.unwrap().delivery_id, "first")
     assert_true((first_item.bytes[0].to_int() & 0x08) == 0x08)
     replay.wait()
+    assert_eq(session.business_depth, 1)
     let second_item = session.next_outgoing().unwrap()
     assert_eq(second_item.delivery.unwrap().delivery_id, "second")
     assert_true((second_item.bytes[0].to_int() & 0x08) == 0)
@@ -244,7 +390,7 @@ async test "unexpected PUBACK settles recoverable handle and releases ownership"
   client.deliveries.active[delivery.delivery_id] = delivery
   client.deliveries.reserved[delivery.packet_id] = delivery
   client.deliveries.order.push(delivery)
-  delivery.attach(1)
+  delivery.attach(1, @async.now() + 1000L)
   delivery.mark_started()
   let attached : Map[Int, DeliveryRecord] = Map([])
   attached[delivery.packet_id] = delivery

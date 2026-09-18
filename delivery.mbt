@@ -24,10 +24,13 @@ pub(all) enum DeliveryPhase {
 pub(all) struct DeliveryStatus {
   delivery_id : String
   phase : DeliveryPhase
+  /// Typed initiating cause for terminal failure; absent while active and
+  /// after successful acknowledgement.
+  terminal_cause : ClientError?
   packet_id : Int
   attempts : Int
   generation : Int?
-} derive(Eq, @debug.Debug)
+} derive(@debug.Debug)
 
 ///|
 priv struct DeliveryRecord {
@@ -41,7 +44,9 @@ priv struct DeliveryRecord {
   mut attempts : Int
   mut generation : Int?
   mut ever_started : Bool
+  mut start_deadline : Int64?
   mut ack_deadline : Int64?
+  mut terminal_cause : ClientError?
 }
 
 ///|
@@ -78,6 +83,7 @@ fn DeliveryRecord::status(self : DeliveryRecord) -> DeliveryStatus {
   {
     delivery_id: self.delivery_id,
     phase: self.phase,
+    terminal_cause: self.terminal_cause,
     packet_id: self.packet_id,
     attempts: self.attempts,
     generation: self.generation,
@@ -123,10 +129,16 @@ fn DeliveryRecord::packet(self : DeliveryRecord, limit : Int) -> Bytes raise Cli
 }
 
 ///|
-fn DeliveryRecord::attach(self : DeliveryRecord, generation : Int) -> Unit {
+fn DeliveryRecord::attach(
+  self : DeliveryRecord,
+  generation : Int,
+  start_deadline : Int64,
+) -> Unit {
   self.attempts += 1
   self.generation = Some(generation)
+  self.start_deadline = Some(start_deadline)
   self.ack_deadline = None
+  self.terminal_cause = None
   self.phase = Queued
   self.changed.broadcast()
 }
@@ -135,13 +147,16 @@ fn DeliveryRecord::attach(self : DeliveryRecord, generation : Int) -> Unit {
 fn DeliveryRecord::rollback_initial_attach(self : DeliveryRecord) -> Unit {
   self.attempts = 0
   self.generation = None
+  self.start_deadline = None
   self.ack_deadline = None
+  self.terminal_cause = None
   self.phase = Queued
 }
 
 ///|
 fn DeliveryRecord::mark_started(self : DeliveryRecord) -> Unit {
   self.ever_started = true
+  self.start_deadline = None
   self.phase = AwaitingAck
   self.changed.broadcast()
 }
@@ -165,6 +180,7 @@ fn DeliveryRecord::detach(
 ) -> Unit {
   if !self.phase.terminal() && self.generation == Some(generation) {
     self.generation = None
+    self.start_deadline = None
     self.ack_deadline = None
     self.phase = AwaitingReconnect(reason)
     self.changed.broadcast()
@@ -174,6 +190,7 @@ fn DeliveryRecord::detach(
 ///|
 fn DeliveryRecord::finish_acknowledged(self : DeliveryRecord) -> Unit {
   if !self.phase.terminal() {
+    self.start_deadline = None
     self.ack_deadline = None
     self.phase = Acknowledged
     self.topic = None
@@ -183,8 +200,13 @@ fn DeliveryRecord::finish_acknowledged(self : DeliveryRecord) -> Unit {
 }
 
 ///|
-fn DeliveryRecord::finish_terminal(self : DeliveryRecord, reason : String) -> Unit {
+fn DeliveryRecord::finish_terminal(
+  self : DeliveryRecord,
+  reason : String,
+  cause : ClientError,
+) -> Unit {
   if !self.phase.terminal() {
+    self.start_deadline = None
     self.ack_deadline = None
     self.generation = None
     self.phase = if self.ever_started {
@@ -192,6 +214,7 @@ fn DeliveryRecord::finish_terminal(self : DeliveryRecord, reason : String) -> Un
     } else {
       TerminalNotSent(reason)
     }
+    self.terminal_cause = Some(cause)
     self.topic = None
     self.payload = None
     self.changed.broadcast()
@@ -223,10 +246,14 @@ fn DeliveryBook::acknowledge(
 }
 
 ///|
-fn DeliveryBook::finish_all(self : DeliveryBook, reason : String) -> Unit {
+fn DeliveryBook::finish_all(
+  self : DeliveryBook,
+  reason : String,
+  cause : ClientError,
+) -> Unit {
   let records = self.order.copy()
   for record in records {
-    record.finish_terminal(reason)
+    record.finish_terminal(reason, cause)
   }
   self.active.clear()
   self.reserved.clear()

@@ -137,7 +137,11 @@ let config = @mqtt.Config::new(
   let status = delivery.wait()
   // Acknowledged means a matching broker PUBACK was received. Reconcile
   // TerminalOutcomeUnknown with application state before issuing a new command.
-  ignore(status)
+  match status.terminal_cause {
+    Some(@mqtt.BrokerSessionLost(_)) => () // establish a new logical session
+    Some(@mqtt.DeliveryAttemptsExhausted(_)) => () // reconcile before retry
+    _ => ()
+  }
 })
 ```
 

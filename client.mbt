@@ -444,6 +444,9 @@ pub fn Client::submit_delivery(
     raise DeliveryRejected("duplicate active delivery_id: \{delivery_id}")
   }
   let session = self.active()
+  if payload.length() > self.config.max_packet_size - 4 {
+    raise ProtocolError("outgoing payload exceeds packet limit")
+  }
   if self.deliveries.active.length() + session.pending.length() >=
     self.config.max_inflight {
     raise Backpressure("inflight limit reached")
@@ -460,7 +463,9 @@ pub fn Client::submit_delivery(
     attempts: 0,
     generation: None,
     ever_started: false,
+    start_deadline: None,
     ack_deadline: None,
+    terminal_cause: None,
   }
   // Encode before mutating ownership so an invalid topic/packet bound leaves no
   // active ID, packet reservation, or queue entry behind.
@@ -468,7 +473,10 @@ pub fn Client::submit_delivery(
   self.deliveries.active[delivery_id] = record
   self.deliveries.reserved[packet_id] = record
   self.deliveries.order.push(record)
-  record.attach(session.generation)
+  record.attach(
+    session.generation,
+    @async.now() + self.config.operation_timeout_ms.to_int64(),
+  )
   session.deliveries[packet_id] = record
   session.delivery_slots += 1
   let accepted = session.outgoing.try_put({
@@ -500,7 +508,13 @@ fn Client::finish_deliveries(self : Client, error : Error) -> Unit {
       self.unknown_outcomes += 1
     }
   }
-  self.deliveries.finish_all(session_error_reason(error))
+  let cause = match error {
+    // Scope shutdown is a normal close, while all supervisor terminal causes
+    // already have a public ClientError variant.
+    SessionLost(_) => Closed
+    _ => client_error_of(error)
+  }
+  self.deliveries.finish_all(session_error_reason(error), cause)
 }
 
 ///|

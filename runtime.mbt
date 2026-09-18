@@ -198,13 +198,16 @@ async fn Client::replay_deliveries(
     if delivery.phase.terminal() {
       continue
     }
-    if delivery.attempts >= self.config.reconnect_attempts + 1 {
+    if delivery.attempts > self.config.reconnect_attempts {
       raise DeliveryAttemptsExhausted(
         "delivery \{delivery.delivery_id} exhausted \{delivery.attempts} generation attempts",
       )
     }
     let bytes = delivery.packet(self.config.max_packet_size)
-    delivery.attach(session.generation)
+    delivery.attach(
+      session.generation,
+      @async.now() + self.config.operation_timeout_ms.to_int64(),
+    )
     session.deliveries[delivery.packet_id] = delivery
     session.delivery_slots += 1
     session.enqueue_delivery(delivery, bytes)
@@ -271,6 +274,7 @@ async fn Client::supervise(self : Client) -> Unit {
           session.write_loop(
             self.config.operation_timeout_ms,
             self.config.write_timeout_ms,
+            self.config.reconnect_attempts,
           )
         })
         group.spawn_bg(() => session.heartbeat_task(self.config))

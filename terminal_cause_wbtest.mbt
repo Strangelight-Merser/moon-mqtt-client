@@ -98,6 +98,7 @@ async test "write timeout remains typed and outcome stays unknown" {
       },
       100,
       1,
+      10,
     ),
   )
   match session.failure_reason {
@@ -128,6 +129,7 @@ async test "writer I/O failure retains its raw stored cause" {
       },
       100,
       50,
+      10,
     ),
   )
   match session.failure_reason {

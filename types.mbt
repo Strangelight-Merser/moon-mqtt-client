@@ -292,6 +292,15 @@ fn Config::validate(self : Config) -> Unit raise ClientError {
       "invalid timeout, capacity, packet limit or reconnect policy",
     )
   }
+  // ResumeSession counts the initial attachment in addition to reconnects.
+  // Reject only the one Int value whose attachment budget is unrepresentable;
+  // CleanSession retains its existing accepted range.
+  if self.session_policy is ResumeSession &&
+    self.reconnect_attempts == 0x7FFFFFFF {
+    raise InvalidConfig(
+      "ResumeSession reconnect_attempts is too large to represent its attachment budget",
+    )
+  }
   if self.will is Some(will) &&
     (
       will.topic.is_empty() ||

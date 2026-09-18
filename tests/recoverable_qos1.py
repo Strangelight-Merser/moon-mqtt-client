@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -13,6 +14,13 @@ import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
+LOCAL_BROKER = ROOT / ".tools/mosquitto"
+BROKER = Path(os.environ.get(
+    "MOSQUITTO",
+    shutil.which("mosquitto") or (
+        str(LOCAL_BROKER) if LOCAL_BROKER.is_file() else "mosquitto"
+    ),
+))
 
 
 def exact(conn: socket.socket, size: int) -> bytes:
@@ -80,6 +88,7 @@ def wait_listening(port: int, process: subprocess.Popen, timeout: float = 5) -> 
         if process.poll() is not None:
             stdout, stderr = process.communicate()
             raise AssertionError(
+                f"mosquitto command: {process.args!r}\n"
                 f"mosquitto exited early ({process.returncode})\n{stdout}\n{stderr}"
             )
         try:
@@ -87,7 +96,10 @@ def wait_listening(port: int, process: subprocess.Popen, timeout: float = 5) -> 
                 return
         except OSError:
             time.sleep(0.02)
-    raise AssertionError(f"mosquitto did not listen on port {port}")
+    raise AssertionError(
+        f"mosquitto command: {process.args!r}\n"
+        f"mosquitto did not listen on port {port}"
+    )
 
 
 def stop_process(process: subprocess.Popen) -> None:
@@ -200,6 +212,7 @@ class RecoverableQos1(unittest.TestCase):
 
         output = self.run_case(peer)
         self.assertIn("unknown reason=broker returned Session Present=false", output)
+        self.assertIn("cause=BrokerSessionLost", output)
 
     def test_resume_skips_duplicate_subscription_at_capacity_one(self):
         evidence = {}
@@ -247,12 +260,13 @@ class RecoverableQos1(unittest.TestCase):
                 encoding="utf-8",
             )
             broker = subprocess.Popen(
-                [str(ROOT / ".tools/mosquitto"), "-c", str(config), "-v"],
+                [str(BROKER), "-c", str(config), "-v"],
                 cwd=ROOT,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            print(f"mosquitto command: {broker.args!r}")
             self.addCleanup(stop_process, broker)
             wait_listening(broker_port, broker)
             evidence = {}

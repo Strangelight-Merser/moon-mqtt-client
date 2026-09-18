@@ -225,6 +225,9 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
       if self.business_depth > 0 {
         self.business_depth -= 1
       }
+      // A replay waiting for a bounded business slot can now try admission.
+      // The mirror describes actual queue occupancy, never blocked producers.
+      self.delivery_changed.broadcast()
       Some(item)
     }
     None => None
@@ -238,18 +241,27 @@ async fn Session::enqueue_delivery(
   delivery : DeliveryRecord,
   bytes : Bytes,
 ) -> Unit {
-  self.business_depth += 1
-  errdefer {
-    if self.business_depth > 0 {
-      self.business_depth -= 1
+  while self.alive &&
+    delivery.generation == Some(self.generation) &&
+    !delivery.phase.terminal() {
+    let accepted = self.outgoing.try_put({
+      bytes,
+      pending: None,
+      delivery: Some(delivery),
+      is_ping: false,
+    }) catch {
+      _ => false
     }
+    if accepted {
+      self.business_depth += 1
+      return
+    }
+    self.delivery_changed.wait()
   }
-  self.outgoing.put({
-    bytes,
-    pending: None,
-    delivery: Some(delivery),
-    is_ping: false,
-  })
+  match self.failure_reason {
+    Some(error) => raise error
+    None => raise Closed
+  }
 }
 
 ///|
@@ -274,6 +286,7 @@ async fn Session::write_one(
   item : Outgoing,
   operation_timeout_ms : Int,
   write_timeout_ms : Int,
+  reconnect_attempts : Int,
 ) -> Bool {
   let timed_out_before_write = match item.pending {
     Some(request) =>
@@ -303,6 +316,18 @@ async fn Session::write_one(
       if delivery.phase.terminal() ||
         delivery.generation != Some(self.generation) {
         return true
+      }
+      if delivery.start_deadline is Some(deadline) &&
+        @async.now() >= deadline {
+        let detail =
+          "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not begin its socket write within operation_timeout_ms=\{operation_timeout_ms} on attempt \{delivery.attempts}"
+        let error : Error = if delivery.attempts > reconnect_attempts {
+          DeliveryAttemptsExhausted(detail)
+        } else {
+          DeliveryAttemptTimeout(detail)
+        }
+        self.abort_with(error)
+        return false
       }
       delivery.mark_started()
     }
@@ -376,10 +401,22 @@ async fn Session::delivery_watchdog(self : Session, config : Config) -> Unit {
     @async.sleep(tick)
     let now = @async.now()
     for _, delivery in self.deliveries {
-      if delivery.ack_deadline is Some(deadline) && now >= deadline {
-        let detail =
-          "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not receive PUBACK in operation_timeout_ms=\{config.operation_timeout_ms} on attempt \{delivery.attempts}"
-        let error : Error = if delivery.attempts >= config.reconnect_attempts + 1 {
+      let detail : String? = match delivery.start_deadline {
+        Some(deadline) if now >= deadline =>
+          Some(
+            "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not begin its socket write within operation_timeout_ms=\{config.operation_timeout_ms} on attempt \{delivery.attempts}",
+          )
+        _ =>
+          match delivery.ack_deadline {
+            Some(deadline) if now >= deadline =>
+              Some(
+                "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not receive PUBACK in operation_timeout_ms=\{config.operation_timeout_ms} on attempt \{delivery.attempts}",
+              )
+            _ => None
+          }
+      }
+      if detail is Some(detail) {
+        let error : Error = if delivery.attempts > config.reconnect_attempts {
           DeliveryAttemptsExhausted(detail)
         } else {
           DeliveryAttemptTimeout(detail)
@@ -396,11 +433,17 @@ async fn Session::write_loop(
   self : Session,
   operation_timeout_ms : Int,
   write_timeout_ms : Int,
+  reconnect_attempts : Int,
 ) -> Unit {
   while self.alive {
     match self.next_outgoing() {
       Some(item) =>
-        if !self.write_one(item, operation_timeout_ms, write_timeout_ms) {
+        if !self.write_one(
+          item,
+          operation_timeout_ms,
+          write_timeout_ms,
+          reconnect_attempts,
+        ) {
           return
         }
       None => {

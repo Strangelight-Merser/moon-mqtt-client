@@ -90,9 +90,12 @@ durable deduplication record.
 
 The handle reports `Queued`, `AwaitingAck`, `AwaitingReconnect`,
 `Acknowledged`, `TerminalNotSent`, or `TerminalOutcomeUnknown`, plus its MQTT
-packet ID, connection-attempt count and current generation. Cancelling or
-timing out `DeliveryHandle::wait` only stops that wait. The admitted protocol
-operation continues and may be observed again through the same handle.
+packet ID, connection-attempt count and current generation. A failed terminal
+status also carries `terminal_cause: ClientError?`, so applications can match
+typed causes such as `BrokerSessionLost` and `DeliveryAttemptsExhausted`
+without parsing the phase's diagnostic string. Cancelling or timing out
+`DeliveryHandle::wait` only stops that wait. The admitted protocol operation
+continues and may be observed again through the same handle.
 
 After a transport loss, a reconnect with `Session Present=true` reattaches
 unresolved deliveries in admission order with their original packet IDs. A
@@ -109,10 +112,13 @@ Present value and only tracks admissions made in the current process scope.
 Applications must use exclusive client-ID ownership; this library does not
 recover work from a previous process.
 
-For recoverable delivery, `operation_timeout_ms` is a per-attempt PUBACK
-watchdog that starts after the complete PUBLISH write. It does not inherit time
-spent waiting in an earlier generation. Expiry reconnects while attachment
-budget remains. A delivery may attach to at most `reconnect_attempts + 1`
+For recoverable delivery, every generation attachment gets a separate
+`operation_timeout_ms` budget to begin its socket write. This bounds both an
+admitted queue entry and a replay waiting for a queue slot. Once writing begins,
+`write_timeout_ms` owns the socket-write budget. After the complete PUBLISH
+write, a fresh `operation_timeout_ms` PUBACK watchdog starts; no deadline is
+inherited from an earlier phase or generation. Expiry reconnects while the
+attachment budget remains. A delivery may attach to at most `reconnect_attempts + 1`
 generations, counting a generation lost before writing; exhaustion ends the
 logical scope with `DeliveryAttemptsExhausted`. Transport reconnect exhaustion
 remains `ReconnectExhausted`. Replay uses the bounded send queue rather than an

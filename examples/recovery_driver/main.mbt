@@ -9,6 +9,20 @@ async fn log(line : String) -> Unit {
 }
 
 ///|
+async fn log_terminal_cause(cause : @mqtt.ClientError?) -> Unit {
+  match cause {
+    Some(@mqtt.BrokerSessionLost(_)) => log("cause=BrokerSessionLost")
+    Some(@mqtt.DeliveryAttemptsExhausted(_)) =>
+      log("cause=DeliveryAttemptsExhausted")
+    Some(@mqtt.ReconnectExhausted(_)) => log("cause=ReconnectExhausted")
+    Some(@mqtt.ProtocolError(_)) => log("cause=ProtocolError")
+    Some(@mqtt.Closed) => log("cause=Closed")
+    Some(_) => log("cause=OtherClientError")
+    None => fail("terminal delivery had no typed cause")
+  }
+}
+
+///|
 async fn main {
   let mode = @env.get_env_var("Q1_MODE").unwrap_or("recover")
   let config = @mqtt.Config::new(
@@ -62,8 +76,14 @@ async fn main {
         log(
           "acknowledged id=\{terminal.delivery_id} packet=\{terminal.packet_id} attempts=\{terminal.attempts}",
         )
-      @mqtt.TerminalNotSent(reason) => log("not_sent reason=\{reason}")
-      @mqtt.TerminalOutcomeUnknown(reason) => log("unknown reason=\{reason}")
+      @mqtt.TerminalNotSent(reason) => {
+        log("not_sent reason=\{reason}")
+        log_terminal_cause(terminal.terminal_cause)
+      }
+      @mqtt.TerminalOutcomeUnknown(reason) => {
+        log("unknown reason=\{reason}")
+        log_terminal_cause(terminal.terminal_cause)
+      }
       _ => fail("wait returned a nonterminal phase")
     }
   })

@@ -104,10 +104,11 @@ pub(all) enum DeliveryPhase {
 pub(all) struct DeliveryStatus {
   delivery_id : String
   phase : DeliveryPhase
+  terminal_cause : ClientError?
   packet_id : Int
   attempts : Int
   generation : Int?
-} derive(Eq, @debug.Debug)
+} derive(@debug.Debug)
 
 pub(all) enum Event {
   Connected(Int)
