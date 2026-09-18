@@ -58,6 +58,7 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
   username : String?
@@ -77,7 +78,7 @@ pub(all) struct Config {
   reconnect_attempts : Int
   control_capacity : Int
 }
-pub fn Config::new(String, String, port? : Int, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
+pub fn Config::new(String, String, port? : Int, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
 
 pub(all) enum Event {
   Connected(Int)
@@ -93,6 +94,11 @@ pub(all) struct Message {
   dup : Bool
   generation : Int
 } derive(@debug.Debug)
+
+pub(all) enum NetworkTransport {
+  Tcp
+  WebSocket(String)
+} derive(Eq, @debug.Debug)
 
 pub(all) enum QoS {
   AtMostOnce

@@ -70,6 +70,13 @@ def main() -> int:
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
         until(lambda: device.poll() is None, 2, "device process started")
+        # The device reports its initial state only after its command/query
+        # subscriptions are acknowledged. A live process alone is not ready.
+        until(
+            lambda: any(t == f"{PREFIX}/relay/feedback" for t, _, _ in messages),
+            8,
+            "device subscriptions and initial feedback",
+        )
         controller = subprocess.Popen(
             [str(paths.demo_binary(ROOT, "controller"))], cwd=ROOT, env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

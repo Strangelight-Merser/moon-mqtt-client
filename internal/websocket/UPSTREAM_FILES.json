@@ -1,0 +1,22 @@
+[
+  {
+    "file": "client.mbt",
+    "upstream_sha256": "4b106b91a83807e674291a384765ad4d608990a2e04a7f02a9a1b4029b4da817",
+    "bytes": 4960
+  },
+  {
+    "file": "conn.mbt",
+    "upstream_sha256": "97b62501275eee033896405f09fb900f9b947350c76a248372aba6da0fa48d26",
+    "bytes": 23338
+  },
+  {
+    "file": "types.mbt",
+    "upstream_sha256": "3ed14f2d83f26459e4da96227a497687cd89d8e3f20da5912c1645dbac7c27e1",
+    "bytes": 2825
+  },
+  {
+    "file": "utils.mbt",
+    "upstream_sha256": "3374ebc284ec091dc9cbd9788a822834c0a8aca4b8874e3bc820860ba9ceb4df",
+    "bytes": 2052
+  }
+]

@@ -75,10 +75,64 @@
 - Patch `_build/exec-jitter/jitter.patch` SHA256 `513fc3ebdd90d3b32cfa994add708ecc12ce4e85de5daf57df47c3474faf5626`; includes the 4 J1 files, excludes preexisting changes and exec state. Source fingerprints: `_build/exec-jitter/source.sha256.json`.
 - Final integrated command exited 0 after restoration: native 45/45, Mosquitto 25/25, protocol faults 10/10, scenario and separate local-workspace TCP/mTLS consumers passed. Root rechecked source fingerprints and original-file hashes, and `git diff --check` passed. Machine-readable evidence: `_build/exec-jitter/acceptance.json`. Linux/EMQX/registry/hardware/soak not executed; no release claim.
 
-## R2 — Intermittent TLS 1.3 identity rejection classification (in_review; local acceptance passed)
+## W1 — Native WS/WSS capability (in_review; local acceptance passed)
+
+- WHY: next roadmap capability enables brokers exposed through native WebSocket endpoints. Base `0a604f478b7d938c9fad73b3c71c30992378f48a`, branch `codex/roadmap-native`, isolated worktree `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`.
+- Root decides API/ownership; Sol `/root/jitter` requested high performs bounded read-only inspection of pinned async websocket and custom TLS integration before implementation dispatch. No recursion.
+- Contract: MQTT subprotocol must be selected; only binary messages feed MQTT; WS message/frame boundaries do not imply MQTT packet boundaries; bounded buffering and control-frame handling, cancellation and closure preserve existing session semantics. TCP/TLS behavior remains available.
+- Acceptance: native WS/WSS including CLI, independent broker interoperability, malformed handshake/non-binary/fragmentation/close and resource-bound tests, original native/broker checks. No claims from Python-only models.
+- References: bundle ROADMAP P1/v0.4 and ACCEPTANCE_CRITERIA v0.4; OASIS MQTT 3.1.1 section 6; RFC 6455.
+
+## Q1 — Reconnect-resilient QoS 1 (planned)
+
+- Depends on reviewed W1. Separate connection generation, logical session and delivery identity; retain outgoing in-flight only when protocol permits, explicit broker-session loss, packet ID and DUP rules, waiter/protocol lifetime separation. Root approves public contract before Sol implementation.
+
+## D1 — Durable outbox beta (planned)
+
+- Depends on Q1 delivery semantics. Evaluate SQLite as single backend; stable ID, restart recovery, bounded storage, expiry, disk-full/corruption, documented duplicate window. No generic storage framework.
+
+## M1 — Application-driven MQTT 5 subset (planned)
+
+- Depends on Q1/D1 evidence. Scope reason codes, session/message expiry, negotiated receive/packet limits, user properties and request/response metadata. No QoS 2 or full-spec claim.
+
+## H1 — Host-side HA/ESP32 consumer and reconciliation (planned)
+
+- Host-side implementation, simulator and instructions can proceed without hardware. Do not hardcode GPIO or equate PUBACK with physical completion; reconcile unknown delivery by correlated state queries. Board/HA access and actual published-package/hardware acceptance remain pending external prerequisites.
+
+## R2 — Intermittent TLS 1.3 identity rejection classification (done)
 
 - Base `0a604f478b7d938c9fad73b3c71c30992378f48a`, original `moon-mqtt-client` checkout. Sol `/root/causes`, retained explicit Sol/high request, owns runtime/TLS fix and new regressions; root semantic review.
 - Evidence: final docs-head push run35355783844 macOS job105634673813 fails original missing-certificate assertion `tests/integration/run.py:676` (TlsFailure expected, ProtocolError observed). Do not retry away failure or alter original assertion/timeouts.
 - Investigate first TLS CONNECT write/CONNACK read error path, especially raw socket errors. Preserve malformed-MQTT ProtocolError and cancellation behavior. Require deterministic regression and original failing integration entry, then integrated checks and fresh hosted CI.
 
-- Implemented explicit encrypted CONNECT/CONNACK OSError/TLS/EOF classification; malformed MQTT, plain TCP and timeouts unchanged. Root reviewed actual diff; before mapping regression failed, after fix native58 and full original local check passed. Hosted raw cause remains unknown; no claim to have reproduced the intermittent CI occurrence. New hosted CI pending.
+- R2 delivered `eeb93be40ba19020df1a9effcdd8771c5f132104` with both hosted CI runs35356886328/35356879535 passing. Code integration into W1 owned by Sol.
+
+### W1 implementation decision and ownership
+
+- Stock pinned WebSocket cannot validate selected subprotocol or consume custom mTLS transport; its frame-header parse is not cancellation-resumable. Root approves a provenance-tracked native client subset of upstream frame engine over arbitrary Reader/Writer, bounded HTTP upgrade, exact mqtt subprotocol, secure entropy, server masking/text rejection. No general network framework. WS packet reads block until data/transport closure instead of reusing 100ms TCP idle cancellation.
+- Public API: `NetworkTransport::{Tcp, WebSocket(String)}`, TLS remains independent; CLI `--ws-path /mqtt` combines existing TLS/identity flags. Root reviews public interface before acceptance.
+- Sol `/root/jitter` owns implementation and NEW native tests; Luna `/root/baseline` owns NEW tests/ws_broker.py and deterministic Paho startup smoke. Root owns NEW tests/ws_interop.py and tests/ws_protocol_faults.py, contract/docs/state and integration. Existing acceptance programs remain unchanged.
+
+### W1 independent review (in_review)
+
+- Reviewer `/root/causes` retained requested Sol/high, independent of implementer `/root/jitter`. Root separately reviews config/adapter/runtime and exercises raw peer and real broker.
+- Findings sent for fixes: serialize closed-state checks with frame writes to prevent data after Close; data/control payload EOF must stay a transport error (not successful truncation or terminal protocol fault); reject reserved close codes; remove unsupported generic Text handling from this MQTT-only fork; include rewritten upstream client source in provenance manifest.
+- Root findings: encrypted WS upgrade must preserve R2 OSError/TLS/EOF classification; strict bounded HTTP host validation belongs only to WS; request target must be bounded/injection-safe; unsolicited extensions rejected.
+- Broker fixture smoke: pinned ARM64 EMQX WS and mTLS WSS CONNACK passed with independent Paho2.1.0; missing-client-cert WSS refused. These are broker/fixture checks, not native-client acceptance.
+
+### W1 external-consumer fixture correction
+
+Full original check passed native70, broker25, faults10 and scenarios, then failed external-consumer compile: its fixed source filename list omitted `websocket_transport.mbt` and `internal/websocket`. Under the user's explicit authorization to handle analogous low-risk follow-through, root updated only local source copying: include root implementation `.mbt` files (excluding tests) and internal package subtree. Consumer program assertions, broker interaction, timeouts and registry path remain byte-for-byte unchanged. The original program remains retrievable from base0a604f4; no weakening/skipping. This necessary fixture evolution replaces the earlier blanket no-test-file-edit working constraint for this copying block only. Failure retained `_build/exec-ws/accepted-check.log`; subsequent full acceptance must supersede it explicitly.
+
+- Additional root/implementer review found protocol-error notification could block on the write lock/socket and delay or mask an already-known framing cause. Root chooses synchronous fail-close on protocol violations (RFC6455 section7.1.7 notification is SHOULD with failure exceptions); normal DISCONNECT/peer-close retain Close handling. A deterministic transport seam must prove immediate close without waiting for a failing/blocked writer. This is a scoped MQTT adapter policy, not a generic RFC framework claim.
+
+### W1 existing normal-scenario startup race
+
+The next full check passed native71, broker25 and faults10 but failed normal-scenario ON feedback. Broker log `_build/exec-ws/scenario-startup-race-broker.log` proves the command was sent at1789743272 before device CONNECT/SUBSCRIBE at1789743273. The test used process liveness as readiness. Root adds a bounded barrier on device initial feedback (emitted only after command/query SUBACK), before launching the controller; all business assertions and existing8s budgets remain. No production command replay/retention changes. This fixture correction falls under the same routine follow-through authorization. Prior failing full log retained as `final-check.log`; final accepted run must use a distinct evidence name.
+
+### W1 final local acceptance
+
+- Root approved public API diff: only NetworkTransport and Config.transport additions. `moon info . --target native` matches that change.
+- Full original check passed native71/broker25/fault10/scenarios/external TCP+mTLS consumers, then raw WS peers6/6 and real EMQX native WS/WSS4/4. Final logs `integrated-{check,protocol,interop}.log` under `_build/exec-ws`. Earlier failed logs are not overwritten.
+- Cond-controlled post-Close writer regression fails when guards are removed and passes restored; protocol error immediate fail-close tested without a write attempt. Provenance fingerprints verified against pinned0.21.3. Local source package inspected for new code/license inclusion and cache exclusion.
+- Base aligned to accepted R2 `eeb93be40ba19020df1a9effcdd8771c5f132104` while preserving tested source bytes. Branch `codex/roadmap-native` stays separate from v0.3 PR. Hosted CI required before W1 done.

@@ -14,6 +14,7 @@ priv struct Options {
   port : Int
   client_id : String
   tls : Bool
+  ws_path : String?
   ca_file : String?
   cert_file : String?
   key_file : String?
@@ -31,7 +32,7 @@ priv struct Options {
 fn usage() -> String {
   "usage: mqtt-cli publish   -t <topic> -m <payload> [--qos 0|1] [--retain]\n" +
   "       mqtt-cli subscribe -t <filter> [--count N] [--timeout-ms N]\n" +
-  "options: --host H --port N --client-id ID --tls --ca FILE --cert FILE --key FILE --stats --verbose\n" +
+  "options: --host H --port N --client-id ID --ws-path PATH --tls --ca FILE --cert FILE --key FILE --stats --verbose\n" +
   "credentials: MQTT_DEMO_USERNAME / MQTT_DEMO_PASSWORD environment variables"
 }
 
@@ -43,6 +44,7 @@ fn parse_args(args : ArrayView[String]) -> Options raise {
   let mut port = 1883
   let mut client_id = "moon-mqtt-cli"
   let mut tls = false
+  let mut ws_path : String? = None
   let mut ca_file : String? = None
   let mut cert_file : String? = None
   let mut key_file : String? = None
@@ -69,6 +71,7 @@ fn parse_args(args : ArrayView[String]) -> Options raise {
       "--port" => port = @string.from_str(next())
       "--client-id" => client_id = next()
       "--tls" => tls = true
+      "--ws-path" => ws_path = Some(next())
       "--ca" => ca_file = Some(next())
       "--cert" => cert_file = Some(next())
       "--key" => key_file = Some(next())
@@ -107,6 +110,7 @@ fn parse_args(args : ArrayView[String]) -> Options raise {
     port,
     client_id,
     tls,
+    ws_path,
     ca_file,
     cert_file,
     key_file,
@@ -127,6 +131,10 @@ fn Options::mqtt_config(self : Options) -> @mqtt.Config {
     self.host,
     self.client_id,
     port=self.port,
+    transport=match self.ws_path {
+      Some(path) => @mqtt.WebSocket(path)
+      None => @mqtt.Tcp
+    },
     tls=if self.tls {
       match self.ca_file {
         Some(path) => @mqtt.CustomCA(path)

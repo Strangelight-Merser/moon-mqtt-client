@@ -58,6 +58,11 @@ jobs:
       - name: EMQX interoperability
         if: runner.os == 'Linux'
         run: MOON="$(command -v moon)" python tests/emqx_interop.py
+      - name: WebSocket framing and cancellation
+        run: MOON="$(command -v moon)" python tests/ws_protocol_faults.py
+      - name: Native WS/WSS interoperability
+        if: runner.os == 'Linux'
+        run: MOON="$(command -v moon)" python tests/ws_interop.py
 
   latest-compatibility:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'

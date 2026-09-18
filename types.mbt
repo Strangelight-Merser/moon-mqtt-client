@@ -12,6 +12,14 @@ pub(all) enum TlsMode {
 } derive(@debug.Debug)
 
 ///|
+/// Network framing used for MQTT bytes. TLS is configured independently, so
+/// `WebSocket(path)` with `TlsMode::Plain` is WS and with a TLS mode is WSS.
+pub(all) enum NetworkTransport {
+  Tcp
+  WebSocket(String)
+} derive(Eq, @debug.Debug)
+
+///|
 /// PEM client certificate presented during a TLS handshake.
 /// `certificate_chain_file` is the leaf followed by any intermediates.
 /// `private_key_file` must be an unencrypted PEM key. Files are re-read on
@@ -113,6 +121,7 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
   username : String?
@@ -144,6 +153,7 @@ pub fn Config::new(
   host : String,
   client_id : String,
   port? : Int = 1883,
+  transport? : NetworkTransport = Tcp,
   tls? : TlsMode = Plain,
   client_identity? : ClientIdentity? = None,
   username? : String? = None,
@@ -167,6 +177,7 @@ pub fn Config::new(
     host,
     port,
     client_id,
+    transport,
     tls,
     client_identity,
     username,
@@ -197,9 +208,59 @@ fn QoS::wire(self : QoS) -> @codec.QoS {
 }
 
 ///|
+fn valid_http_host(host : String) -> Bool {
+  let bytes = @utf8.encode(host)
+  if bytes.length() > 1024 {
+    return false
+  }
+  for byte in bytes {
+    let value = byte.to_int()
+    if value < 0x21 ||
+      value > 0x7e ||
+      byte is (b'/' | b'?' | b'#' | b'@') {
+      return false
+    }
+  }
+  true
+}
+
+///|
+fn valid_websocket_path(path : String) -> Bool {
+  let bytes = @utf8.encode(path)
+  if bytes.length() == 0 || bytes.length() > 8192 || bytes[0] != b'/' {
+    return false
+  }
+  for byte in bytes {
+    let value = byte.to_int()
+    // Request targets are emitted verbatim. Require an ASCII URI with all
+    // non-ASCII and unsafe characters percent-encoded by the caller. Fragments
+    // are client-side URI syntax and must never be sent to the server.
+    if value < 0x21 || value > 0x7e || byte == b'#' {
+      return false
+    }
+  }
+  true
+}
+
+///|
 fn Config::validate(self : Config) -> Unit raise ClientError {
   if self.host.is_empty() || self.client_id.is_empty() {
     raise InvalidConfig("host and stable client_id must be non-empty")
+  }
+  match self.transport {
+    Tcp => ()
+    WebSocket(path) => {
+      if !valid_http_host(self.host) {
+        raise InvalidConfig(
+          "WebSocket host must be a bounded ASCII authority without URI delimiters",
+        )
+      }
+      if !valid_websocket_path(path) {
+        raise InvalidConfig(
+          "WebSocket path must be a bounded ASCII request target beginning with /; percent-encode non-ASCII bytes",
+        )
+      }
+    }
   }
   if self.port <= 0 || self.port > 65535 {
     raise InvalidConfig("invalid port")

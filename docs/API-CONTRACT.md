@@ -136,3 +136,13 @@ queue occupancy, pending requests, cumulative reconnects, cumulative
 disconnects, cumulative unknown outcomes, and the most recent disconnect reason.
 It contains no credentials and no message bodies, and the client does not depend
 on any monitoring service to produce it.
+
+## Native WebSocket transport (development branch)
+
+`Config.transport` selects `Tcp` (default) or `WebSocket(path)`. TLS remains a separate setting: `Plain` gives WS, while `SystemRoots`/`CustomCA` gives WSS with the existing optional client identity. Existing publish completion semantics do not change. PUBACK never means a downstream device executed a command.
+
+The upgrade offers only `mqtt` and requires that exact selected subprotocol. Response headers are bounded to 16 KiB. The path starts with `/`, is at most 8192 encoded ASCII bytes, and contains no whitespace, control bytes or fragment; callers percent-encode non-ASCII URI bytes. HTTP host validation applies only to WebSocket transport. No compression or other extensions are negotiated. Server text messages, masked frames, malformed upgrades or invalid framing are terminal protocol failures. Detected framing violations immediately close the transport without awaiting a Close-frame write, so a blocked peer cannot mask the original error; normal MQTT DISCONNECT sends a bounded best-effort WebSocket Close. Ordinary transport loss remains subject to the existing reconnect policy.
+
+Binary data messages form one MQTT byte stream: a packet may cross frame/message boundaries and multiple packets may share a message. Stream buffering stays bounded, and the MQTT packet-size bound is enforced before accepting an oversized packet body. Peer control frames are handled by the transport independently of MQTT packet boundaries.
+
+The WS parser is not periodically cancelled while a connection remains usable. Session abort or scope cancellation closes the underlying stream and ends the reader; no partially consumed frame is reused in a later generation. A publish remains NotSent until its writer starts and OutcomeUnknown after writing starts without completion. Transport masking uses secure entropy and fails if entropy is unavailable; the weaker reconnect-jitter fallback is never used for masking.

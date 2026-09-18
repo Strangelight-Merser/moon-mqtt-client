@@ -11,7 +11,8 @@
 
 ## 安装与构建
 
-当前版本：**0.3.0**，支持双向 TLS（mTLS）。在 MoonBit 项目中添加依赖：
+源码基线为 **0.3.0**，支持双向 TLS（mTLS）；本开发分支继续实现原生 WS/WSS。
+发布与注册表安装状态见 [执行状态](docs/exec/STATE.md)，源码能力不代表已发布。添加注册表依赖的命令为：
 
 ```sh
 moon add Strangelight-Merser/moon-mqtt-client
@@ -65,7 +66,7 @@ python3 -m venv .venv
 
 ## 支持范围
 
-- 原生 TCP，以及验证服务器身份的 TLS；支持系统根证书或自定义 PEM CA。
+- 原生 TCP/TLS，以及开发分支的 WS/WSS；TLS 支持系统根证书或自定义 PEM CA。
 - 可选双向 TLS（mTLS）：PEM 证书链 + 未加密私钥；`Plain` 不能搭配客户端身份。
 - MQTT 3.1.1、QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
 - 订阅与取消订阅确认，包括逐主题的订阅拒绝结果。
@@ -76,7 +77,28 @@ python3 -m venv .venv
   发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
 
 暂不支持 QoS 2、MQTT 5、持久会话、离线队列、跨连接重传、加密私钥、
-WebSocket，以及浏览器和微控制器目标。
+浏览器和微控制器目标。
+
+## 原生 WebSocket
+
+配置 `transport=WebSocket("/mqtt")`，由 `tls` 决定 WS 或 WSS；WSS 使用同一套服务器验证与可选客户端身份配置。服务端必须选择 `mqtt` 子协议。只接收二进制消息，MQTT 包可以跨 WebSocket 帧和消息，报文大小仍受 `max_packet_size` 限制。
+
+```moonbit
+let config = @mqtt.Config::new(
+  "broker.example.com", "native-wss-client", port=8084,
+  transport=@mqtt.WebSocket("/mqtt"), tls=@mqtt.SystemRoots,
+)
+```
+
+CLI 为现有命令增加 `--ws-path`；以下需要已配置 WSS 的 broker：
+
+```sh
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  publish --host broker.example.com --port 8084 --ws-path /mqtt --tls \
+  -t lab/state -m ON --qos 1
+```
+
+私有 CA 使用 `--ca`，双向 TLS 再提供 `--cert` 与 `--key`。客户端不协商 WebSocket 压缩扩展，不提供 HTTP 代理或浏览器适配。开发验收命令与实际结果记录在 [执行任务](docs/exec/TASKS.md)。
 
 ## API 示例
 

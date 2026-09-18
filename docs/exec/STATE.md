@@ -1,16 +1,27 @@
 # Execution state
 
-Updated: 2026-09-18. Status: R2 fix locally accepted, hosted CI pending; broader software roadmap proceeds in isolated worktree.
+Updated: 2026-09-18. Status: W1 locally accepted and awaiting hosted CI; expanded roadmap remains in_progress. J1/C1/R2 done.
 
-## Active CI regression and follow-through
+## Expanded scope and active checkout
 
-Final documentation-head push run `35355783844` at `0a604f478b7d938c9fad73b3c71c30992378f48a` failed macOS original `test_mtls_tls13_only_identity_rejection_error_types`: missing-certificate case expected TlsFailure, observed ProtocolError. Same-head PR run35355788909 passed. Failure retained, not retried away.
+User explicitly requested autonomous continuation until the preceding plan is fully executed. This supersedes the earlier one-milestone stopping point. Progress sequentially through WS/WSS, reconnect-resilient QoS 1, one-backend durable outbox, application-driven MQTT 5 and host-side ESP32/HA consumer work. Preserve explicit non-goals and distinguish unavailable hardware/publication acceptance. No new merge/publication/hardware authorization was granted.
 
-R2 fixes a verified gap: async-tls may propagate raw socket OSError during encrypted CONNECT/CONNACK I/O, which previously became ProtocolError. Exact CI exception is unavailable; reset/EPIPE is an inference, not a reproduced hosted cause. The new production exchange helper maps only OSError, TLS errors and EOF to TlsFailure on encrypted transports; plain transport errors, malformed MQTT, timeouts and cancellation remain unchanged. CONNECT encoding sits outside that classification boundary.
+Active implementation worktree: `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`, branch `codex/roadmap-native`, base `eeb93be40ba19020df1a9effcdd8771c5f132104` (aligned to the passing R2 commit without changing tested implementation bytes). The original `moon-mqtt-client` checkout and PR #2 stay at the v0.3 candidate. New work must not accidentally expand that PR. Toolchain and Python environment are shared via symlinks; a support task unnecessarily installed `websocket-client==1.9.2` into the shared Python environment while diagnosing broker readiness. Paho 2.1.0 already implements WebSocket itself; root subsequently uninstalled exactly that newly introduced package. No dependency declaration was added; final integration runs use only the existing Paho requirement. Builds and fixture resources remain isolated. Bundle reference copy is under `_build/research/moon_mqtt_codex_bundle`.
 
-Sol `/root/causes` implemented; root reviewed actual diff and tested the new injected-error regression with the OSError mapping removed (fails) and restored (passes). Original identity-rejection test passed; full `MOONBIT_ASYNC_CHECK_FD_LEAK=1 ./scripts/check.sh` passed: native58, broker25, faults10, scenarios and local TCP/mTLS consumers. Public API unchanged and all51 protected hashes retained. No extra EMQX rerun locally for this classification-only fix; hosted Linux runs it. Evidence `_build/exec-tls-flake/accepted-check.log`, `regression-before.log`, `post-fix-original-test.log`, `api.log`, `acceptance.json`. Fresh hosted verification still required for this patch.
+W1 native WS/WSS is implemented and locally accepted. Public API adds NetworkTransport and Config.transport; existing publish API/completion semantics stay. CLI --ws-path reuses TLS/mTLS flags. The small provenance-tracked frame engine requires mqtt subprotocol, binary streaming, bounded buffering, secure masking and explicit close/error behavior. Root inspected final API and semantics, independently tested raw peer and EMQX, and verified source/provenance fingerprints.
 
-User subsequently expanded scope to completing the preceding software roadmap. Work continues in `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`, branch `codex/roadmap-native`. Its STATE/TASKS own the expanded scope. v0.3 PR remains isolated from new capabilities; merge/publication/hardware remain separate gates.
+Final local evidence `_build/exec-ws/integrated-check.log`: native71, original broker25, faults10, scenario and external local-workspace TCP/mTLS consumers passed with FD checking. `integrated-protocol.log`:6 test cases (including multiple invalid handshake/frame variants) passed. `integrated-interop.log`:4 real native CLI WS/WSS tests passed, including QoS0/1 both directions and mTLS rejection cases; strict Python ResourceWarning checks clean, no unnecessary websocket-client dependency. Local package includes internal source/licenses and excludes Python caches/tool environments. This is not registry installation.
+
+Earlier failures are retained: external-consumer copier omitted new source packages; normal-scenario process-liveness check let a command precede device SUBACK. Root corrected only those fixture setup/copy blocks under routine follow-through authorization, with original application assertions/timeouts unchanged. Tests are not claimed wholly byte-unchanged: those two fixture files and the CLI are the disclosed exceptions; other protected originals remain unchanged. See TASKS for exact wire evidence.
+
+Sol implementation/review were separate sessions; reviewer approved binary protocol changes subject to guarded-writer regression, now passing with a mutation counterexample. Root chose synchronous fail-close for detected malformed frames so cleanup cannot mask protocol errors. Final hosted CI for this W1 commit remains pending. Next planned capability is explicit reconnect-resilient QoS1 delivery, keeping ordinary publish semantics.
+
+
+## R2 hosted regression resolved
+
+Final v0.3 closure uncovered an intermittent missing-client-certificate classification failure at `0a604f4`. A raw socket-error classification gap was proved independently; exact hosted exception remains unavailable. Sol fixed the encrypted CONNECT/CONNACK boundary, preserving malformed MQTT, plain transport and timeout/cancellation types. Root reviewed and ran full local check (native58, broker25, faults10, scenarios/consumers), protected hashes and API checks. Deterministic injected error failed without the mapping and passed with it.
+
+Fix commit `eeb93be40ba19020df1a9effcdd8771c5f132104` pushed to the original v0.3 PR. [PR CI35356886328](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35356886328) and [push CI35356879535](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35356879535) both passed Ubuntu/macOS, including Ubuntu EMQX. Original-checkout evidence `_build/exec-tls-flake/`. The R2 fix is integrated, and this branch is based directly on that accepted commit.
 
 ## Current baseline and authorization
 
@@ -54,4 +65,4 @@ The collaboration interface explicitly exposes `model`, `reasoning_effort`, and 
 
 This milestone is complete: default reconnect dispersion and typed terminal failures are fixed, and the previous hosted Linux/EMQX CI blocker is cleared on the accepted implementation. Resume by reading this file, TASKS.md and actual Git state; do not rerun historical work without a new change or specific risk.
 
-Next release gate requires separately authorized merge/publication and clean registry installation of the actual published modules. No merge, tag, registry/GitHub release, new long soak or ESP32/HA hardware acceptance was performed. Existing TLS timeout/CustomCA classification limitations remain documented in release notes. Do not expand into the next architecture milestone as part of this CI closure.
+Next release gate requires separately authorized merge/publication and clean registry installation of the actual published modules. No merge, tag, registry/GitHub release, new long soak or ESP32/HA hardware acceptance was performed. Existing TLS timeout/CustomCA classification limitations remain documented in release notes. The later explicit user instruction expands software scope; release and hardware gates remain separate.

@@ -31,6 +31,21 @@ async fn mqtt_connect_exchange(
 }
 
 ///|
+fn websocket_handshake_error(error : Error, encrypted : Bool) -> Error {
+  match error {
+    @ws.InvalidHandshake(reason) =>
+      ProtocolError("WebSocket handshake failed: \{reason}")
+    @io.ReaderClosed | @tls.ConnectionClosed if encrypted =>
+      TlsFailure("TLS transport closed during WebSocket handshake")
+    @tls.TlsError(message) if encrypted => TlsFailure(message)
+    @os_error.OSError(_) if encrypted =>
+      TlsFailure(@tls.describe_tls_error(error))
+    _ => error
+  }
+}
+
+///|
+///|
 async fn Client::dial(self : Client) -> Session {
   @async.with_timeout(self.config.connect_timeout_ms, () => {
     let tcp = @socket.Tcp::connect_to_host(
@@ -38,7 +53,7 @@ async fn Client::dial(self : Client) -> Session {
       port=self.config.port,
     )
     errdefer tcp.close()
-    let (reader, writer, close_transport) : (
+    let (stream_reader, stream_writer, close_stream) : (
       &@io.Reader,
       &@io.Writer,
       () -> Unit,
@@ -81,6 +96,35 @@ async fn Client::dial(self : Client) -> Session {
             tcp.close()
           },
         )
+      }
+    }
+    errdefer close_stream()
+    let (reader, writer, close_transport) : (
+      &@io.Reader,
+      &@io.Writer,
+      () -> Unit,
+    ) = match self.config.transport {
+      Tcp => (stream_reader, stream_writer, close_stream)
+      WebSocket(path) => {
+        let stream : WebSocketStream = {
+          reader: stream_reader,
+          writer: stream_writer,
+          close_transport: close_stream,
+        }
+        let websocket = @ws.Conn::connect(
+          stream,
+          websocket_host_header(self.config.host, self.config.port),
+          path,
+        ) catch {
+          error =>
+            raise websocket_handshake_error(
+              error,
+              !(self.config.tls is Plain),
+            )
+        }
+        let ws_reader = WebSocketReader::new(websocket)
+        let ws_writer : WebSocketWriter = { conn: websocket, }
+        (ws_reader, ws_writer, () => websocket.close())
       }
     }
     errdefer close_transport()
@@ -317,11 +361,23 @@ async fn Client::supervise(self : Client) -> Unit {
 ///|
 async fn Client::read_loop(self : Client, session : Session) -> Unit {
   while session.alive {
-    // Each bounded operation reads exactly one byte. The frame being assembled
-    // lives outside those cancellable slices, so an idle gap between the fixed
-    // header, Remaining Length, and body cannot discard bytes already consumed.
+    // TCP uses cancellable 100 ms slices around each bounded socket operation.
+    // WebSocket parsing blocks until data or session close because a timeout
+    // after a partial frame header would discard parser state.
     let incoming = try {
-      read_session_packet(session, self.config.max_packet_size)
+      match self.config.transport {
+        Tcp => read_session_packet(session, self.config.max_packet_size)
+        WebSocket(_) =>
+          if session.alive {
+            // WebSocket frame parsing performs multi-byte reads. Do not wrap it
+            // in the TCP path's recurring 100 ms cancellation slices: a timeout
+            // after a partial frame header would discard parser state. Session
+            // abort closes the underlying stream and wakes this blocking read.
+            Some(read_packet(session.reader, self.config.max_packet_size))
+          } else {
+            None
+          }
+      }
     } catch {
       error => {
         // Preserve the actual framing/I/O cause for pending requests. Never
