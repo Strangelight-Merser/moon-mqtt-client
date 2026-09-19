@@ -8,6 +8,69 @@ async fn announce(client : @mqtt.Client, prefix : String, entity : String) -> Un
   publish(client, "homeassistant/switch/" + entity + "/config", @relay.discovery(prefix, entity), retain=true)
 }
 
+/// Retained controller metadata is bounded to one value per topic.  A broker
+/// disconnect may happen after the write starts, so transient failures leave
+/// the value dirty and let the next connected loop retry the idempotent
+/// metadata publication.  Physical commands never use this state.
+struct DirtyMetadata {
+  mut discovery : Bool
+  mut availability : String?
+  mut state : String?
+}
+
+///|
+async fn flush_metadata(
+  client : @mqtt.Client,
+  prefix : String,
+  entity : String,
+  dirty : DirtyMetadata,
+) -> Unit {
+  if dirty.discovery {
+    try {
+      announce(client, prefix, entity)
+      dirty.discovery = false
+    } catch {
+      @mqtt.NotConnected | @mqtt.NotSent(_) | @mqtt.OutcomeUnknown(_) | @mqtt.Backpressure(_) => return
+      error => raise error
+    }
+  }
+  // A fresh reported state must be visible before advertising controller
+  // availability=online.  Offline is safe to publish first because it only
+  // removes the controller from the available set while state is reconciled.
+  if dirty.availability == Some("offline") {
+    match dirty.availability {
+      Some(value) => try {
+        publish(client, prefix + "/controller/availability", value, retain=true)
+        dirty.availability = None
+      } catch {
+        @mqtt.NotConnected | @mqtt.NotSent(_) | @mqtt.OutcomeUnknown(_) | @mqtt.Backpressure(_) => return
+        error => raise error
+      }
+      None => ()
+    }
+  }
+  match dirty.state {
+    Some(value) => try {
+      publish(client, prefix + "/ha/state", value, retain=true)
+      dirty.state = None
+    } catch {
+      @mqtt.NotConnected | @mqtt.NotSent(_) | @mqtt.OutcomeUnknown(_) | @mqtt.Backpressure(_) => return
+      error => raise error
+    }
+    None => ()
+  }
+  match dirty.availability {
+    Some(value) => try {
+      publish(client, prefix + "/controller/availability", value, retain=true)
+      dirty.availability = None
+    } catch {
+      @mqtt.NotConnected | @mqtt.NotSent(_) | @mqtt.OutcomeUnknown(_) | @mqtt.Backpressure(_) => return
+      error => raise error
+    }
+    None => ()
+  }
+}
+
 ///|
 async fn main {
   let prefix = @relay.prefix()
@@ -33,6 +96,7 @@ async fn main {
     let mut next_query = 0L
     let mut last_boot = ""
     let mut last_sequence = 0
+    let dirty = DirtyMetadata::{ discovery: true, availability: None, state: None }
     while true {
       let event = @async.with_timeout_opt(250, () => client.next_event())
       match event {
@@ -42,9 +106,9 @@ async fn main {
           last_boot = ""
           last_sequence = 0
           next_query = 0L
-          announce(client, prefix, entity)
-          publish(client, prefix + "/controller/availability", "offline", retain=true)
-          publish(client, prefix + "/ha/state", "None", retain=true)
+          dirty.discovery = true
+          dirty.availability = Some("offline")
+          dirty.state = Some("None")
         }
         Some(@mqtt.Disconnected(_, _)) => {
           pending = None
@@ -53,13 +117,13 @@ async fn main {
         }
         Some(@mqtt.MessageReceived(message)) => {
           if message.topic == "homeassistant/status" && message.payload == b"online" {
-            announce(client, prefix, entity)
+            dirty.discovery = true
             next_query = 0L
           } else if message.topic == prefix + "/device/availability" {
             if message.payload == b"online" { next_query = 0L }
             else {
-              publish(client, prefix + "/controller/availability", "offline", retain=true)
-              publish(client, prefix + "/ha/state", "None", retain=true)
+              dirty.availability = Some("offline")
+              dirty.state = Some("None")
             }
           } else if message.topic == prefix + "/ha/set" {
             if message.retain || pending is Some(_) ||
@@ -93,8 +157,8 @@ async fn main {
                 last_sequence = feedback.sequence
                 if pending == Some(feedback.correlation_id) { pending = None }
                 if query_id == Some(feedback.correlation_id) { query_id = None }
-                publish(client, prefix + "/ha/state", @relay.state_text(feedback.state), retain=true)
-                publish(client, prefix + "/controller/availability", "online", retain=true)
+                dirty.state = Some(@relay.state_text(feedback.state))
+                dirty.availability = Some("online")
                 @demo.log_line("{\"event\":\"reported\",\"id\":\{@relay.text(feedback.correlation_id)},\"state\":\{@relay.text(@relay.state_text(feedback.state))}}")
               }
               _ => ()
@@ -109,21 +173,22 @@ async fn main {
         pending = None
         next_query = 0L
         @demo.log_line("{\"event\":\"execution_unconfirmed\"}")
-        publish(client, prefix + "/controller/availability", "offline", retain=true)
+        dirty.availability = Some("offline")
       }
       if now >= next_query {
         if query_id is Some(_) {
-          publish(client, prefix + "/controller/availability", "offline", retain=true)
-          publish(client, prefix + "/ha/state", "None", retain=true)
+          dirty.availability = Some("offline")
+          dirty.state = Some("None")
         }
         let id = @relay.fresh_id()
         query_id = Some(id)
         next_query = now + 5000L
         try publish(client, prefix + "/device/query", @relay.query(id)) catch {
-          @mqtt.NotConnected | @mqtt.NotSent(_) | @mqtt.OutcomeUnknown(_) => ()
+          @mqtt.NotConnected | @mqtt.NotSent(_) | @mqtt.OutcomeUnknown(_) | @mqtt.Backpressure(_) => ()
           error => raise error
         }
       }
+      flush_metadata(client, prefix, entity, dirty)
     }
   })
 }
