@@ -343,32 +343,14 @@ async fn validate_schema(
 }
 
 ///|
-async fn SqliteOutbox::open(
+/// Read-only validation used both before and after exclusive ownership. The
+/// second pass closes the time-of-check/time-of-use window without mutating a
+/// file which should have been rejected by schema or identity.
+async fn validate_open_candidate(
+  connection : @sqlite3.Connection,
   options : DurableOutboxOptions,
   identity : String,
-) -> SqliteOutbox {
-  if options.path == "" || options.max_records <= 0 || options.max_records > 65535 ||
-    options.max_payload_bytes <= 0L || options.max_pages <= 0 {
-    raise DurableStoreLimit("durable outbox options must be positive")
-  }
-  if identity == "" {
-    raise DurableStoreIdentity("durable outbox identity must not be empty")
-  }
-  let connection = try {
-    @sqlite3.Connection::open_async(options.path)
-  } catch {
-    @sqlite3.SqliteError(..) as error =>
-      raise sqlite_error(error, "open durable outbox")
-    error => raise error
-  }
-  errdefer (try connection.close() catch { _ => () })
-  ignore(sqlite_query_int(connection, "PRAGMA busy_timeout = 0", "set busy timeout"))
-  if sqlite_query_int(connection, "PRAGMA busy_timeout", "read busy timeout") != 0L {
-    raise DurableStoreSchema("SQLite did not retain busy_timeout=0")
-  }
-  // Every check before the configuration block below is read-only. Rejected
-  // unknown schemas, unrelated databases and identity mismatches must retain
-  // their original bytes and persistent PRAGMA values.
+) -> Bool {
   let integrity = sqlite_query_text(
     connection,
     "PRAGMA integrity_check",
@@ -382,8 +364,7 @@ async fn SqliteOutbox::open(
     "PRAGMA user_version",
     "read durable schema version",
   )
-  let mut initialize = false
-  if version == 0L {
+  let initialize = if version == 0L {
     let tables = sqlite_query_int(
       connection,
       "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
@@ -394,9 +375,10 @@ async fn SqliteOutbox::open(
         "refusing to initialize a nonempty unversioned database",
       )
     }
-    initialize = true
+    true
   } else if version == DURABLE_SCHEMA_VERSION {
     validate_schema(connection, identity)
+    false
   } else {
     raise DurableStoreSchema("unsupported durable schema version \{version}")
   }
@@ -432,6 +414,42 @@ async fn SqliteOutbox::open(
       "database already exceeds max_pages=\{options.max_pages}",
     )
   }
+  initialize
+}
+
+///|
+async fn SqliteOutbox::open_with_prelock(
+  options : DurableOutboxOptions,
+  identity : String,
+  before_lock : (async () -> Unit)?,
+) -> SqliteOutbox {
+  if options.path == "" || options.max_records <= 0 || options.max_records > 65535 ||
+    options.max_payload_bytes <= 0L || options.max_pages <= 0 {
+    raise DurableStoreLimit("durable outbox options must be positive")
+  }
+  if identity == "" {
+    raise DurableStoreIdentity("durable outbox identity must not be empty")
+  }
+  let connection = try {
+    @sqlite3.Connection::open_async(options.path)
+  } catch {
+    @sqlite3.SqliteError(..) as error =>
+      raise sqlite_error(error, "open durable outbox")
+    error => raise error
+  }
+  errdefer (try connection.close() catch { _ => () })
+  ignore(sqlite_query_int(connection, "PRAGMA busy_timeout = 0", "set busy timeout"))
+  if sqlite_query_int(connection, "PRAGMA busy_timeout", "read busy timeout") != 0L {
+    raise DurableStoreSchema("SQLite did not retain busy_timeout=0")
+  }
+  // The first pass rejects malformed and mismatched files without changing
+  // persistent settings. The private callback is a deterministic race seam;
+  // production passes None.
+  ignore(validate_open_candidate(connection, options, identity))
+  match before_lock {
+    Some(action) => action()
+    None => ()
+  }
   let locking = sqlite_query_text(
     connection,
     "PRAGMA locking_mode = EXCLUSIVE",
@@ -440,6 +458,14 @@ async fn SqliteOutbox::open(
   if locking != "exclusive" {
     raise DurableStoreSchema("SQLite did not retain exclusive locking mode")
   }
+  // Acquire the connection's retained exclusive ownership before trusting any
+  // preflight observation. A competing writer can commit between the passes,
+  // but the locked revalidation below must then observe and reject it.
+  @async.protect_from_cancel(async fn() {
+    sqlite_drain(connection, "BEGIN EXCLUSIVE", "acquire durable ownership")
+    sqlite_commit(connection)
+  })
+  let initialize = validate_open_candidate(connection, options, identity)
   let journal = sqlite_query_text(
     connection,
     "PRAGMA journal_mode = DELETE",
@@ -465,18 +491,20 @@ async fn SqliteOutbox::open(
   if initialize {
     initialize_schema(connection, identity)
   }
-  // A completed exclusive transaction acquires the connection's retained
-  // exclusive lock. A second owner then fails immediately under busy_timeout=0.
-  @async.protect_from_cancel(async fn() {
-    sqlite_drain(connection, "BEGIN EXCLUSIVE", "acquire durable ownership")
-    sqlite_commit(connection)
-  })
   {
     connection,
     options,
     open: true,
     transaction_lock: @semaphore.Semaphore(1),
   }
+}
+
+///|
+async fn SqliteOutbox::open(
+  options : DurableOutboxOptions,
+  identity : String,
+) -> SqliteOutbox {
+  SqliteOutbox::open_with_prelock(options, identity, None)
 }
 
 ///|

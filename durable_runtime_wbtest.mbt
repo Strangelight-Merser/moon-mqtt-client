@@ -770,6 +770,55 @@ async test "rejected durable opens preserve bytes and persistent journal mode" {
 }
 
 ///|
+async test "durable open revalidates bounds after acquiring exclusive ownership" {
+  let directory = @fs.tmpdir(prefix="mqtt-durable-runtime-open-race")
+  defer @fs.rmdir(directory, recursive=true)
+  let path = "\{directory}/outbox.sqlite3"
+  let roomy = DurableOutboxOptions::new(path, max_records=2)
+  let limited = DurableOutboxOptions::new(path, max_records=1)
+  let seed = SqliteOutbox::open(roomy, "race-identity")
+  seed.close()
+  try {
+    let unexpected = SqliteOutbox::open_with_prelock(
+      limited,
+      "race-identity",
+      Some(async fn() {
+        // This owner commits after the first connection's read-only preflight
+        // but closes before that connection acquires its retained lock.
+        let competitor = SqliteOutbox::open(roomy, "race-identity")
+        ignore(competitor.admit(
+          "raced-a",
+          1,
+          "t",
+          b"a",
+          false,
+          100L,
+          1L,
+        ))
+        ignore(competitor.admit(
+          "raced-b",
+          2,
+          "t",
+          b"b",
+          false,
+          100L,
+          1L,
+        ))
+        competitor.close()
+      }),
+    )
+    unexpected.close()
+    abort("open accepted records committed after its first validation")
+  } catch {
+    DurableStoreLimit(_) => ()
+    error => abort("post-lock revalidation returned wrong error: \{error}")
+  }
+  let verify = SqliteOutbox::open(roomy, "race-identity")
+  assert_eq(verify.inspect().length(), 2)
+  verify.close()
+}
+
+///|
 async test "expiry crossing during possible-write commit never reaches socket" {
   let directory = @fs.tmpdir(prefix="mqtt-durable-runtime-cross-expiry")
   defer @fs.rmdir(directory, recursive=true)
