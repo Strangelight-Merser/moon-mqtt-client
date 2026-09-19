@@ -1,6 +1,6 @@
 name = "Strangelight-Merser/moon-mqtt-client"
 
-version = "0.7.0"
+version = "0.7.1"
 
 repository = "https://github.com/Strangelight-Merser/moon-mqtt-client"
 

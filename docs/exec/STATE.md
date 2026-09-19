@@ -1,5 +1,19 @@
 # Execution state
 
+## Active A0–A4 v0.7.1 audit candidate — RUNNING
+
+Current request supersedes historical release authorization below: local A0–A4 only; no push, merge, publication, schema 2 change, B tasks or hardware. Original checkout remains clean at `eeb93be40ba19020df1a9effcdd8771c5f132104` on `codex/v0.3-mtls`.
+
+- BASE: fetched `origin/main` = `73bcd1952262ba4a097ccf0b11fae9ad4cf4fe68`; released v0.7.0 = `bc93570ebd3e3034511126342f84c87876088ebc`. Difference is five documentation files only; v0.4–v0.7 capabilities will not be reimplemented.
+- Integration/core worktree: `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-v071`, branch `codex/v0.7.1-audit`. HA isolated worktree: `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-v071-ha`, branch `codex/v0.7.1-ha`. Both created from BASE. Shared read-only toolchain/venv, separate build/dependency directories.
+- Input: original ZIP preserved; extracted read-only reference `/tmp/moon-mqtt-v070-audit-input/moon_mqtt_v070_audit`. Its Python probes are hypotheses, not native acceptance.
+- Owners: root/Astra integration and final acceptance; `/root/core_sol` requested `gpt-5.6-sol` high, A1 then A2; `/root/baseline_luna` requested `gpt-5.6-luna` high, A0 then approved A3. Spawn responses confirm sessions but do not expose actual backend model metadata. Independent new Sol review required at A4. Maximum two concurrent child tasks.
+- F3 approved policy: fixed dirty discovery/availability/latest-state values; successful publish clears its value, transient NotConnected/NotSent/OutcomeUnknown/Backpressure preserves it. Other errors propagate. Connected invalidates old command/query correlation and reports offline/unknown until a fresh query confirms state. Never queue/replay physical commands. Original four host scenarios preserved.
+- A0 DONE: live release/PR#3/main CI verified by Luna; root verified fixed wrapper MoonBit and bundled Mosquitto2.0.22/Paho2.1.0. PATH absence is not a tool blocker. Original source unchanged; schema2 confirmed in released code.
+- Evidence directory: `_build/audit-v071/` in each worktree. Candidate tests/independent review/integrated checks initially NOT_RUN; no current-candidate CI/registry/HIL claim.
+
+## Historical completed workflow (retained)
+
 Updated: 2026-09-18. Expanded authorized host/software implementation: **done**. Roadmap release R7: **done**. W1/Q1/D1/H1 host software and M1 runtime are done. Actual HA/ESP32 gates remain open. The separately authorized v0.3 registry/publication gates are now done.
 
 ## Authorization and active baselines
