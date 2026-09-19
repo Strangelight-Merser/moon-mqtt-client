@@ -62,6 +62,8 @@ jobs:
         run: MOON="$(command -v moon)" python tests/ha_relay.py
       - name: Recoverable QoS 1
         run: MOON="$(command -v moon)" python tests/recoverable_qos1.py
+      - name: Durable outbox process recovery
+        run: MOON="$(command -v moon)" python tests/durable_outbox.py
       - name: EMQX interoperability
         if: runner.os == 'Linux'
         run: MOON="$(command -v moon)" python tests/emqx_interop.py

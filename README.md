@@ -153,7 +153,8 @@ packet ID 和顺序重发；已经开始写入的发布设置 `DUP=1`。等待�
 恢复进程重启前的内存，也不保证设备执行或应用层恰好一次。
 
 需要跨进程保存这些显式投递时，使用具体的 SQLite durable outbox。绝对过期时间由应用
-以 Unix 毫秒给出；scope 打开时先恢复句柄和 packet ID，再开始连接：
+以 Unix 毫秒给出；scope 打开时先恢复句柄和 packet ID，再开始连接。下面另将
+`moonbitlang/core/env` 导入为 `@env`，为新投递设置 30 秒期限：
 
 ```moonbit
 let outbox = @mqtt.DurableOutboxOptions::new("./commands.sqlite3")
@@ -165,7 +166,7 @@ let config = @mqtt.Config::new(
   let delivery = if recovered.is_empty() {
     client.submit_durable_delivery(
       "command-20260918-002", "lab/command", @utf8.encode("OFF"),
-      1790000000000L,
+      @env.now().reinterpret_as_int64() + 30000L,
     )
   } else {
     recovered[0]
