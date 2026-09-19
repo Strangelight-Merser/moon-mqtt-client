@@ -96,3 +96,9 @@ H1 host candidate8a51005 integrated: newexamples/ha_relay controller + independe
 H1 integrated fullcheck passed native96, originalbroker25/fault10/scenarios/TCP+mTLSconsumers, recovery5 andHAhost4; `_build/exec-ha/integrated-full-check.log`. Rootsemanticreview noted no command replay on ambiguous outcome/restart and no hardwareclaim; hostCI pending.
 
 D1 runtime firstcompilegreen but root earlyreview found reservation rollback before encode, storagecause lost through stringabort, stalegenerationwrite afterDBawait, and protectedACKcommit racing synchronousfinish_all. Sentfour blockers toSol forimplementation+regressions; D1notaccepted. RequestedSol/causes reactivation rejected twice by environment threadlimit; boundedM1codec implementation awaits availableSol orroot progress. Luna spec verification restarted successfully.
+
+H1 host software accepted on ff2bcc88ee43b93f23ff37002ff74d6f8b2ac70b: hosted35411282623 bothplatformspassed native96/broker25/fault10/HA4/recovery5/WSraw6; UbuntuEMQX4/WS4. Luna retrievedmetadata/log/summary in `_build/exec-ha/ci-ff2bcc8.*`; root independentlychecked exacthead andjob conclusions. H1physicalHA/ESP32 andpublishedpackage acceptance stillpending.
+
+M1 root implementation in isolated `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-mqtt5`, branchcodex/mqtt5-codec, baseff2bcc8. Onlynewinternal/mqtt5 codec files currentlymodified. Explicittypedproperties, packet/direction/duplicate/valuechecks, compactACKs, incomingindependentdecoder, outgoingreuseof3.1.1fieldvalidation with5propertysections. Nativecheckpassed; focusedtests/independentbrokerseam ongoing, noMQTT5runtimeclaim.
+
+M1 codec seam native103passed, isolatedrealMosquitto/Paho5 bidirectionalmetadata passed (`moon-mqtt-mqtt5/_build/exec-mqtt5/{native-all,codec-interop}.log`). Luna cross-checking literalproperty/reason tables; runtimeintegrationpending. H1hostsoftwaredone atacceptedff2bcc8, hardware/actualHA stillblockedonexternalprerequisites.
