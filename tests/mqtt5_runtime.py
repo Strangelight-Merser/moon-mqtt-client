@@ -112,6 +112,32 @@ class RuntimePeers(unittest.TestCase):
         result = self.run_peer("flow", peer)
         self.assertIn("reason=16", result.stdout)
 
+    def test_reconnect_reduces_credit_without_quarantining_queued_deliveries(self):
+        def peer(conn, listener):
+            connack(conn, b"\x21\x00\x02")
+            originals = [recv_packet(conn), recv_packet(conn)]
+            identifiers = [publish_id(packet) for packet in originals]
+            self.assertNotEqual(*identifiers)
+            self.assertTrue(all(packet[0] == 0x32 for packet in originals))
+            conn.close()
+            with listener.accept()[0] as resumed:
+                resumed.settimeout(4)
+                connack(resumed, b"\x21\x00\x01", present=True)
+                first = recv_packet(resumed)
+                self.assertEqual(first[0], 0x3a)
+                self.assertEqual(publish_id(first), identifiers[0])
+                resumed.settimeout(0.15)
+                with self.assertRaises(socket.timeout):
+                    resumed.recv(1)
+                resumed.settimeout(4)
+                ack(resumed, identifiers[0], 0x10)
+                second = recv_packet(resumed)
+                self.assertEqual(second[0], 0x3a)
+                self.assertEqual(publish_id(second), identifiers[1])
+                ack(resumed, identifiers[1])
+                self.assertEqual(recv_packet(resumed)[0], 0xe0)
+        self.assertIn("reason=16", self.run_peer("flow-reconnect", peer).stdout)
+
     def test_negative_puback_is_definite_broker_rejection(self):
         def peer(conn, _):
             connack(conn)

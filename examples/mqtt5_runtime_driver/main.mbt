@@ -3,7 +3,7 @@ async fn main {
   let args = @env.args()
   guard args.length() == 3 else { abort("expected mode and port") }
   let mode = args[1]
-  let resume_enabled = mode == "flow" ||
+  let resume_enabled = mode == "flow" || mode == "flow-reconnect" ||
     mode == "fresh-resume" ||
     mode == "durable" ||
     mode == "durable-empty" ||
@@ -77,7 +77,7 @@ async fn main {
   @async.with_timeout(9000, async fn() {
     @mqtt.with_client(config, async fn(client) {
       match mode {
-        "flow" => {
+        "flow" | "flow-reconnect" => {
           let first = client.submit_delivery("first", "m1/request", b"first")
           let second = client.submit_delivery("second", "m1/request", b"second")
           let status = first.wait()
