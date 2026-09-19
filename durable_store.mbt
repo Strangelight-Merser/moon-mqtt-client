@@ -64,6 +64,13 @@ priv struct ExpirySweep {
 }
 
 ///|
+priv enum DeliveryExpiryResult {
+  ExpiryStillPending
+  ExpiryRemoved
+  ExpiryBlocked
+}
+
+///|
 /// One concrete SQLite owner. The exclusive lock is retained until `close`.
 priv struct SqliteOutbox {
   connection : @sqlite3.Connection
@@ -359,6 +366,72 @@ async fn SqliteOutbox::open(
   if sqlite_query_int(connection, "PRAGMA busy_timeout", "read busy timeout") != 0L {
     raise DurableStoreSchema("SQLite did not retain busy_timeout=0")
   }
+  // Every check before the configuration block below is read-only. Rejected
+  // unknown schemas, unrelated databases and identity mismatches must retain
+  // their original bytes and persistent PRAGMA values.
+  let integrity = sqlite_query_text(
+    connection,
+    "PRAGMA integrity_check",
+    "check durable database integrity",
+  )
+  if integrity != "ok" {
+    raise DurableStoreCorrupt("SQLite integrity_check failed: \{integrity}")
+  }
+  let version = sqlite_query_int(
+    connection,
+    "PRAGMA user_version",
+    "read durable schema version",
+  )
+  let mut initialize = false
+  if version == 0L {
+    let tables = sqlite_query_int(
+      connection,
+      "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
+      "inspect unversioned database",
+    )
+    if tables != 0L {
+      raise DurableStoreSchema(
+        "refusing to initialize a nonempty unversioned database",
+      )
+    }
+    initialize = true
+  } else if version == DURABLE_SCHEMA_VERSION {
+    validate_schema(connection, identity)
+  } else {
+    raise DurableStoreSchema("unsupported durable schema version \{version}")
+  }
+  if !initialize {
+    let record_count = sqlite_query_int(
+      connection,
+      "SELECT count(*) FROM durable_outbox",
+      "validate durable record bound",
+    )
+    if record_count > options.max_records.to_int64() {
+      raise DurableStoreLimit(
+        "stored record count exceeds max_records=\{options.max_records}",
+      )
+    }
+    let payload_bytes = sqlite_query_int(
+      connection,
+      "SELECT coalesce(sum(length(payload)), 0) FROM durable_outbox",
+      "validate durable payload bound",
+    )
+    if payload_bytes > options.max_payload_bytes {
+      raise DurableStoreLimit(
+        "stored payload bytes exceed max_payload_bytes=\{options.max_payload_bytes}",
+      )
+    }
+  }
+  let page_count = sqlite_query_int(
+    connection,
+    "PRAGMA page_count",
+    "read durable page count",
+  )
+  if page_count > options.max_pages.to_int64() {
+    raise DurableStoreLimit(
+      "database already exceeds max_pages=\{options.max_pages}",
+    )
+  }
   let locking = sqlite_query_text(
     connection,
     "PRAGMA locking_mode = EXCLUSIVE",
@@ -389,55 +462,8 @@ async fn SqliteOutbox::open(
       "database already exceeds max_pages=\{options.max_pages}",
     )
   }
-  let integrity = sqlite_query_text(
-    connection,
-    "PRAGMA integrity_check",
-    "check durable database integrity",
-  )
-  if integrity != "ok" {
-    raise DurableStoreCorrupt("SQLite integrity_check failed: \{integrity}")
-  }
-  let version = sqlite_query_int(
-    connection,
-    "PRAGMA user_version",
-    "read durable schema version",
-  )
-  if version == 0L {
-    let tables = sqlite_query_int(
-      connection,
-      "SELECT count(*) FROM sqlite_master WHERE type = 'table'",
-      "inspect unversioned database",
-    )
-    if tables != 0L {
-      raise DurableStoreSchema(
-        "refusing to initialize a nonempty unversioned database",
-      )
-    }
+  if initialize {
     initialize_schema(connection, identity)
-  } else if version == DURABLE_SCHEMA_VERSION {
-    validate_schema(connection, identity)
-  } else {
-    raise DurableStoreSchema("unsupported durable schema version \{version}")
-  }
-  let record_count = sqlite_query_int(
-    connection,
-    "SELECT count(*) FROM durable_outbox",
-    "validate durable record bound",
-  )
-  if record_count > options.max_records.to_int64() {
-    raise DurableStoreLimit(
-      "stored record count exceeds max_records=\{options.max_records}",
-    )
-  }
-  let payload_bytes = sqlite_query_int(
-    connection,
-    "SELECT coalesce(sum(length(payload)), 0) FROM durable_outbox",
-    "validate durable payload bound",
-  )
-  if payload_bytes > options.max_payload_bytes {
-    raise DurableStoreLimit(
-      "stored payload bytes exceed max_payload_bytes=\{options.max_payload_bytes}",
-    )
   }
   // A completed exclusive transaction acquires the connection's retained
   // exclusive lock. A second owner then fails immediately under busy_timeout=0.
@@ -749,7 +775,7 @@ async fn SqliteOutbox::expire(
     try {
       let query = try {
         self.connection.prepare_async(
-          "SELECT delivery_id, ever_started FROM durable_outbox WHERE expires_at_ms <= ? ORDER BY sequence",
+          "SELECT delivery_id, ever_started FROM durable_outbox WHERE state = 0 AND expires_at_ms <= ? ORDER BY sequence",
         )
       } catch {
         @sqlite3.SqliteError(..) as error =>
@@ -788,7 +814,7 @@ async fn SqliteOutbox::expire(
       for id in removed {
         ignore(sqlite_exec_id(
           self.connection,
-          "DELETE FROM durable_outbox WHERE delivery_id = ? AND ever_started = 0",
+          "DELETE FROM durable_outbox WHERE delivery_id = ? AND state = 0 AND ever_started = 0",
           id,
           "remove expired never-started delivery",
         ))
@@ -796,7 +822,7 @@ async fn SqliteOutbox::expire(
       for id in quarantined {
         ignore(sqlite_exec_text_id(
           self.connection,
-          "UPDATE durable_outbox SET state = 1, reason = ? WHERE delivery_id = ?",
+          "UPDATE durable_outbox SET state = 1, reason = ? WHERE delivery_id = ? AND state = 0",
           "expired after a possible write",
           id,
           "quarantine expired possible-write delivery",
@@ -809,6 +835,81 @@ async fn SqliteOutbox::expire(
         raise sqlite_error(error, "apply durable expiry")
       error => raise error
     }
+  })
+}
+
+///|
+/// Apply the absolute expiry transition to one active delivery immediately
+/// before a possible write or from its generation watchdog.
+async fn SqliteOutbox::expire_one(
+  self : SqliteOutbox,
+  delivery_id : String,
+  now_ms : Int64,
+) -> DeliveryExpiryResult {
+  self.transaction_lock.acquire()
+  defer self.transaction_lock.release()
+  self.ensure_open()
+  @async.protect_from_cancel(async fn() {
+    sqlite_begin(self.connection)
+    errdefer (try sqlite_rollback(self.connection) catch { _ => () })
+    let statement = try {
+      self.connection.prepare_async(
+        "SELECT expires_at_ms, ever_started, state FROM durable_outbox WHERE delivery_id = ?",
+      )
+    } catch {
+      @sqlite3.SqliteError(..) as error =>
+        raise sqlite_error(error, "prepare durable expiry check")
+      error => raise error
+    }
+    let result = try {
+      statement.bind(index=1, delivery_id)
+      guard statement.step_async() is @sqlite3.Row else {
+        raise DurableStoreState(
+          "check durable expiry: delivery not found: \{delivery_id}",
+        )
+      }
+      let expires_at_ms : Int64 = statement.column(index=0)
+      let ever_started : Int64 = statement.column(index=1)
+      let state : Int64 = statement.column(index=2)
+      ignore(statement.step_async())
+      statement.finalize()
+      if state != 0L {
+        raise DurableStoreState(
+          "check durable expiry: delivery already blocked: \{delivery_id}",
+        )
+      }
+      if expires_at_ms > now_ms {
+        ExpiryStillPending
+      } else if ever_started == 0L {
+        ignore(sqlite_exec_id(
+          self.connection,
+          "DELETE FROM durable_outbox WHERE delivery_id = ? AND state = 0 AND ever_started = 0",
+          delivery_id,
+          "remove expired never-started delivery",
+        ))
+        ExpiryRemoved
+      } else {
+        ignore(sqlite_exec_text_id(
+          self.connection,
+          "UPDATE durable_outbox SET state = 1, reason = ? WHERE delivery_id = ? AND state = 0",
+          "expired after a possible write",
+          delivery_id,
+          "quarantine expired possible-write delivery",
+        ))
+        ExpiryBlocked
+      }
+    } catch {
+      @sqlite3.SqliteError(..) as error => {
+        try statement.finalize() catch { _ => () }
+        raise sqlite_error(error, "check durable expiry")
+      }
+      error => {
+        try statement.finalize() catch { _ => () }
+        raise error
+      }
+    }
+    sqlite_commit(self.connection)
+    result
   })
 }
 

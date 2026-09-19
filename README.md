@@ -73,11 +73,12 @@ python3 -m venv .venv
 - 有上限的发送队列、事件队列、报文大小和并发请求数。
 - 默认 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
   `Connected(generation)` 事件。可显式选择 `ResumeSession`，通过投递句柄在同一
-  进程作用域内恢复未确认的 QoS 1 发布。
+  进程作用域内恢复未确认的 QoS 1 发布；原生 beta 还可选择 SQLite durable
+  outbox，在进程重启后恢复同一逻辑会话中的显式投递。
 - 任务和 socket 的生命周期由回调作用域管理。回调正常返回或调用 `disconnect()` 时
   发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
 
-暂不支持 QoS 2、MQTT 5、离线接收队列、跨进程投递恢复、加密私钥、
+暂不支持 QoS 2、MQTT 5、通用离线接收队列、加密私钥、
 浏览器和微控制器目标。
 
 ## 原生 WebSocket
@@ -150,6 +151,35 @@ let config = @mqtt.Config::new(
 packet ID 和顺序重发；已经开始写入的发布设置 `DUP=1`。等待句柄被取消不会取消投递。
 该能力只保存当前进程作用域内已接收的投递，要求稳定 client ID 由单一客户端独占；它不
 恢复进程重启前的内存，也不保证设备执行或应用层恰好一次。
+
+需要跨进程保存这些显式投递时，使用具体的 SQLite durable outbox。绝对过期时间由应用
+以 Unix 毫秒给出；scope 打开时先恢复句柄和 packet ID，再开始连接：
+
+```moonbit
+let outbox = @mqtt.DurableOutboxOptions::new("./commands.sqlite3")
+let config = @mqtt.Config::new(
+  "127.0.0.1", "exclusive-stable-client-id",
+  session_policy=@mqtt.ResumeSession,
+)
+@mqtt.with_durable_client(outbox, config, async fn(client, recovered) {
+  let delivery = if recovered.is_empty() {
+    client.submit_durable_delivery(
+      "command-20260918-002", "lab/command", @utf8.encode("OFF"),
+      1790000000000L,
+    )
+  } else {
+    recovered[0]
+  }
+  ignore(delivery.wait())
+})
+```
+
+admission、generation attach、首次可能写入和 PUBACK 删除都先提交 SQLite，再公开对应
+内存状态或执行网络写。正常关闭保留未完成记录；broker session 丢失、协议错误或预算耗尽
+会留下 blocked 记录。`inspect_durable_outbox` 可在不连接 broker 时检查，
+`discard_durable_delivery` 只允许删除可证明从未开始写入的记录。该能力仍是 MQTT QoS 1
+至少一次恢复：PUBACK 到达但 SQLite 删除尚未提交时崩溃，重启后可能重复发送，不能据此
+断言设备执行恰好一次。
 
 `with_client` 在首次连接成功后调用回调；首次连接、CONNACK 或 TLS 失败会直接返回给调用方。
 连接曾经建立后发生的故障会触发有次数上限的重试。`wait_connected()` 可等待重连完成；

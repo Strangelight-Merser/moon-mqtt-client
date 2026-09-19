@@ -204,13 +204,89 @@ async fn Client::replay_deliveries(
       )
     }
     let bytes = delivery.packet(self.config.max_packet_size)
-    delivery.attach(
-      session.generation,
-      @async.now() + self.config.operation_timeout_ms.to_int64(),
-    )
-    session.deliveries[delivery.packet_id] = delivery
-    session.delivery_slots += 1
+    match delivery.durable {
+      Some(meta) =>
+        try {
+          meta.runtime.transition(async fn() {
+            match meta.runtime.outbox.expire_one(
+              delivery.delivery_id,
+              (meta.runtime.now_ms)(),
+            ) {
+              ExpiryStillPending => {
+                meta.runtime.outbox.record_attach(delivery.delivery_id)
+                delivery.attach(
+                  session.generation,
+                  @async.now() + self.config.operation_timeout_ms.to_int64(),
+                )
+                session.deliveries[delivery.packet_id] = delivery
+                session.delivery_slots += 1
+              }
+              ExpiryRemoved => {
+                let error = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired before replay and was never possibly written",
+                )
+                delivery.finish_terminal(session_error_reason(error), error)
+                raise error
+              }
+              ExpiryBlocked => {
+                let error = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired before replay after a possible write",
+                )
+                delivery.finish_terminal(session_error_reason(error), error)
+                raise error
+              }
+            }
+          })
+        } catch {
+          error if @async.is_cancellation_error(error) => raise error
+          error => raise client_error_of(error)
+        }
+      None => {
+        delivery.attach(
+          session.generation,
+          @async.now() + self.config.operation_timeout_ms.to_int64(),
+        )
+        session.deliveries[delivery.packet_id] = delivery
+        session.delivery_slots += 1
+      }
+    }
     session.enqueue_delivery(delivery, bytes)
+  }
+}
+
+///|
+/// Persist terminal delivery evidence before releasing packet identifiers or
+/// payloads. A store failure supersedes the initiating cause because the caller
+/// must inspect storage before attempting another network scope.
+async fn Client::block_durable_deliveries(self : Client, cause : Error) -> Error {
+  guard self.durable is Some(runtime) else {
+    return cause
+  }
+  if cause is DurableStorage(_) {
+    return cause
+  }
+  try {
+    runtime.transition(async fn() {
+      for delivery in self.deliveries.order {
+        if !delivery.phase.terminal() && delivery.durable is Some(_) {
+          runtime.outbox.block(
+            delivery.delivery_id,
+            session_error_reason(cause),
+          )
+        }
+      }
+    })
+    cause
+  } catch {
+    error => {
+      if @async.is_cancellation_error(error) {
+        raise error
+      }
+      match durable_store_error_of(error) {
+        Some(store_error) => DurableStorage(store_error)
+        None => error
+      }
+    }
   }
 }
 
@@ -263,7 +339,9 @@ async fn Client::supervise(self : Client) -> Unit {
       self.session = Some(session)
       defer session.abort("connection ended")
       if self.config.session_policy is ResumeSession &&
-        !first_connection &&
+        (!first_connection ||
+        (self.durable is Some(runtime) &&
+        runtime.recovered_requires_session_present)) &&
         !session_present {
         raise BrokerSessionLost(
           "broker returned Session Present=false while recoverable state was active",
@@ -302,7 +380,9 @@ async fn Client::supervise(self : Client) -> Unit {
             }
           }
         }
-        if self.config.session_policy is ResumeSession && !first_connection {
+        if self.config.session_policy is ResumeSession &&
+          (!first_connection ||
+          (self.durable is Some(_) && !self.deliveries.active.is_empty())) {
           self.replay_deliveries(session)
         }
         self.ready = true
@@ -349,7 +429,7 @@ async fn Client::supervise(self : Client) -> Unit {
         // every such concrete first cause. `SessionLost` is synthetic: it only
         // wins when both the recorded and observed errors are SessionLost, so a
         // generic cleanup cannot mask a direct heartbeat or task-group error.
-        let cause : Error = match self.session {
+        let observed : Error = match self.session {
           Some(session) =>
             match session.failure_reason {
               Some(recorded) =>
@@ -365,11 +445,19 @@ async fn Client::supervise(self : Client) -> Unit {
             }
           None => error
         }
+        // Storage methods expose precise DurableStoreError values. Normalize
+        // them before terminal-policy matching so replay and ACK DELETE faults
+        // fail-stop instead of entering the ordinary transport retry path.
+        let cause : Error = match durable_store_error_of(observed) {
+          Some(store_error) => DurableStorage(store_error)
+          None => observed
+        }
         let reason = session_error_reason(cause)
         self.ready = false
         self.session = None
         self.changed.broadcast()
         if self.stopped {
+          self.settle_deliveries(self.close_reason())
           return
         }
         // Backpressure, a saturated control queue and connect-phase protocol
@@ -380,29 +468,41 @@ async fn Client::supervise(self : Client) -> Unit {
             // application callback to reconcile their terminal state. End the
             // worker normally after recording the typed stop reason instead of
             // letting task-group failure cancel that callback.
-            self.record_stop(cause)
-            self.finish_deliveries(cause)
+            let terminal = self.block_durable_deliveries(cause)
+            self.record_stop(terminal)
+            self.settle_deliveries(terminal)
             return
           }
-          Backpressure(_) | ProtocolError(_) | NotConnected => {
+          Backpressure(_) | ProtocolError(_) => {
+            let terminal = self.block_durable_deliveries(cause)
+            self.record_stop(terminal)
+            self.settle_deliveries(terminal)
+            raise terminal
+          }
+          DeliveryRejected(_) | DurableStorage(_) | NotConnected => {
+            // Expiry has already removed/quarantined its own row. Storage and
+            // setup failures retain other pending rows for explicit reopen.
             self.record_stop(cause)
-            self.finish_deliveries(cause)
+            self.settle_deliveries(cause)
             raise cause
           }
           _ => ()
         }
         if !ever_ready {
+          // A scope that never connected cannot infer a protocol-side terminal
+          // outcome. Preserve durable rows pending for a later explicit open.
           self.record_stop(cause)
-          self.finish_deliveries(cause)
+          self.settle_deliveries(cause)
           raise cause
         }
         self.emit(Disconnected(self.generation, reason))
         attempts += 1
         if attempts > self.config.reconnect_attempts {
           let exhausted = ReconnectExhausted(reason)
-          self.record_stop(exhausted)
-          self.finish_deliveries(exhausted)
-          raise exhausted
+          let terminal = self.block_durable_deliveries(exhausted)
+          self.record_stop(terminal)
+          self.settle_deliveries(terminal)
+          raise terminal
         }
         // Bounded exponential backoff plus per-client jitter. Jitter comes from
         // this client's own xorshift stream, so two clients that lose the same
@@ -505,12 +605,39 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
               )
               return
             }
-            session.deliveries.remove(ack.message_id)
-            if session.delivery_slots > 0 {
-              session.delivery_slots -= 1
+            match delivery.durable {
+              Some(meta) =>
+                try {
+                  meta.runtime.transition(async fn() {
+                    // Validation before waiting for the FIFO gate is only a
+                    // fast-path protocol check. Expiry or teardown may settle
+                    // this owner while ACK handling is queued on the gate.
+                    if session.alive &&
+                      delivery.generation == Some(session.generation) &&
+                      delivery.phase is AwaitingAck &&
+                      session.deliveries.contains(ack.message_id) {
+                      meta.runtime.outbox.acknowledge(delivery.delivery_id)
+                      session.deliveries.remove(ack.message_id)
+                      if session.delivery_slots > 0 {
+                        session.delivery_slots -= 1
+                      }
+                      self.deliveries.acknowledge(delivery)
+                      session.delivery_changed.broadcast()
+                    }
+                  })
+                } catch {
+                  error if @async.is_cancellation_error(error) => raise error
+                  error => raise client_error_of(error)
+                }
+              None => {
+                session.deliveries.remove(ack.message_id)
+                if session.delivery_slots > 0 {
+                  session.delivery_slots -= 1
+                }
+                self.deliveries.acknowledge(delivery)
+                session.delivery_changed.broadcast()
+              }
             }
-            self.deliveries.acknowledge(delivery)
-            session.delivery_changed.broadcast()
           }
           None =>
             match session.pending.get(ack.message_id) {

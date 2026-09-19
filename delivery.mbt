@@ -33,6 +33,60 @@ pub(all) struct DeliveryStatus {
 } derive(@debug.Debug)
 
 ///|
+/// Persisted state returned by standalone durable-outbox inspection.
+pub(all) enum DurableDeliveryState {
+  DurablePending
+  DurableBlocked(String)
+} derive(Eq, @debug.Debug)
+
+///|
+/// One durable record in stable insertion order. Payload bytes are returned so
+/// an operator can reconcile the exact admitted command without opening the
+/// SQLite file through a second implementation.
+pub(all) struct DurableDeliveryInfo {
+  delivery_id : String
+  packet_id : Int
+  sequence : Int64
+  topic : String
+  payload : Bytes
+  retain : Bool
+  expires_at_ms : Int64
+  attempts : Int
+  ever_started : Bool
+  state : DurableDeliveryState
+} derive(@debug.Debug)
+
+///|
+/// Concrete runtime ownership shared by the client and its durable records.
+/// The FIFO semaphore serializes storage transitions with their in-memory
+/// publication; SqliteOutbox separately serializes its own statements.
+priv struct DurableRuntime {
+  outbox : SqliteOutbox
+  gate : @semaphore.Semaphore
+  recovered_requires_session_present : Bool
+  /// Wall clock seam keeps absolute-expiry transition tests deterministic.
+  now_ms : () -> Int64
+}
+
+///|
+priv struct DurableRecordMeta {
+  runtime : DurableRuntime
+  expires_at_ms : Int64
+}
+
+///|
+/// Serialize one durable transition and keep its SQLite commit plus matching
+/// memory publication indivisible with respect to coroutine cancellation.
+async fn[T] DurableRuntime::transition(
+  self : DurableRuntime,
+  action : async () -> T,
+) -> T {
+  self.gate.acquire()
+  defer self.gate.release()
+  @async.protect_from_cancel(action)
+}
+
+///|
 priv struct DeliveryRecord {
   delivery_id : String
   packet_id : Int
@@ -47,6 +101,7 @@ priv struct DeliveryRecord {
   mut start_deadline : Int64?
   mut ack_deadline : Int64?
   mut terminal_cause : ClientError?
+  mut durable : DurableRecordMeta?
 }
 
 ///|

@@ -150,6 +150,7 @@ fn cause_test_client(config : Config) -> Client {
     changed: @cond_var.Cond(),
     subscriptions: {},
     deliveries: DeliveryBook::new(),
+    durable: None,
     session: None,
     ready: true,
     stopped: false,

@@ -80,6 +80,10 @@ pub(all) suberror ClientError {
   DeliveryRejected(String)
   BrokerSessionLost(String)
   DeliveryAttemptsExhausted(String)
+  /// A durable outbox operation failed. The nested error preserves whether
+  /// operator action should address contention, capacity, integrity, identity,
+  /// or I/O before the outbox is reopened.
+  DurableStorage(DurableStoreError)
   /// The request's total `operation_timeout_ms` expired. Raised through the
   /// request as `NotSent` (never written) or `OutcomeUnknown` (write started).
   OperationTimeout(String)

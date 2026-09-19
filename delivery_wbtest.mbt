@@ -17,6 +17,7 @@ fn delivery_test_record(
     start_deadline: None,
     ack_deadline: None,
     terminal_cause: None,
+    durable: None,
   }
 }
 
@@ -77,6 +78,7 @@ fn delivery_test_client(config : Config) -> Client {
     changed: @cond_var.Cond(),
     subscriptions: {},
     deliveries,
+    durable: None,
     session: None,
     ready: true,
     stopped: false,

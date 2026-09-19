@@ -101,6 +101,7 @@ fn session_error_reason(error : Error) -> String {
     DeliveryRejected(reason) => reason
     BrokerSessionLost(reason) => reason
     DeliveryAttemptsExhausted(reason) => reason
+    DurableStorage(error) => @debug.to_string(error)
     DeliveryAttemptTimeout(reason) => reason
     OperationTimeout(reason) => reason
     WriteTimeout(reason) => reason
@@ -329,7 +330,113 @@ async fn Session::write_one(
         self.abort_with(error)
         return false
       }
-      delivery.mark_started()
+      match delivery.durable {
+        Some(meta) => {
+          let original_start_deadline = delivery.start_deadline
+          let transition = try {
+            meta.runtime.transition(async fn() {
+              match meta.runtime.outbox.expire_one(
+                delivery.delivery_id,
+                (meta.runtime.now_ms)(),
+              ) {
+                ExpiryStillPending => {
+                  if !delivery.ever_started {
+                    meta.runtime.outbox.record_may_write(delivery.delivery_id)
+                  }
+                  delivery.mark_started()
+                  None
+                }
+                ExpiryRemoved => {
+                  let error = DeliveryRejected(
+                    "durable delivery \{delivery.delivery_id} expired before its first possible write",
+                  )
+                  delivery.finish_terminal(session_error_reason(error), error)
+                  Some(error)
+                }
+                ExpiryBlocked => {
+                  let error = DeliveryRejected(
+                    "durable delivery \{delivery.delivery_id} expired after a possible write",
+                  )
+                  delivery.finish_terminal(session_error_reason(error), error)
+                  Some(error)
+                }
+              }
+            })
+          } catch {
+            error => {
+              if @async.is_cancellation_error(error) {
+                raise error
+              }
+              match durable_store_error_of(error) {
+                Some(store_error) => Some(DurableStorage(store_error))
+                None => Some(client_error_of(error))
+              }
+            }
+          }
+          match transition {
+            Some(error) => {
+              self.abort_with(error)
+              return false
+            }
+            None => ()
+          }
+          // The durable transition can suspend while another task ends this
+          // physical generation. A conservative possible-write bit may remain,
+          // but dead-generation bytes must never reach its socket.
+          if !self.alive ||
+            delivery.generation != Some(self.generation) ||
+            delivery.phase.terminal() {
+            return false
+          }
+          // Both SQLite calls above may suspend. Recheck immutable wall expiry
+          // and the original monotonic queue budget after the final COMMIT and
+          // immediately before the socket write.
+          let wall_now = (meta.runtime.now_ms)()
+          if wall_now >= meta.expires_at_ms {
+            let error : Error = try {
+              meta.runtime.transition(async fn() {
+                ignore(meta.runtime.outbox.expire_one(
+                  delivery.delivery_id,
+                  wall_now,
+                ))
+                let expired = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired after possible-write persistence and before socket write",
+                )
+                delivery.finish_terminal(
+                  session_error_reason(expired),
+                  expired,
+                )
+                expired
+              })
+            } catch {
+              store_error => {
+                if @async.is_cancellation_error(store_error) {
+                  raise store_error
+                }
+                match durable_store_error_of(store_error) {
+                  Some(value) => DurableStorage(value)
+                  None => client_error_of(store_error)
+                }
+              }
+            }
+            self.abort_with(error)
+            return false
+          }
+          if original_start_deadline is Some(deadline) &&
+            @async.now() >= deadline {
+            let detail =
+              "delivery \{delivery.delivery_id} packet \{delivery.packet_id} exceeded its pre-write operation budget while persisting durable possible-write state on attempt \{delivery.attempts}"
+            let error : Error = if delivery.attempts > reconnect_attempts {
+              DeliveryAttemptsExhausted(detail)
+            } else {
+              DeliveryAttemptTimeout(detail)
+            }
+            self.abort_with(error)
+            return false
+          }
+        }
+        None => delivery.mark_started()
+      }
     }
     None => ()
   }
@@ -395,12 +502,91 @@ priv suberror DeliveryAttemptTimeout {
 
 ///|
 /// One watchdog per physical generation. A waiter never owns this timer.
+async fn Session::expire_durable_delivery(
+  self : Session,
+  delivery : DeliveryRecord,
+) -> Error? {
+  guard delivery.durable is Some(meta) else { return None }
+  try {
+    meta.runtime.transition(async fn() {
+      // The wall-clock observation which selected this record happened before
+      // waiting for the FIFO gate. An ACK or generation teardown may have won
+      // the gate in the meantime, so both ownership and time are authoritative
+      // only after the gate is held.
+      if !self.alive ||
+        delivery.generation != Some(self.generation) ||
+        delivery.phase.terminal() ||
+        !self.deliveries.contains(delivery.packet_id) {
+        return None
+      }
+      let now_ms = (meta.runtime.now_ms)()
+      if now_ms < meta.expires_at_ms {
+        return None
+      }
+      let error : Error? = match meta.runtime.outbox.expire_one(
+        delivery.delivery_id,
+        now_ms,
+      ) {
+        // A backwards wall-clock step, or an already-settled owner observed
+        // before the checks above, is not a protocol or storage failure.
+        ExpiryStillPending => None
+        ExpiryRemoved =>
+          Some(DeliveryRejected(
+            "durable delivery \{delivery.delivery_id} expired before its first possible write",
+          ))
+        ExpiryBlocked =>
+          Some(DeliveryRejected(
+            "durable delivery \{delivery.delivery_id} expired after a possible write",
+          ))
+      }
+      match error {
+        Some(cause) => {
+          // Persisted expiry and the observable handle terminal state share the
+          // gate. A queued ACK can therefore win entirely or observe this
+          // already-recorded first cause, never a half-settled delivery.
+          delivery.finish_terminal(
+            session_error_reason(cause),
+            client_error_of(cause),
+          )
+          self.abort_with(cause)
+        }
+        None => ()
+      }
+      error
+    })
+  } catch {
+    store_error => {
+      if @async.is_cancellation_error(store_error) {
+        raise store_error
+      }
+      match durable_store_error_of(store_error) {
+        Some(error) => Some(DurableStorage(error))
+        None => Some(client_error_of(store_error))
+      }
+    }
+  }
+}
+
+///|
+/// One watchdog per physical generation. A waiter never owns this timer.
 async fn Session::delivery_watchdog(self : Session, config : Config) -> Unit {
   let tick = (config.operation_timeout_ms / 4).clamp(min=10, max=250)
   while self.alive {
     @async.sleep(tick)
     let now = @async.now()
     for _, delivery in self.deliveries {
+      if delivery.durable is Some(meta) &&
+        (meta.runtime.now_ms)() >= meta.expires_at_ms {
+        match self.expire_durable_delivery(delivery) {
+          Some(error) => {
+            // Successful expiry already recorded and aborted under the gate;
+            // storage failures still need to stop this generation here.
+            self.abort_with(error)
+            raise error
+          }
+          None => ()
+        }
+      }
       let detail : String? = match delivery.start_deadline {
         Some(deadline) if now >= deadline =>
           Some(

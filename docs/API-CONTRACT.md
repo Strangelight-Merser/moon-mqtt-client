@@ -63,15 +63,17 @@ best-effort and does not claim cross-field atomicity.
 | `ReconnectExhausted` | Retries after a previously working connection were exhausted | n/a |
 | `InvalidConfig` | Identity files missing, encrypted, malformed, or mismatched; or `Plain` plus a client identity | n/a |
 | `TlsFailure` | TLS handshake or server-certificate verification failed after a valid config | n/a |
+| `DurableStorage(error)` | A required SQLite transition failed; the nested error retains busy/full/read-only/corrupt/I/O/schema/identity/limit/state classification | Depends; inspect the stable ID before reopening |
 | `Closed` | The client was shut down normally (`disconnect` or `with_client` scope end) | n/a |
 
 A failed first connection raises the classified error to `wait_connected` and to
 `with_client`. `Closed` is reserved for a normal stop; it does not replace
 `InvalidConfig` or `TlsFailure`.
 
-`OutcomeUnknown` is the only result that requires application-level recovery.
-Recovery must not assume success or failure: query the peer or resend an
-idempotent request.
+For ordinary requests, `OutcomeUnknown` is the result that requires
+application-level recovery. Durable blocked rows and `DurableStorage` likewise
+require inspection and reconciliation. Recovery must not assume success or
+failure: query the peer or resend an idempotent request.
 
 ## Recoverable QoS 1 delivery
 
@@ -129,6 +131,66 @@ device execution, or exactly-once application delivery. MQTT QoS 1 replay can
 produce duplicate application messages. Completion and terminal failure remove
 the active payload and packet-ID reservation; callers may retain the small
 terminal handle snapshot.
+
+## Durable outbox beta
+
+`with_durable_client(options, config, callback)` extends only the explicit
+recoverable QoS 1 path with one concrete SQLite outbox. It requires
+`ResumeSession`; ordinary QoS 0 remains ephemeral, ordinary QoS 1 remains
+rejected under resume mode, and the in-memory `submit_delivery` API is rejected
+inside a durable scope. The outbox file is exclusively owned for the callback
+scope and is bound to a versioned identity containing `mqtt`/`mqtts`/`ws`/`wss`
+scheme, host, port, WebSocket path, stable client ID and optional username.
+Passwords, CA paths, certificate paths and private-key paths are not stored, so
+credential rotation does not by itself create a new logical session. The
+application remains responsible for ensuring the broker maps rotated
+certificates to the same tenant and that the stable client ID has one owner.
+
+Before any dial, the scope opens and integrity-checks SQLite, applies absolute
+expiry, loads pending rows in insertion order, and reserves every stored packet
+ID. The callback runs after the connection is ready and receives the exact
+recovered `DeliveryHandle` objects. A recovered row that may have reached the
+network requires `Session Present=true` even on this process's first connection.
+If the broker lost that logical session, the row is persisted as blocked and no
+PUBLISH is replayed. A recovered row proven never started may make its first
+send after a new session is established.
+
+`submit_durable_delivery(id, topic, payload, expires_at_ms)` is async because
+admission commits before a success handle exists. It remains connected-only and
+bounded by `max_inflight`; `DurableOutboxOptions` separately bounds rows, total
+payload bytes and SQLite main-file pages. A generation attachment commits its
+attempt before queueing. Before the first possible socket write, the outbox
+commits `ever_started`; after a valid PUBACK, DELETE commits before the handle is
+woken and its packet ID or payload is released. Cancellation waits for any
+already-submitted SQLite transition and publishes the matching memory ownership
+before it propagates. A caller uncertain whether admission returned can inspect
+the stable ID.
+
+The absolute expiry is Unix time in milliseconds. Expired never-started rows are
+removed as not sent. Expired rows that might have been sent are blocked as an
+unknown outcome and require application reconciliation. Wall-clock corrections
+can move when this absolute deadline is observed. Per-generation queue and ACK
+watchdogs still use the monotonic runtime clock.
+
+Normal `disconnect` or callback exit settles current handles with `Closed` but
+keeps unresolved rows pending for a later explicit durable scope. Protocol
+failure, broker-session loss and exhausted delivery or reconnect budgets persist
+a blocked reason before current handles are settled. A storage failure stops the
+scope without a same-scope network retry; if the blocked marker itself could not
+be committed, the durable store error is the authoritative result. SQLite is
+closed only after client tasks and protected transitions have ended.
+
+`inspect_durable_outbox` returns records in stable insertion order without
+dialing. `discard_durable_delivery` deletes only a row proven never started and
+only outside an active owning scope. Started or blocked possible-write rows have
+no single-row force-delete API in this beta.
+
+The unavoidable duplicate window is a broker PUBACK that arrived before the
+durable DELETE committed. A crash in that interval leaves the row eligible for
+retransmission with its original packet ID and `DUP=1`. This is at-least-once
+transport recovery, not exactly-once processing or a permanent deduplication
+ledger. SQLite `synchronous=EXTRA`, rollback journal mode and process-kill tests
+do not establish guarantees beyond SQLite, the operating system and filesystem.
 
 ## Connection lifetime, timeouts and cancellation
 

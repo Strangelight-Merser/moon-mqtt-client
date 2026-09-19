@@ -5,6 +5,7 @@ struct Client {
   changed : @cond_var.Cond
   subscriptions : Map[String, QoS]
   deliveries : DeliveryBook
+  durable : DurableRuntime?
   mut session : Session?
   mut ready : Bool
   mut stopped : Bool
@@ -83,16 +84,61 @@ fn ReconnectBackoff::next(self : ReconnectBackoff) -> Int {
 }
 
 ///|
-/// Own all client tasks within the callback's lifetime.
-pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T {
-  config.validate()
-  ignore(encode(config.connect_packet(), config.max_packet_size))
-  let client : Client = {
+fn durable_now_ms() -> Int64 {
+  @env.now().reinterpret_as_int64()
+}
+
+///|
+/// A length-prefixed versioned identity avoids delimiter collisions while
+/// binding one file to the logical MQTT endpoint and stable client identity.
+fn durable_identity(config : Config) -> String {
+  let (scheme, target) = match (config.transport, config.tls) {
+    (Tcp, Plain) => ("mqtt", "")
+    (Tcp, _) => ("mqtts", "")
+    (WebSocket(path), Plain) =>
+      ("ws", "\{@utf8.encode(path).length()}:\{path}")
+    (WebSocket(path), _) =>
+      ("wss", "\{@utf8.encode(path).length()}:\{path}")
+  }
+  let username = match config.username {
+    Some(value) => "some:\{@utf8.encode(value).length()}:\{value}"
+    None => "none"
+  }
+  "moon-mqtt-durable-v1|\{scheme}|\{@utf8.encode(config.host).length()}:\{config.host}|\{config.port}|\{target}|\{@utf8.encode(config.client_id).length()}:\{config.client_id}|\{username}"
+}
+
+///|
+fn PersistedDelivery::public_info(self : PersistedDelivery) -> DurableDeliveryInfo {
+  {
+    delivery_id: self.delivery_id,
+    packet_id: self.packet_id,
+    sequence: self.sequence,
+    topic: self.topic,
+    payload: self.payload,
+    retain: self.retain,
+    expires_at_ms: self.expires_at_ms,
+    attempts: self.attempts,
+    ever_started: self.ever_started,
+    state: match self.state {
+      Pending => DurablePending
+      Blocked => DurableBlocked(self.reason)
+    },
+  }
+}
+
+///|
+fn new_client(
+  config : Config,
+  deliveries : DeliveryBook,
+  durable : DurableRuntime?,
+) -> Client {
+  {
     config,
     events: @aqueue.Queue(kind=@aqueue.Blocking(config.receive_capacity)),
     changed: @cond_var.Cond(),
     subscriptions: {},
-    deliveries: DeliveryBook::new(),
+    deliveries,
+    durable,
     session: None,
     ready: false,
     stopped: false,
@@ -106,6 +152,14 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     backoff: ReconnectBackoff::new_default(),
     stop_reason: None,
   }
+}
+
+///|
+/// Own all client tasks within the callback's lifetime.
+pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T {
+  config.validate()
+  ignore(encode(config.connect_packet(), config.max_packet_size))
+  let client = new_client(config, DeliveryBook::new(), None)
   @async.with_task_group(group => {
     let worker = group.spawn(() => client.supervise())
     client.worker = Some(worker)
@@ -125,6 +179,147 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     client.disconnect()
     result
   })
+}
+
+///|
+/// Inspect a durable outbox without starting a network connection. The file is
+/// opened with the same exclusive ownership and identity checks as a client
+/// scope, then closed after all asynchronous SQLite work has settled.
+pub async fn inspect_durable_outbox(
+  options : DurableOutboxOptions,
+  config : Config,
+) -> Array[DurableDeliveryInfo] {
+  config.validate()
+  if !(config.session_policy is ResumeSession) {
+    raise InvalidConfig("durable outbox requires ResumeSession")
+  }
+  let outbox = SqliteOutbox::open(options, durable_identity(config))
+  errdefer (try outbox.close() catch { _ => () })
+  let records = outbox.inspect()
+  outbox.close()
+  records.map(record => record.public_info())
+}
+
+///|
+/// Discard one record only when storage proves no write could have started.
+/// This standalone operation refuses concurrent ownership of the same file.
+pub async fn discard_durable_delivery(
+  options : DurableOutboxOptions,
+  config : Config,
+  delivery_id : String,
+) -> Unit {
+  config.validate()
+  if !(config.session_policy is ResumeSession) {
+    raise InvalidConfig("durable outbox requires ResumeSession")
+  }
+  let outbox = SqliteOutbox::open(options, durable_identity(config))
+  errdefer (try outbox.close() catch { _ => () })
+  outbox.discard_never_started(delivery_id)
+  outbox.close()
+}
+
+///|
+/// Own a ResumeSession client and one concrete SQLite outbox for the callback's
+/// lifetime. Recovered handles are materialized, ordered and packet-reserved
+/// before the supervisor can dial. The callback receives those exact objects
+/// after the first connection becomes ready.
+pub async fn[T] with_durable_client(
+  options : DurableOutboxOptions,
+  config : Config,
+  action : async (Client, Array[DeliveryHandle]) -> T,
+) -> T {
+  config.validate()
+  if !(config.session_policy is ResumeSession) {
+    raise InvalidConfig("durable outbox requires ResumeSession")
+  }
+  if options.max_records > config.max_inflight {
+    raise InvalidConfig(
+      "durable max_records must not exceed client max_inflight",
+    )
+  }
+  ignore(encode(config.connect_packet(), config.max_packet_size))
+  let outbox = SqliteOutbox::open(options, durable_identity(config))
+  errdefer (try outbox.close() catch { _ => () })
+  ignore(outbox.expire(durable_now_ms()))
+  let persisted = outbox.inspect()
+  if persisted.length() > config.max_inflight {
+    raise DurableStoreLimit(
+      "persisted durable records exceed client max_inflight",
+    )
+  }
+  for record in persisted {
+    if record.state is Blocked {
+      raise DurableStoreState(
+        "durable delivery \{record.delivery_id} is blocked: \{record.reason}",
+      )
+    }
+  }
+  let runtime : DurableRuntime = {
+    outbox,
+    gate: @semaphore.Semaphore(1),
+    recovered_requires_session_present: persisted.any(record => record.ever_started),
+    now_ms: durable_now_ms,
+  }
+  let deliveries = DeliveryBook::new()
+  let recovered : Array[DeliveryHandle] = []
+  for stored in persisted {
+    let record : DeliveryRecord = {
+      delivery_id: stored.delivery_id,
+      packet_id: stored.packet_id,
+      changed: @cond_var.Cond(),
+      topic: Some(stored.topic),
+      payload: Some(stored.payload),
+      retain: stored.retain,
+      phase: AwaitingReconnect("recovered from durable outbox"),
+      attempts: stored.attempts,
+      generation: None,
+      ever_started: stored.ever_started,
+      start_deadline: None,
+      ack_deadline: None,
+      terminal_cause: None,
+      durable: Some({
+        runtime,
+        expires_at_ms: stored.expires_at_ms,
+      }),
+    }
+    if deliveries.active.contains(record.delivery_id) ||
+      deliveries.reserved.contains(record.packet_id) {
+      raise DurableStoreSchema(
+        "durable records contain duplicate delivery or packet identifiers",
+      )
+    }
+    deliveries.active[record.delivery_id] = record
+    deliveries.reserved[record.packet_id] = record
+    deliveries.order.push(record)
+    recovered.push({ record, })
+  }
+  let client = new_client(config, deliveries, Some(runtime))
+  // Error unwinding first joins the task group, then settles through the
+  // durable gate, and only the earlier outer errdefer closes SQLite.
+  errdefer client.settle_deliveries(
+    SessionLost("durable client scope ended"),
+  )
+  let result = @async.with_task_group(group => {
+    let worker = group.spawn(() => client.supervise())
+    client.worker = Some(worker)
+    defer {
+      client.stopped = true
+      client.ready = false
+      if client.session is Some(session) {
+        session.abort("durable client scope ended")
+      }
+      worker.cancel()
+      client.events.close(error=Closed)
+      client.changed.broadcast()
+    }
+    client.wait_connected()
+    let value = action(client, recovered)
+    client.disconnect()
+    value
+  })
+  client.settle_deliveries(SessionLost("durable client scope ended"))
+  outbox.close()
+  result
 }
 
 ///|
@@ -177,6 +372,16 @@ fn client_error_of(error : Error) -> ClientError {
     DeliveryRejected(msg) => DeliveryRejected(msg)
     BrokerSessionLost(msg) => BrokerSessionLost(msg)
     DeliveryAttemptsExhausted(msg) => DeliveryAttemptsExhausted(msg)
+    DurableStorage(error) => DurableStorage(error)
+    DurableStoreBusy(msg) => DurableStorage(DurableStoreBusy(msg))
+    DurableStoreFull(msg) => DurableStorage(DurableStoreFull(msg))
+    DurableStoreReadOnly(msg) => DurableStorage(DurableStoreReadOnly(msg))
+    DurableStoreCorrupt(msg) => DurableStorage(DurableStoreCorrupt(msg))
+    DurableStoreIo(msg) => DurableStorage(DurableStoreIo(msg))
+    DurableStoreSchema(msg) => DurableStorage(DurableStoreSchema(msg))
+    DurableStoreIdentity(msg) => DurableStorage(DurableStoreIdentity(msg))
+    DurableStoreLimit(msg) => DurableStorage(DurableStoreLimit(msg))
+    DurableStoreState(msg) => DurableStorage(DurableStoreState(msg))
     OperationTimeout(msg) => OperationTimeout(msg)
     WriteTimeout(msg) => WriteTimeout(msg)
     PingResponseTimeout(msg) => PingResponseTimeout(msg)
@@ -187,6 +392,24 @@ fn client_error_of(error : Error) -> ClientError {
     // degrading it to the generic ProtocolError fallback.
     @tls.TlsError(msg) => TlsFailure(msg)
     _ => ProtocolError(error.to_string())
+  }
+}
+
+///|
+fn durable_store_error_of(error : Error) -> DurableStoreError? {
+  try {
+    raise error
+  } catch {
+    DurableStoreBusy(msg) => Some(DurableStoreBusy(msg))
+    DurableStoreFull(msg) => Some(DurableStoreFull(msg))
+    DurableStoreReadOnly(msg) => Some(DurableStoreReadOnly(msg))
+    DurableStoreCorrupt(msg) => Some(DurableStoreCorrupt(msg))
+    DurableStoreIo(msg) => Some(DurableStoreIo(msg))
+    DurableStoreSchema(msg) => Some(DurableStoreSchema(msg))
+    DurableStoreIdentity(msg) => Some(DurableStoreIdentity(msg))
+    DurableStoreLimit(msg) => Some(DurableStoreLimit(msg))
+    DurableStoreState(msg) => Some(DurableStoreState(msg))
+    _ => None
   }
 }
 
@@ -437,6 +660,11 @@ pub fn Client::submit_delivery(
   if !(self.config.session_policy is ResumeSession) {
     raise DeliveryRejected("submit_delivery requires ResumeSession")
   }
+  if self.durable is Some(_) {
+    raise DeliveryRejected(
+      "durable client scopes require submit_durable_delivery",
+    )
+  }
   if !valid_delivery_id(delivery_id) {
     raise DeliveryRejected("delivery_id must contain 1..128 UTF-8 bytes")
   }
@@ -466,6 +694,7 @@ pub fn Client::submit_delivery(
     start_deadline: None,
     ack_deadline: None,
     terminal_cause: None,
+    durable: None,
   }
   // Encode before mutating ownership so an invalid topic/packet bound leaves no
   // active ID, packet reservation, or queue entry behind.
@@ -499,7 +728,180 @@ pub fn Client::submit_delivery(
 }
 
 ///|
+/// Commit one durable QoS 1 admission before it can become visible to the
+/// network. `expires_at_ms` is an absolute Unix-millisecond deadline persisted
+/// once; cancellation after commit leaves the stable ID inspectable.
+pub async fn Client::submit_durable_delivery(
+  self : Client,
+  delivery_id : String,
+  topic : String,
+  payload : Bytes,
+  expires_at_ms : Int64,
+  retain? : Bool = false,
+) -> DeliveryHandle {
+  guard self.durable is Some(runtime) else {
+    raise DeliveryRejected("submit_durable_delivery requires a durable client scope")
+  }
+  if !valid_delivery_id(delivery_id) {
+    raise DeliveryRejected("delivery_id must contain 1..128 UTF-8 bytes")
+  }
+  if payload.length() > self.config.max_packet_size - 4 {
+    raise ProtocolError("outgoing payload exceeds packet limit")
+  }
+  let now = (runtime.now_ms)()
+  if expires_at_ms <= now {
+    raise DeliveryRejected("durable delivery expiry must be in the future")
+  }
+  let attached : (DeliveryRecord, Session?) = try {
+    runtime.transition(async fn() {
+      if self.deliveries.active.contains(delivery_id) {
+        raise DeliveryRejected("duplicate active delivery_id: \{delivery_id}")
+      }
+      let session = self.active()
+      if self.deliveries.active.length() + session.pending.length() >=
+        self.config.max_inflight {
+        raise Backpressure("inflight limit reached")
+      }
+      let packet_id = self.deliveries.allocate_packet_id(session)
+      let record : DeliveryRecord = {
+        delivery_id,
+        packet_id,
+        changed: @cond_var.Cond(),
+        topic: Some(topic),
+        payload: Some(payload),
+        retain,
+        phase: Queued,
+        attempts: 0,
+        generation: None,
+        ever_started: false,
+        start_deadline: None,
+        ack_deadline: None,
+        terminal_cause: None,
+        durable: None,
+      }
+      // Reserve the MQTT identifier before the first SQLite suspension so an
+      // ordinary request cannot claim it while admission commits.
+      self.deliveries.reserved[packet_id] = record
+      let mut admitted = false
+      errdefer (if !admitted { self.deliveries.reserved.remove(packet_id) })
+      ignore(record.packet(self.config.max_packet_size))
+      // Occupy the inflight capacity before SQLite can suspend. Ordinary
+      // requests do not share the durable FIFO gate, so the packet-ID
+      // reservation alone would let one of them steal the last slot while the
+      // durable COMMIT is pending.
+      session.delivery_slots += 1
+      let mut provisional_slot = true
+      errdefer {
+        if provisional_slot && session.alive && session.delivery_slots > 0 {
+          session.delivery_slots -= 1
+          session.delivery_changed.broadcast()
+        }
+      }
+      let stored = runtime.outbox.admit(
+        delivery_id,
+        packet_id,
+        topic,
+        payload,
+        retain,
+        expires_at_ms,
+        now,
+      )
+      admitted = true
+      record.durable = Some({
+        runtime,
+        expires_at_ms: stored.expires_at_ms,
+      })
+      self.deliveries.active[delivery_id] = record
+      self.deliveries.order.push(record)
+      // The connection may disappear during the durable admission. The row and
+      // handle remain admitted; a later replay owns attachment in that case.
+      let current : Session? = match self.session {
+        Some(current) if self.ready && current.alive &&
+          current.generation == session.generation => Some(current)
+        _ => None
+      }
+      match current {
+        Some(current) => {
+          runtime.outbox.record_attach(delivery_id)
+          record.attach(
+            current.generation,
+            @async.now() + self.config.operation_timeout_ms.to_int64(),
+          )
+          current.deliveries[packet_id] = record
+          // The provisional capacity reservation now belongs to this record.
+          provisional_slot = false
+          (record, Some(current))
+        }
+        None => {
+          if session.alive && session.delivery_slots > 0 {
+            session.delivery_slots -= 1
+            session.delivery_changed.broadcast()
+          }
+          provisional_slot = false
+          record.phase = AwaitingReconnect(
+            "connection changed after durable admission",
+          )
+          record.changed.broadcast()
+          (record, None)
+        }
+      }
+    })
+  } catch {
+    error => {
+      match durable_store_error_of(error) {
+        Some(store_error) => {
+          let wrapped = DurableStorage(store_error)
+          self.record_stop(wrapped)
+          self.stopped = true
+          self.ready = false
+          match self.session {
+            Some(session) => session.abort_with(wrapped)
+            None => ()
+          }
+          self.changed.broadcast()
+          raise wrapped
+        }
+        None => raise error
+      }
+    }
+  }
+  let (record, generation) = attached
+  // protect_from_cancel deliberately completes the storage+memory transition
+  // with the task still marked cancelled. This checkpoint propagates that
+  // cancellation before any optional queue wait while leaving stable ownership.
+  @async.pause()
+  match generation {
+    Some(session) => {
+      let bytes = record.packet(self.config.max_packet_size)
+      try {
+        session.enqueue_delivery(record, bytes)
+      } catch {
+        error => {
+          if @async.is_cancellation_error(error) {
+            raise error
+          }
+          // Admission is already committed. Generation teardown detaches this
+          // record, and the supervisor retries it without rolling storage back.
+        }
+      }
+    }
+    None => ()
+  }
+  { record, }
+}
+
+///|
 fn Client::finish_deliveries(self : Client, error : Error) -> Unit {
+  // Durable settlement must serialize with ACK DELETE and other storage
+  // transitions. Async owners call settle_deliveries after their task joins.
+  if self.durable is Some(_) {
+    return
+  }
+  self.finish_deliveries_now(error)
+}
+
+///|
+fn Client::finish_deliveries_now(self : Client, error : Error) -> Unit {
   if self.deliveries.active.is_empty() {
     return
   }
@@ -515,6 +917,17 @@ fn Client::finish_deliveries(self : Client, error : Error) -> Unit {
     _ => client_error_of(error)
   }
   self.deliveries.finish_all(session_error_reason(error), cause)
+}
+
+///|
+async fn Client::settle_deliveries(self : Client, error : Error) -> Unit {
+  match self.durable {
+    Some(runtime) =>
+      runtime.transition(fn() {
+        self.finish_deliveries_now(error)
+      })
+    None => self.finish_deliveries_now(error)
+  }
 }
 
 ///|
@@ -607,4 +1020,5 @@ pub async fn Client::disconnect(self : Client) -> Unit {
       _ => ()
     }
   }
+  self.settle_deliveries(SessionLost("client disconnected"))
 }

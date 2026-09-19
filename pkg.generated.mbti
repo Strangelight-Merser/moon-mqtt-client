@@ -6,7 +6,13 @@ import {
 }
 
 // Values
+pub async fn discard_durable_delivery(DurableOutboxOptions, Config, String) -> Unit
+
+pub async fn inspect_durable_outbox(DurableOutboxOptions, Config) -> Array[DurableDeliveryInfo]
+
 pub async fn[T] with_client(Config, async (Client) -> T) -> T
+
+pub async fn[T] with_durable_client(DurableOutboxOptions, Config, async (Client, Array[DeliveryHandle]) -> T) -> T
 
 // Errors
 pub(all) suberror ClientError {
@@ -22,6 +28,7 @@ pub(all) suberror ClientError {
   DeliveryRejected(String)
   BrokerSessionLost(String)
   DeliveryAttemptsExhausted(String)
+  DurableStorage(DurableStoreError)
   OperationTimeout(String)
   WriteTimeout(String)
   PingResponseTimeout(String)
@@ -53,6 +60,7 @@ pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool) ->
 pub fn Client::set_reconnect_seed(Self, Int) -> Unit
 pub fn Client::stats(Self) -> ClientStats
 pub fn Client::submit_delivery(Self, String, String, Bytes, retain? : Bool) -> DeliveryHandle raise ClientError
+pub async fn Client::submit_durable_delivery(Self, String, String, Bytes, Int64, retain? : Bool) -> DeliveryHandle
 pub async fn Client::subscribe(Self, Array[Subscription]) -> Array[SubscriptionResult]
 pub async fn Client::unsubscribe(Self, Array[String]) -> Unit
 pub async fn Client::wait_connected(Self) -> Unit
@@ -126,6 +134,24 @@ pub(all) struct DeliveryStatus {
   attempts : Int
   generation : Int?
 } derive(@debug.Debug)
+
+pub(all) struct DurableDeliveryInfo {
+  delivery_id : String
+  packet_id : Int
+  sequence : Int64
+  topic : String
+  payload : Bytes
+  retain : Bool
+  expires_at_ms : Int64
+  attempts : Int
+  ever_started : Bool
+  state : DurableDeliveryState
+} derive(@debug.Debug)
+
+pub(all) enum DurableDeliveryState {
+  DurablePending
+  DurableBlocked(String)
+} derive(Eq, @debug.Debug)
 
 pub(all) struct DurableOutboxOptions {
   path : String
