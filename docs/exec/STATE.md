@@ -1,17 +1,37 @@
 # Execution state
 
-## Active A0–A4 v0.7.1 audit candidate — RUNNING
+## A0–A4 v0.7.1 local candidate — DONE (2026-09-19)
 
-Current request supersedes historical release authorization below: local A0–A4 only; no push, merge, publication, schema 2 change, B tasks or hardware. Original checkout remains clean at `eeb93be40ba19020df1a9effcdd8771c5f132104` on `codex/v0.3-mtls`.
+This request is complete within local candidate scope. No push, merge, publication, schema 2 change, B task, production service or hardware operation is authorized or performed this round. Historical release authorization below does not extend this scope.
 
-- BASE: fetched `origin/main` = `73bcd1952262ba4a097ccf0b11fae9ad4cf4fe68`; released v0.7.0 = `bc93570ebd3e3034511126342f84c87876088ebc`. Difference is five documentation files only; v0.4–v0.7 capabilities will not be reimplemented.
-- Integration/core worktree: `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-v071`, branch `codex/v0.7.1-audit`. HA isolated worktree: `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-v071-ha`, branch `codex/v0.7.1-ha`. Both created from BASE. Shared read-only toolchain/venv, separate build/dependency directories.
-- Input: original ZIP preserved; extracted read-only reference `/tmp/moon-mqtt-v070-audit-input/moon_mqtt_v070_audit`. Its Python probes are hypotheses, not native acceptance.
-- Owners: root/Astra integration and final acceptance; `/root/core_sol` requested `gpt-5.6-sol` high, A1 then A2; `/root/baseline_luna` requested `gpt-5.6-luna` high, A0 then approved A3. Spawn responses confirm sessions but do not expose actual backend model metadata. Independent new Sol review required at A4. Maximum two concurrent child tasks.
-- F3 approved policy: fixed dirty discovery/availability/latest-state values; successful publish clears its value, transient NotConnected/NotSent/OutcomeUnknown/Backpressure preserves it. Other errors propagate. Connected invalidates old command/query correlation and reports offline/unknown until a fresh query confirms state. Never queue/replay physical commands. Original four host scenarios preserved.
-- A0 DONE: live release/PR#3/main CI verified by Luna; root verified fixed wrapper MoonBit and bundled Mosquitto2.0.22/Paho2.1.0. PATH absence is not a tool blocker. Original source unchanged; schema2 confirmed in released code.
-- A4 first frozen candidate `d6643e8` passed the complete local checks, but independent review found two P2 blockers: implicit export of HA DirtyMetadata (root changed it to priv and restored generated API identity), and queued PINGRESP incorrectly suppressing the later real ping timeout (Sol fixed queued/writing separation in `1e3e848`, with a native red/green regression and native148/148). First green tests do not close these review findings.
-- Evidence directory: `_build/audit-v071/` in each worktree. Candidate tests/independent review/integrated checks initially NOT_RUN; no current-candidate CI/registry/HIL claim.
+- BASE: fetched main `73bcd1952262ba4a097ccf0b11fae9ad4cf4fe68`; released v0.7.0 `bc93570ebd3e3034511126342f84c87876088ebc`. Only five documentation files differ. Released v0.4–v0.7 capabilities were not reimplemented.
+- Original checkout `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-client` remains clean on `codex/v0.3-mtls` at `eeb93be40ba19020df1a9effcdd8771c5f132104`.
+- Candidate checkout `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-v071`, branch `codex/v0.7.1-audit`. Reviewed and tested implementation: `ce856843c75b90a6fc3395a5aff06fbf106fb05c`, tree `69a84795a119f3546bbfd7572a1fc43b2c4cdb65`; BASE-to-candidate patch SHA256 `b82b8338382cbf2aa0a6f227101f5ab55a5a6b713aff2cddbc33ceabdb0b5fae`. The closing commit changes only documentation; `_build/audit-v071/acceptance.json` binds its delivery SHA to these identical implementation/test bytes.
+- Fixed tools verified locally: moon0.1.20260904, moonc0.10.12+1634b282e, Mosquitto2.0.22, Paho2.1.0. Toolchain/venv are shared; worktrees have separate builds. Original audit ZIP is unchanged; checksum-verified reference retained in `_build/audit-v071/input/`.
+
+### Findings and evidence
+
+- **F1 CONFIRMED → FIXED.** Native baseline red to final 2/2: never-written expired delivery makes zero writer calls, settles NotSent, unknown count stays zero. The counterexample actually writes once in an older generation and remains Unknown after expiry with zero new-generation writes. Durable COMMIT-before-write is unchanged.
+- **F2 CONFIRMED → FIXED.** Initial native regressions exposed duplicate enqueue, early-response and abort-return races. Independent review found a further queued-response false-negative; a production-read-loop ordering-fence regression failed before rework and passed after separating queued/writing/early-answered states. Final A2 6/6 covers timeout starting after write, queue capacity for PUBACK/DISCONNECT, and teardown. Controlled writers establish the state-machine interleavings, not every transport's scheduling.
+- **F3 CONFIRMED → FIXED.** Actual native controller plus local Mosquitto/proxy reproduces exit on discovery, availability and state interruptions in the release baseline. The exact final fault script was run against an isolated archive of BASE. Final candidate 4/4 survives transient loss, queries fresh state, keeps physical command count exactly one, and exits with ProtocolError on a permanent peer fault. BASE also exited on that permanent fault but reported OutcomeUnknown; it did not swallow the error. Metadata uses three bounded dirty values; original command ID/expiry/nonoptimistic behavior is preserved.
+- Independent `/root/independent_sol` reviewed frozen `d6643e8`, raised two P2s (implicit helper API export and queued/writing ambiguity), and independently closed both on `ce856843…`: **PASS, no remaining blocker**. Root read the implementation/test diffs and both reports. `DirtyMetadata` is private. Regenerating API leaves all original interfaces unchanged; 61 protected files and all 186 frozen non-document files match.
+
+### Integrated verification on ce856843…
+
+All commands ran sequentially with `MOONBIT_ASYNC_CHECK_FD_LEAK=1`, exit 0 and no skips:
+
+- `./scripts/check.sh`: native148/148, Mosquitto/Paho25/25, protocol faults10/10, scenario smoke, separate TCP/mTLS workspace consumers, recoverable QoS1 5/5, durable process recovery4/4, original HA4/4, MQTT5 codec roundtrip and runtime12/12.
+- `.venv/bin/python -W error::ResourceWarning tests/ha_relay_transient.py`: 4/4, no ResourceWarning. This new suite is run explicitly; original acceptance scripts/tests are unchanged.
+- `.venv/bin/python tests/ws_protocol_faults.py`: 6/6.
+- `./scripts/moon.sh info --target native`, protected/frozen hash comparison and `git diff --check`: pass. Existing four compiler warnings remain.
+
+**NOT_RUN on this candidate:** Linux client/conditional EMQX and native WS/WSS jobs, rolling toolchain, new hosted CI, clean registry reinstall, publication, actual Home Assistant, ESP32/GPIO/HIL. Historical v0.7 CI/registry evidence is not candidate evidence. No public API or schema change; schema 2 databases are neither migrated nor recreated.
+
+### Ownership and handoff
+
+Root/Astra handled contracts, integration and final acceptance. `/root/core_sol` implemented A1 then A2 and its review correction; `/root/baseline_luna` did A0, approved A3 and final integrated verification in separate worktrees; `/root/independent_sol` was a new, read-only review session. Dispatch explicitly requested `gpt-5.6-sol` / `gpt-5.6-luna` with high reasoning; receipts confirm distinct sessions but do not expose backend model identity, so actual model metadata is **UNCONFIRMED**. At most two child tasks ran concurrently.
+
+Evidence root `_build/audit-v071/`: `final-candidate.patch`, `final-candidate.json`, `A4-FINAL-INDEPENDENT-REVIEW.md`, `A4-FINAL-RESULTS.md`, `A4-final-integrity.json`, `A4-final-*.log`, `A3-baseline-final-provenance.json`, native red/green logs, and `acceptance.json`. Short changes are in `docs/RELEASE-NOTES-v0.7.1.md`. Stop here; publication and B1–B3 need a new request.
 
 ## Historical completed workflow (retained)
 

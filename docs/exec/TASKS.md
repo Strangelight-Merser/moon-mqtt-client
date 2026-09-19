@@ -7,17 +7,21 @@ Common BASE `73bcd1952262ba4a097ccf0b11fae9ad4cf4fe68`. No public API/schema2 ch
 ### A0 — DONE — Luna, Astra adjudication
 WHY: avoid stale v0.3 checkout and duplicate released work. SCOPE: baseline, toolchain, GitHub release/CI, required checks. ACCEPTANCE: clean user tree, fixed BASE, published schema2, actual/requested routing limitations and required commands documented. Evidence: `_build/audit-v071/`; live GitHub release/PR/CI checked by Luna, tool wrappers independently verified by root (moon0.1.20260904/moonc0.10.12+1634b282e, Mosquitto2.0.22, Paho2.1.0). Published schema2 source confirmed. These are baseline facts, not candidate check results.
 
-### A1 — REVIEW — Sol
+### A1 — DONE — Sol
 WHY: distinguish no write from possible write on expiry. SCOPE: session and new native tests. CONTRACT: all fallible non-durable packet preparation precedes first possible-write marker; previous-generation writes remain Unknown; durable COMMIT remains before network write. ACCEPTANCE: baseline red/fixed green, zero writer calls/NotSent/no unknown increment for new expired delivery, prior-write counterexample. Requested `gpt-5.6-sol` high; actual metadata unconfirmed.
 
-### A2 — REVIEW — same Sol after A1
+### A2 — DONE — same Sol after A1
 WHY: avoid duplicate queued/writing heartbeat and early-response timer resurrection. SCOPE: session/runtime and new native regressions. CONTRACT: one pending ping, control-plane slots remain usable, timeout begins at completed write, generation/shutdown isolation. ACCEPTANCE: native red/green blocked Writer and early response cases, correct missing-response timeout and cleanup.
 
-### A3 — REVIEW — Luna after A0
+### A3 — DONE — Luna after A0
 WHY: metadata transient failure must not terminate host scope. SCOPE: controller and new host fault regression, original four tests unchanged. APPROVED CONTRACT: three bounded latest dirty values; transient NotConnected/NotSent/OutcomeUnknown/Backpressure only; permanent errors propagate; reconnect performs fresh query, no physical command replay, nonoptimistic/ID/expiry retained. ACCEPTANCE: actual native controller baseline failure and fixed recovery when each metadata publish is interrupted; original four scenarios pass. Requested `gpt-5.6-luna` high; actual metadata unconfirmed.
 
-### A4 — RUNNING — independent Sol, Luna checks, Astra integration
+### A4 — DONE — independent Sol, Luna checks, Astra integration
 WHY: implementation self-check is insufficient. SCOPE: frozen candidate diff, invariants, new regressions and existing required checks after integration. ACCEPTANCE: separate read-only review session, fixed SHA/patch fingerprint, integrated native/full checks, protected API/schema and originals, NOT_RUN limits recorded. No push/merge/release; stop before B tasks.
+
+### Final acceptance evidence
+
+Astra accepted implementation `ce856843c75b90a6fc3395a5aff06fbf106fb05c` after independent Sol PASS and Luna's integrated checks. F1/F2/F3 are all CONFIRMED/FIXED. A1 native2/2; A2 native6/6 after review red/green rework; A3 actual native host fault4/4, with identical final tests also reproducing all three transient failures on BASE. Original HA4/4 and complete check native148/broker25/faults10/recovery5/durable4/runtime12 plus consumers/scenario/codec passed; WS6/6 passed separately. Both review P2s closed; regenerated API and schema2/original tests are unchanged. Details, commands, roles, immutable fingerprints and NOT_RUN gates are in STATE and `_build/audit-v071/A4-FINAL-*`. Closing documentation does not change reviewed implementation/test bytes. No remote action or B-stage work was performed.
 
 ## Historical completed workflow (retained)
 
