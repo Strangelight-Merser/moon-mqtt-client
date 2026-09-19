@@ -87,7 +87,7 @@
 
 - Depends on reviewed W1. Separate connection generation, logical session and delivery identity; retain outgoing in-flight only when protocol permits, explicit broker-session loss, packet ID and DUP rules, waiter/protocol lifetime separation. Root approves public contract before Sol implementation.
 
-## D1 — Durable outbox beta (in_progress)
+## D1 — Durable outbox beta (done)
 
 - Depends on Q1 delivery semantics. Evaluate SQLite as single backend; stable ID, restart recovery, bounded storage, expiry, disk-full/corruption, documented duplicate window. No generic storage framework.
 
@@ -198,3 +198,11 @@ D1 independent reviewer /root/durable_review requested gpt-5.6-sol/high with for
 M1 root acceptance assets prepared: untracked tests/mqtt5_runtime.py (Python syntax only), draft native driver under `_build/exec-mqtt5/runtime-driver-draft/` (not compiled; not in package). Planned detailed API names for driver alignment: Config.protocol/session_expiry_secs; Client.publish_detailed -> PublishReceipt; ClientError.BrokerRejected(BrokerReason)/ServerDisconnected(BrokerReason); DeliveryStatus.broker_reason; Message.properties. Implementer may propose a concrete improvement before driver integration; do not silently drop reason observability. The draft independently covers ReceiveMaximum=1 with inbound PUBACK while send credit is exhausted, negative PUBACK, fresh unexpected Session Present, ServerKeepAlive, QoS/retain/packet limits, compact terminal DISCONNECT and actual Mosquitto/Paho property roundtrip. Durable protocol5 process recovery/expiry and schema integration still need additional evidence.
 
 M1 owner update: /root/durable_review (explicit Sol/high retained), newworktree moon-mqtt-mqtt5-runtime/base3b6ae8c; prior planned jitter ownership superseded. Root owns tests/mqtt5_runtime.py and production runtime driver. D1 jitter only fixes store-open TOCTOU and validates follow-up. Distinct worktrees, and M1 deliberately leaves SqliteOutbox::open unchanged until follow-up integration. No agent writes global state; no M1 self-review claim. Root will perform M1 semantics review and request independent Sol review when implementation is ready.
+
+### M1-store parallel implementation card (in_progress)
+
+Owner /root/jitter (retained requested Sol/high, actual model unconfirmed), isolated moon-mqtt-mqtt5-outbox/codex/mqtt5-outbox/baseb774c8a. WHY: concrete schema work has separate file ownership and a fixed interface, so it can proceed alongside M1 protocol/core without duplicating effort. This is the explicit useful-work exception to one Sol implementer; core owner confirmed durable_store.mbt unchanged and hands it off.
+
+Sole files durable_store.mbt, new mqtt5_store_wbtest.mbt, existing internal/mqtt5 import only. Core runtime remains /root/durable_review-owned. PersistedDelivery gains properties:Bytes (canonical PUBLISH property section, default zero length byte) and message_expiry_at_ms:Int64?. admit keeps positional parameters plus optional named properties and message_expiry_at_ms. Add async has_known_session/mark_session_known independent of row count. Version2 rejects old/unknown schema without mutation; retains two-pass validation and exclusive ownership. Validate metadata through codec, preserve exact binary/order/deadline, include payload+property bytes in max_payload_bytes, and reject corrupt or inconsistent expiry presence. No broker tests or global exec edits. Native reopen/bounds/rollback/known-marker/schema1-byte-preservation regressions; hand a commit to core/root for integration.
+
+D1 accepted b774c8aec35c8792d7be4688e38cdf271e34aa8e / hosted35413417731: bothplatforms native123, broker25/fault10/recovery5/durable4/HA4/codec/WSraw6; UbuntuEMQX4/WS4. Rootverified exacthead/job results andactual logs after Luna retrieval; `_build/exec-outbox/ci-b774c8a.*`. D1 milestone done, M1runtime remains in_progress.
