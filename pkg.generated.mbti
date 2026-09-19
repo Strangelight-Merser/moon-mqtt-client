@@ -28,6 +28,18 @@ pub(all) suberror ClientError {
   TlsFailure(String)
 } derive(@debug.Debug)
 
+pub(all) suberror DurableStoreError {
+  DurableStoreBusy(String)
+  DurableStoreFull(String)
+  DurableStoreReadOnly(String)
+  DurableStoreCorrupt(String)
+  DurableStoreIo(String)
+  DurableStoreSchema(String)
+  DurableStoreIdentity(String)
+  DurableStoreLimit(String)
+  DurableStoreState(String)
+} derive(@debug.Debug)
+
 // Types and methods
 type Client
 pub async fn Client::disconnect(Self) -> Unit
@@ -109,6 +121,14 @@ pub(all) struct DeliveryStatus {
   attempts : Int
   generation : Int?
 } derive(@debug.Debug)
+
+pub(all) struct DurableOutboxOptions {
+  path : String
+  max_records : Int
+  max_payload_bytes : Int64
+  max_pages : Int
+}
+pub fn DurableOutboxOptions::new(String, max_records? : Int, max_payload_bytes? : Int64, max_pages? : Int) -> Self
 
 pub(all) enum Event {
   Connected(Int)
