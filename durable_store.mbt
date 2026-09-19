@@ -193,6 +193,14 @@ fn validate_property_metadata(
 }
 
 ///|
+/// The required zero Property Length byte carries no application metadata and
+/// is bounded by SQLite page limits like fixed row/schema overhead. Every
+/// nonempty canonical section is charged in full.
+fn property_storage_charge(properties : Bytes) -> Int64 {
+  if properties == b"\x00" { 0L } else { properties.length().to_int64() }
+}
+
+///|
 async fn sqlite_drain(
   connection : @sqlite3.Connection,
   sql : String,
@@ -498,7 +506,6 @@ async fn validate_open_candidate(
     true
   } else if version == DURABLE_SCHEMA_VERSION {
     validate_schema(connection, identity)
-    validate_stored_property_metadata(connection)
     false
   } else {
     raise DurableStoreSchema("unsupported durable schema version \{version}")
@@ -514,9 +521,37 @@ async fn validate_open_candidate(
         "stored record count exceeds max_records=\{options.max_records}",
       )
     }
+    let invalid_property_types = sqlite_query_int(
+      connection,
+      "SELECT count(*) FROM durable_outbox WHERE typeof(properties) != 'blob' OR (message_expiry_at_ms IS NOT NULL AND typeof(message_expiry_at_ms) != 'integer')",
+      "validate durable property storage types",
+    )
+    if invalid_property_types != 0L {
+      raise DurableStoreSchema("durable MQTT 5 metadata has invalid SQLite types")
+    }
+    let max_property_bytes = sqlite_query_int(
+      connection,
+      "SELECT coalesce(max(length(properties)), 0) FROM durable_outbox",
+      "validate per-record durable property bound",
+    )
+    if max_property_bytes > options.max_payload_bytes {
+      raise DurableStoreLimit(
+        "stored property bytes exceed max_payload_bytes=\{options.max_payload_bytes}",
+      )
+    }
+    let max_record_bytes = sqlite_query_int(
+      connection,
+      "SELECT coalesce(max(length(payload) + CASE WHEN properties = X'00' THEN 0 ELSE length(properties) END), 0) FROM durable_outbox",
+      "validate per-record durable payload and property bound",
+    )
+    if max_record_bytes > options.max_payload_bytes {
+      raise DurableStoreLimit(
+        "stored record bytes exceed max_payload_bytes=\{options.max_payload_bytes}",
+      )
+    }
     let payload_bytes = sqlite_query_int(
       connection,
-      "SELECT coalesce(sum(length(payload) + length(properties)), 0) FROM durable_outbox",
+      "SELECT coalesce(sum(length(payload) + CASE WHEN properties = X'00' THEN 0 ELSE length(properties) END), 0) FROM durable_outbox",
       "validate durable payload and property bound",
     )
     if payload_bytes > options.max_payload_bytes {
@@ -534,6 +569,9 @@ async fn validate_open_candidate(
     raise DurableStoreLimit(
       "database already exceeds max_pages=\{options.max_pages}",
     )
+  }
+  if !initialize {
+    validate_stored_property_metadata(connection)
   }
   initialize
 }
@@ -777,6 +815,14 @@ async fn SqliteOutbox::admit(
   if expires_at_ms <= now_ms {
     raise DurableStoreLimit("delivery expiry must be in the future")
   }
+  let payload_length = payload.length().to_int64()
+  let property_length = property_storage_charge(properties)
+  if payload_length > self.options.max_payload_bytes ||
+    property_length > self.options.max_payload_bytes - payload_length {
+    raise DurableStoreLimit(
+      "durable payload and property bound max_payload_bytes=\{self.options.max_payload_bytes} exceeded",
+    )
+  }
   validate_property_metadata(properties, message_expiry_at_ms, false)
   @async.protect_from_cancel(async fn() {
     sqlite_begin(self.connection)
@@ -793,14 +839,10 @@ async fn SqliteOutbox::admit(
     }
     let payload_bytes = sqlite_query_int(
       self.connection,
-      "SELECT coalesce(sum(length(payload) + length(properties)), 0) FROM durable_outbox",
+      "SELECT coalesce(sum(length(payload) + CASE WHEN properties = X'00' THEN 0 ELSE length(properties) END), 0) FROM durable_outbox",
       "count durable payload and property bytes",
     )
-    let payload_length = payload.length().to_int64()
-    let property_length = properties.length().to_int64()
-    if payload_length > self.options.max_payload_bytes ||
-      property_length > self.options.max_payload_bytes - payload_length ||
-      payload_bytes > self.options.max_payload_bytes ||
+    if payload_bytes > self.options.max_payload_bytes ||
       payload_length + property_length > self.options.max_payload_bytes - payload_bytes {
       raise DurableStoreLimit(
         "durable payload and property bound max_payload_bytes=\{self.options.max_payload_bytes} exceeded",
