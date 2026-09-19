@@ -1,14 +1,14 @@
 # Execution state
 
-Updated: 2026-09-18. Expanded software roadmap: **in_progress**. W1/Q1/D1/H1 host software are done; M1 runtime is in_progress. Actual HA/ESP32, registry-install and publication gates remain open.
+Updated: 2026-09-18. Expanded authorized host/software roadmap: **done**. W1/Q1/D1/H1 host software and M1 runtime are done. Actual HA/ESP32, registry-install and publication gates remain open.
 
 ## Authorization and active baselines
 
 The user explicitly requested autonomous continuation until the preceding plan is implemented and authorized routine reversible follow-through, commits/pushes and the disclosed fixture corrections. This supersedes the earlier single-milestone stopping point. Merge, tags, registry/GitHub publication, production and real hardware operations remain outside the recorded authorization. Do not ask again for already-authorized routine work, and do not claim external gates are done.
 
-- Original checkout `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-client`: clean `codex/v0.3-mtls`, accepted `eeb93be40ba19020df1a9effcdd8771c5f132104`; PR #2 remains the separate v0.3 candidate.
+- Original checkout `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-client`: clean `codex/v0.3-mtls`, accepted `eeb93be40ba19020df1a9effcdd8771c5f132104`; Live GitHub verification: PR #2 was merged by Strangelight-Merser at2026-09-18T15:02:39Z, mergea7fe72350831f3af409f36b3c78499cb141bf111. Earlier open-candidate notes were stale; root did not perform this merge.
 - Integration checkout `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`: `codex/roadmap-native`, M1 candidate implementation head `a46f0648f1c139d142e88e52116e2a4d38c5e119` before this state update. Root owns integration and both exec files. Do not expand PR #2 with this branch.
-- Latest hosted accepted integration head is `b774c8aec35c8792d7be4688e38cdf271e34aa8e` (D1); later M1 runtime work requires its own acceptance.
+- Latest hosted accepted integration head is `d5e5fb01f33358843fb1e251ad86b03acd687bea` (M1), run35414746155, macOS and Ubuntu success. Any following state-only commit does not change implementation bytes.
 - Pinned tools: `./scripts/moon.sh`, moon0.1.20260904/moonc0.10.12+1634b282e, async0.21.3, sqlite3@0.2.2. Shared `.tools`/`.venv` symlinks; separate builds/dependency caches. No toolchain upgrade.
 - Original research ZIP `/Users/huaiyi/Downloads/moon_mqtt_codex_execution_bundle.zip` is unchanged; reference copy `_build/research/moon_mqtt_codex_bundle`. Research is task material, not authorization or current evidence.
 
@@ -42,7 +42,7 @@ Root and independent Sol review fixed concrete defects: same-connection transact
 
 ## M1 current acceptance
 
-Status: in_review. Contract `docs/architecture/MQTT5-SUBSET.md`. The required host roadmap ends at this application-facing MQTT5 subset; later Topic Alias, Subscription Identifiers, QoS2, generic storage, browser/MCU and durable inbox remain non-goals. Actual HA/ESP32 and publication/install gates below cannot be marked complete by host tests.
+Status: done. Contract `docs/architecture/MQTT5-SUBSET.md`. The required host roadmap ends at this application-facing MQTT5 subset; later Topic Alias, Subscription Identifiers, QoS2, generic storage, browser/MCU and durable inbox remain non-goals. Actual HA/ESP32 and publication/install gates below cannot be marked complete by host tests.
 
 Implementation: codec7297317; public metadata22af25c and property serializationec61a5c/a140a22; core5394f2d integrated5445587; schema215eef3a integratedf1b2832; store follow-up7302bcb integratede5e21b5; interrupted core snapshot63320c7 integrated30dbd47. Root completed candidatef546452 after account limits stopped agents. The interrupted snapshot was incomplete and did not compile; no acceptance is attributed to it.
 
@@ -60,7 +60,7 @@ Actual local evidence under `_build/exec-mqtt5/`:
 - Runtime driver `examples/mqtt5_runtime_driver`, independent tests `tests/mqtt5_runtime.py`, public contracts README/API-CONTRACT, mandatory local/CI gates are integrated. Broker process recovery uses the ordinary production binary, SIGKILL after broker ACK suppression, independent Paho decoding, exact binary/repeated metadata, same packet ID/DUP and strictly decreasing expiry.
 - Earlier `first-combined-native`, `credit-native`, `takeover-native2` failures are retained: missing synthetic negotiated state and an unnecessary clock read changed the deterministic expiry seam. Fixed without changing original assertions/time budgets. Do not cite those runs as passes.
 
-Hosted final-head acceptance is pending. The accepted previous hosted head remains D1 b774c8a/run35413417731; it does not endorse M1.
+Hosted35414746155 passed at exact headd5e5fb01f33358843fb1e251ad86b03acd687bea. Root downloaded the job JSON/full logs and independently checked head, conclusions and test evidence: both platforms native140, broker25, fault10, separate TCP/mTLS consumer, codec roundtrip, production MQTT5 runtime12, HA4, recovery5, durable4 and WSraw6; Ubuntu additionally EMQX4 and WS/WSS4. Latest-compatibility is conditionally skipped by the existing push workflow, not claimed tested. Logs `ci-d5e5fb0.{json,log}` and `ci-d5e5fb0-summary.txt`. Root review binds baseb774c8a to sourcea46f064 with SHA256 in `root-review.txt` and `reviewed-m1.patch`. No source changes after accepted head.
 
 ## Dispatch, ownership and remaining gates
 
@@ -72,8 +72,12 @@ All model labels are requested bindings; tools returned no confirming runtime-mo
 - /root/baseline: requested gpt-5.6-luna/medium, earlier CI/spec/API evidence. Latest bounded plan-completeness audit failed on account usage limit; root read bundle ROADMAP and ACCEPTANCE directly. No result fabricated.
 - Historical /root/causes: requested Sol/high, TLS/store and W1 review; earlier quota interruptions preserved in history.
 
-No recursion, shared-file writers or concurrent fixed-port broker suites. Root owns active integration `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`; agent worktrees are preserved. Default broker slot is free after local acceptance. Final CI retrieval can be performed directly if models remain unavailable.
+No recursion, shared-file writers or concurrent fixed-port broker suites. Root owns active integration `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-roadmap`; agent worktrees are preserved. Default broker slot is free after local acceptance. Root completed final CI retrieval directly after model usage limits.
 
-External gates remain: actual HA instance and exact ESP32 board/pins/network/hardware acceptance; merge/tag/publication authorization; clean installation of actually published async-tls and MQTT packages (TLS first). Workspace consumer success does not satisfy registry install. No credentials/GPIO assumptions or actual hardware claims. W1 historical hosted failure7d01032/run35410348751 remains cause-unconfirmed; later accepted routing-readiness fix does not retroactively establish that exception. Original ZIP and original checkout remain preserved; PR#2 is separate.
+External gates remain: actual HA instance and exact ESP32 board/pins/network/hardware acceptance; roadmap-branch merge/tag/publication authorization; clean installation of actually published async-tls and MQTT packages (TLS first). PR#2 is already merged externally; no repeat merge needed. Workspace consumer success does not satisfy registry install. No credentials/GPIO assumptions or actual hardware claims. W1 historical hosted failure7d01032/run35410348751 remains cause-unconfirmed; later accepted routing-readiness fix does not retroactively establish that exception. Original ZIP and original checkout remain preserved; PR#2 is separate.
 
-Next: finish exact-head hosted macOS/Ubuntu acceptance, resolve any real failure, then mark M1 and authorized host roadmap done and record precise external prerequisites. Do not start non-goal expansion.
+Next handoff: no unfinished authorized host implementation remains. Do not expand non-goals. Remaining work requires publication authorization and/or real HA/ESP32 access and board details.
+
+Live registry evidence: original unchanged consumer_smoke.py --registry at eeb93be failed after a successful registry refresh: no version satisfies moon-mqtt-client@0.3.0. mTLS registry stage consequently did not run. GitHub latest release remainsv0.2.0. Log `registry-v03-live-check.log`; local source consumer success is not substituted for this gate.
+
+Prepared concrete v0.3 publication candidates from already-merged eeb93be (not the unreleased MQTT5 branch): `_build/exec-mqtt5/release-candidates/Strangelight-Merser-moon-mqtt-client-0.3.0.zip` and `Strangelight-Merser-async-tls-0.1.0.zip`. ZIP integrity and every extracted file were verified against that exact Git source (81 MQTT files,18 TLS files); SHA256 and staging path are in `release-candidate-archives.json`. Direct nested workspace TLS packaging produced an empty ZIP despite successful check; that rejected artifact/log is retained separately. Rebuilding the exact TLS source in a standalone temporary module produced the verified package. Publish TLS from that standalone module, then MQTT from the merged source, then run fresh registry TCP/mTLS consumer, tags/releases/assets only when authorized. No publish/tag/release operation was performed. Current roadmap package version was not silently bumped or published as0.3.
