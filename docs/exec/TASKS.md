@@ -1,5 +1,12 @@
 # Tasks
 
+## Authorized continuation (2026-09-19)
+
+- R8 RUNNING: root publishes the accepted v0.7.1 after current Linux/macOS CI (including HA fault tests), independent extracted-package acceptance, merge/tree equality, registry clean-install acceptance and anonymous asset verification. Luna owns local package checks. Existing A0–A4 stop notes below describe the completed prior request and are superseded only by this explicit release/B-stage authorization.
+- B1 PLANNED: Sol drafts a short durable recovery ADR for root decision; schema2 unchanged; then explicit inspect/export and controlled resolution, crash recovery and independent review. Separate branch, no v0.7.1 scope expansion.
+- B2 BLOCKED ON DEVICE: user says hardware arrives tomorrow. Prepare independent consumer and evidence checklist only; actual HA/board/GPIO/firmware/serial inputs remain unknown. No HIL claim or automatic wakeup.
+- B3 PLANNED: root defines explicit reconnect reasons; Sol implements after B1, preserving takeover/auth/protocol terminal handling and no automatic redirects.
+
 ## Active A0–A4 (v0.7.1 local candidate)
 
 Common BASE `73bcd1952262ba4a097ccf0b11fae9ad4cf4fe68`. No public API/schema2 change; preserve original acceptance programs, add focused regressions. Root alone integrates and marks DONE after examining evidence. Historical tasks below do not authorize publication this round.

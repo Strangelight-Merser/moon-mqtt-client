@@ -1,5 +1,11 @@
 # Execution state
 
+## Current authorization — v0.7.1 release then B1–B3 (2026-09-19)
+
+The user explicitly authorized CI, push/PR/merge, package publication and registry/public-asset acceptance, then B1–B3. Schema 2 must remain unchanged. Root owns release actions and integration; Sol prepares the B1 ADR before implementation; Luna validates the package and prepares B2 host handoff. Physical hardware is unavailable until tomorrow per the user: HIL is waiting on the device and board/pin/framework details, with no GPIO assumptions or scheduled automation.
+
+R8 release is RUNNING from c5e83cb. Only CI wiring for the new HA fault suite and release state/documents may change before publication; accepted implementation remains ce85684. Original acceptance tests remain unchanged. B1/B3 software will be developed separately after this release; no next-stage functionality enters v0.7.1.
+
 ## A0–A4 v0.7.1 local candidate — DONE (2026-09-19)
 
 This request is complete within local candidate scope. No push, merge, publication, schema 2 change, B task, production service or hardware operation is authorized or performed this round. Historical release authorization below does not extend this scope.
