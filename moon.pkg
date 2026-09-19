@@ -5,6 +5,7 @@ import {
   "moonbitlang/async/semaphore",
   "moonbitlang/async/socket",
   "Strangelight-Merser/async-tls" @tls,
+  "Strangelight-Merser/moon-mqtt-client/internal/mqtt5" @mqtt5,
   "Strangelight-Merser/moon-mqtt-client/internal/websocket" @ws,
   "moonbitlang/async/io",
   "moonbitlang/async/os_error",

@@ -49,6 +49,8 @@ priv struct PersistedDelivery {
   sequence : Int64
   topic : String
   payload : Bytes
+  properties : Bytes
+  message_expiry_at_ms : Int64?
   retain : Bool
   expires_at_ms : Int64
   attempts : Int
@@ -80,7 +82,7 @@ priv struct SqliteOutbox {
 }
 
 ///|
-const DURABLE_SCHEMA_VERSION : Int64 = 1L
+const DURABLE_SCHEMA_VERSION : Int64 = 2L
 
 ///|
 fn durable_error(
@@ -107,6 +109,86 @@ fn durable_error(
 fn sqlite_error(error : @sqlite3.SqliteError, context : String) -> DurableStoreError {
   match error {
     @sqlite3.SqliteError(code~, msg~, ..) => durable_error(code, context, msg)
+  }
+}
+
+///|
+fn invalid_property_metadata(
+  persisted : Bool,
+  context : String,
+) -> Unit raise DurableStoreError {
+  if persisted {
+    raise DurableStoreSchema(context)
+  }
+  raise DurableStoreState(context)
+}
+
+///|
+/// Validate one complete canonical client-to-server PUBLISH property section
+/// and its separately persisted absolute expiry deadline. Codec failures are
+/// deliberately translated into durable-store categories at this boundary.
+fn validate_property_metadata(
+  properties : Bytes,
+  message_expiry_at_ms : Int64?,
+  persisted : Bool,
+) -> Unit raise DurableStoreError {
+  let limit = properties.length().max(1)
+  let decoded = try {
+    @mqtt5.decode_publish_properties(properties, limit)
+  } catch {
+    _ => {
+      invalid_property_metadata(
+        persisted,
+        "invalid durable MQTT 5 PUBLISH property section",
+      )
+      []
+    }
+  }
+  let canonical = try {
+    @mqtt5.encode_publish_properties(decoded, limit)
+  } catch {
+    _ => {
+      invalid_property_metadata(
+        persisted,
+        "durable MQTT 5 PUBLISH properties cannot be re-encoded",
+      )
+      b""
+    }
+  }
+  if canonical != properties {
+    invalid_property_metadata(
+      persisted,
+      "durable MQTT 5 PUBLISH properties are not canonical",
+    )
+  }
+  let mut has_message_expiry = false
+  for property in decoded {
+    if property is @mqtt5.MessageExpiry(_) {
+      has_message_expiry = true
+    }
+  }
+  match message_expiry_at_ms {
+    Some(deadline) => {
+      if deadline <= 0L {
+        invalid_property_metadata(
+          persisted,
+          "durable message expiry deadline must be positive",
+        )
+      }
+      if !has_message_expiry {
+        invalid_property_metadata(
+          persisted,
+          "durable message expiry deadline has no Message Expiry property",
+        )
+      }
+    }
+    None =>
+      if has_message_expiry {
+        invalid_property_metadata(
+          persisted,
+          "durable Message Expiry property has no absolute deadline",
+        )
+      }
   }
 }
 
@@ -260,17 +342,17 @@ async fn initialize_schema(
     errdefer (try sqlite_rollback(connection) catch { _ => () })
     sqlite_drain(
         connection,
-        "CREATE TABLE durable_meta (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_version INTEGER NOT NULL, identity TEXT NOT NULL, next_sequence INTEGER NOT NULL CHECK (next_sequence > 0))",
+        "CREATE TABLE durable_meta (singleton INTEGER PRIMARY KEY CHECK (singleton = 1), schema_version INTEGER NOT NULL, identity TEXT NOT NULL, next_sequence INTEGER NOT NULL CHECK (next_sequence > 0), known_session INTEGER NOT NULL CHECK (known_session IN (0, 1)))",
         "create durable metadata",
       )
     sqlite_drain(
         connection,
-        "CREATE TABLE durable_outbox (delivery_id TEXT PRIMARY KEY, packet_id INTEGER NOT NULL UNIQUE CHECK (packet_id BETWEEN 1 AND 65535), sequence INTEGER NOT NULL UNIQUE CHECK (sequence > 0), topic TEXT NOT NULL, payload BLOB NOT NULL, retain INTEGER NOT NULL CHECK (retain IN (0, 1)), expires_at_ms INTEGER NOT NULL, attempts INTEGER NOT NULL CHECK (attempts >= 0), ever_started INTEGER NOT NULL CHECK (ever_started IN (0, 1)), state INTEGER NOT NULL CHECK (state IN (0, 1)), reason TEXT NOT NULL)",
+        "CREATE TABLE durable_outbox (delivery_id TEXT PRIMARY KEY, packet_id INTEGER NOT NULL UNIQUE CHECK (packet_id BETWEEN 1 AND 65535), sequence INTEGER NOT NULL UNIQUE CHECK (sequence > 0), topic TEXT NOT NULL, payload BLOB NOT NULL, properties BLOB NOT NULL, message_expiry_at_ms INTEGER CHECK (message_expiry_at_ms IS NULL OR message_expiry_at_ms > 0), retain INTEGER NOT NULL CHECK (retain IN (0, 1)), expires_at_ms INTEGER NOT NULL, attempts INTEGER NOT NULL CHECK (attempts >= 0), ever_started INTEGER NOT NULL CHECK (ever_started IN (0, 1)), state INTEGER NOT NULL CHECK (state IN (0, 1)), reason TEXT NOT NULL)",
         "create durable outbox",
       )
     let insert = try {
       connection.prepare_async(
-          "INSERT INTO durable_meta (singleton, schema_version, identity, next_sequence) VALUES (1, ?, ?, 1)",
+          "INSERT INTO durable_meta (singleton, schema_version, identity, next_sequence, known_session) VALUES (1, ?, ?, 1, 0)",
         )
     } catch {
       @sqlite3.SqliteError(..) as error =>
@@ -294,7 +376,7 @@ async fn initialize_schema(
     }
     sqlite_drain(
       connection,
-      "PRAGMA user_version = 1",
+      "PRAGMA user_version = 2",
       "set durable schema version",
     )
     sqlite_commit(connection)
@@ -316,7 +398,7 @@ async fn validate_schema(
   }
   try {
     let statement = connection.prepare_async(
-      "SELECT schema_version, identity FROM durable_meta WHERE singleton = 1",
+      "SELECT schema_version, identity, next_sequence, known_session FROM durable_meta WHERE singleton = 1",
     )
     defer statement.finalize()
     guard statement.step_async() is @sqlite3.Row else {
@@ -324,6 +406,8 @@ async fn validate_schema(
     }
     let version : Int64 = statement.column(index=0)
     let stored_identity : String = statement.column(index=1)
+    let next_sequence : Int64 = statement.column(index=2)
+    let known_session : Int64 = statement.column(index=3)
     if version != DURABLE_SCHEMA_VERSION {
       raise DurableStoreSchema(
         "unsupported durable schema version \{version}",
@@ -334,10 +418,46 @@ async fn validate_schema(
         "outbox identity mismatch: stored=\{stored_identity} requested=\{identity}",
       )
     }
+    if next_sequence <= 0L || (known_session != 0L && known_session != 1L) {
+      raise DurableStoreSchema("invalid durable metadata fields")
+    }
     ignore(statement.step_async())
   } catch {
     @sqlite3.SqliteError(..) as error =>
       raise sqlite_error(error, "validate durable metadata")
+    error => raise error
+  }
+}
+
+///|
+async fn validate_stored_property_metadata(
+  connection : @sqlite3.Connection,
+) -> Unit {
+  try {
+    let statement = connection.prepare_async(
+      "SELECT properties, message_expiry_at_ms FROM durable_outbox ORDER BY sequence",
+    )
+    defer statement.finalize()
+    while true {
+      match statement.step_async() {
+        @sqlite3.Done(..) => break
+        @sqlite3.Row => {
+          let properties : Bytes = statement.column(index=0)
+          let expiry_value : @sqlite3.Value = statement.column(index=1)
+          let deadline : Int64? = match expiry_value {
+            @sqlite3.Null => None
+            @sqlite3.Integer(value) => Some(value)
+            _ => raise DurableStoreSchema(
+              "durable message expiry deadline has invalid SQLite type",
+            )
+          }
+          validate_property_metadata(properties, deadline, true)
+        }
+      }
+    }
+  } catch {
+    @sqlite3.SqliteError(..) as error =>
+      raise sqlite_error(error, "validate durable MQTT 5 metadata")
     error => raise error
   }
 }
@@ -378,6 +498,7 @@ async fn validate_open_candidate(
     true
   } else if version == DURABLE_SCHEMA_VERSION {
     validate_schema(connection, identity)
+    validate_stored_property_metadata(connection)
     false
   } else {
     raise DurableStoreSchema("unsupported durable schema version \{version}")
@@ -395,8 +516,8 @@ async fn validate_open_candidate(
     }
     let payload_bytes = sqlite_query_int(
       connection,
-      "SELECT coalesce(sum(length(payload)), 0) FROM durable_outbox",
-      "validate durable payload bound",
+      "SELECT coalesce(sum(length(payload) + length(properties)), 0) FROM durable_outbox",
+      "validate durable payload and property bound",
     )
     if payload_bytes > options.max_payload_bytes {
       raise DurableStoreLimit(
@@ -532,13 +653,50 @@ fn SqliteOutbox::close(self : SqliteOutbox) -> Unit raise {
 }
 
 ///|
+async fn SqliteOutbox::has_known_session(self : SqliteOutbox) -> Bool {
+  self.transaction_lock.acquire()
+  defer self.transaction_lock.release()
+  self.ensure_open()
+  let value = sqlite_query_int(
+    self.connection,
+    "SELECT known_session FROM durable_meta WHERE singleton = 1",
+    "read durable known-session marker",
+  )
+  match value {
+    0L => false
+    1L => true
+    _ => raise DurableStoreSchema("invalid durable known-session marker")
+  }
+}
+
+///|
+async fn SqliteOutbox::mark_session_known(self : SqliteOutbox) -> Unit {
+  self.transaction_lock.acquire()
+  defer self.transaction_lock.release()
+  self.ensure_open()
+  @async.protect_from_cancel(async fn() {
+    sqlite_begin(self.connection)
+    errdefer (try sqlite_rollback(self.connection) catch { _ => () })
+    sqlite_drain(
+      self.connection,
+      "UPDATE durable_meta SET known_session = 1 WHERE singleton = 1",
+      "persist durable known-session marker",
+    )
+    if self.connection.changes() != 1L {
+      raise DurableStoreState("durable metadata row is missing")
+    }
+    sqlite_commit(self.connection)
+  })
+}
+
+///|
 async fn SqliteOutbox::inspect(self : SqliteOutbox) -> Array[PersistedDelivery] {
   self.transaction_lock.acquire()
   defer self.transaction_lock.release()
   self.ensure_open()
   try {
     let statement = self.connection.prepare_async(
-      "SELECT delivery_id, packet_id, sequence, topic, payload, retain, expires_at_ms, attempts, ever_started, state, reason FROM durable_outbox ORDER BY sequence",
+      "SELECT delivery_id, packet_id, sequence, topic, payload, properties, message_expiry_at_ms, retain, expires_at_ms, attempts, ever_started, state, reason FROM durable_outbox ORDER BY sequence",
     )
     defer statement.finalize()
     let records : Array[PersistedDelivery] = []
@@ -547,10 +705,19 @@ async fn SqliteOutbox::inspect(self : SqliteOutbox) -> Array[PersistedDelivery] 
         @sqlite3.Done(..) => break
         @sqlite3.Row => {
           let packet_id : Int64 = statement.column(index=1)
-          let retain : Int64 = statement.column(index=5)
-          let attempts : Int64 = statement.column(index=7)
-          let ever_started : Int64 = statement.column(index=8)
-          let state : Int64 = statement.column(index=9)
+          let properties : Bytes = statement.column(index=5)
+          let expiry_value : @sqlite3.Value = statement.column(index=6)
+          let message_expiry_at_ms : Int64? = match expiry_value {
+            @sqlite3.Null => None
+            @sqlite3.Integer(value) => Some(value)
+            _ => raise DurableStoreSchema(
+              "durable message expiry deadline has invalid SQLite type",
+            )
+          }
+          let retain : Int64 = statement.column(index=7)
+          let attempts : Int64 = statement.column(index=9)
+          let ever_started : Int64 = statement.column(index=10)
+          let state : Int64 = statement.column(index=11)
           if packet_id < 1L || packet_id > 65535L ||
             attempts < 0L || attempts > 2147483647L ||
             (retain != 0L && retain != 1L) ||
@@ -558,18 +725,21 @@ async fn SqliteOutbox::inspect(self : SqliteOutbox) -> Array[PersistedDelivery] 
             (state != 0L && state != 1L) {
             raise DurableStoreSchema("invalid persisted delivery fields")
           }
+          validate_property_metadata(properties, message_expiry_at_ms, true)
           records.push({
             delivery_id: statement.column(index=0),
             packet_id: packet_id.to_int(),
             sequence: statement.column(index=2),
             topic: statement.column(index=3),
             payload: statement.column(index=4),
+            properties,
+            message_expiry_at_ms,
             retain: retain == 1L,
-            expires_at_ms: statement.column(index=6),
+            expires_at_ms: statement.column(index=8),
             attempts: attempts.to_int(),
             ever_started: ever_started == 1L,
             state: if state == 0L { Pending } else { Blocked },
-            reason: statement.column(index=10),
+            reason: statement.column(index=12),
           })
         }
       }
@@ -592,6 +762,8 @@ async fn SqliteOutbox::admit(
   retain : Bool,
   expires_at_ms : Int64,
   now_ms : Int64,
+  properties? : Bytes = b"\x00",
+  message_expiry_at_ms? : Int64? = None,
 ) -> PersistedDelivery {
   self.transaction_lock.acquire()
   defer self.transaction_lock.release()
@@ -605,6 +777,7 @@ async fn SqliteOutbox::admit(
   if expires_at_ms <= now_ms {
     raise DurableStoreLimit("delivery expiry must be in the future")
   }
+  validate_property_metadata(properties, message_expiry_at_ms, false)
   @async.protect_from_cancel(async fn() {
     sqlite_begin(self.connection)
     errdefer (try sqlite_rollback(self.connection) catch { _ => () })
@@ -620,13 +793,17 @@ async fn SqliteOutbox::admit(
     }
     let payload_bytes = sqlite_query_int(
       self.connection,
-      "SELECT coalesce(sum(length(payload)), 0) FROM durable_outbox",
-      "count durable payload bytes",
+      "SELECT coalesce(sum(length(payload) + length(properties)), 0) FROM durable_outbox",
+      "count durable payload and property bytes",
     )
-    if payload_bytes > self.options.max_payload_bytes ||
-      payload.length().to_int64() > self.options.max_payload_bytes - payload_bytes {
+    let payload_length = payload.length().to_int64()
+    let property_length = properties.length().to_int64()
+    if payload_length > self.options.max_payload_bytes ||
+      property_length > self.options.max_payload_bytes - payload_length ||
+      payload_bytes > self.options.max_payload_bytes ||
+      payload_length + property_length > self.options.max_payload_bytes - payload_bytes {
       raise DurableStoreLimit(
-        "durable payload bound max_payload_bytes=\{self.options.max_payload_bytes} exceeded",
+        "durable payload and property bound max_payload_bytes=\{self.options.max_payload_bytes} exceeded",
       )
     }
     let sequence = sqlite_query_int(
@@ -639,7 +816,7 @@ async fn SqliteOutbox::admit(
     }
     let insert = try {
       self.connection.prepare_async(
-        "INSERT INTO durable_outbox (delivery_id, packet_id, sequence, topic, payload, retain, expires_at_ms, attempts, ever_started, state, reason) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '')",
+        "INSERT INTO durable_outbox (delivery_id, packet_id, sequence, topic, payload, properties, message_expiry_at_ms, retain, expires_at_ms, attempts, ever_started, state, reason) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '')",
       )
     } catch {
       @sqlite3.SqliteError(..) as error =>
@@ -652,8 +829,16 @@ async fn SqliteOutbox::admit(
       insert.bind(index=3, sequence)
       insert.bind(index=4, topic)
       insert.bind(index=5, payload)
-      insert.bind(index=6, if retain { 1 } else { 0 })
-      insert.bind(index=7, expires_at_ms)
+      insert.bind(index=6, properties)
+      insert.bind(
+        index=7,
+        match message_expiry_at_ms {
+          Some(value) => @sqlite3.Value::Integer(value)
+          None => @sqlite3.Value::Null
+        },
+      )
+      insert.bind(index=8, if retain { 1 } else { 0 })
+      insert.bind(index=9, expires_at_ms)
       ignore(insert.step_async())
       insert.finalize()
     } catch {
@@ -696,6 +881,8 @@ async fn SqliteOutbox::admit(
       sequence,
       topic,
       payload,
+      properties,
+      message_expiry_at_ms,
       retain,
       expires_at_ms,
       attempts: 0,
