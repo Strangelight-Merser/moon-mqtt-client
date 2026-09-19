@@ -113,23 +113,19 @@ async test "A2 early PINGRESP stays pending until the current write returns" {
   let (session, peer_writer) = audit_v071_a2_session(writer)
   let config = audit_v071_a2_config()
   let client = new_client(config, DeliveryBook::new(), None)
-  // Baseline-compatible representation of a queued PINGREQ. The fixed state
-  // machine keeps this occupied through an early response until write return.
-  session.ping_sent = Some(-1L)
-  let item : Outgoing = {
-    bytes: encode(@codec.PingreqPacket, 4096),
-    pending: None,
-    delivery: None,
-    is_ping: true,
+  session.queue_ping(config)
+  guard session.next_outgoing() is Some(item) else {
+    abort("queued PINGREQ missing")
   }
   @async.with_task_group(group => {
     let writing = group.spawn(() => session.write_one(item, 5000, 5000, 2))
     writer.wait_entered()
     let reading = group.spawn(() => client.read_loop(session))
     peer_writer.write(encode(@codec.PingrespPacket, 4096))
-    while session.ping_sent == Some(-1L) {
+    while session.ping_sent == Some(ping_writing()) {
       @async.pause()
     }
+    assert_eq(session.ping_sent, Some(ping_responded_while_writing()))
     let heartbeat = group.spawn(() => session.heartbeat(config))
     @async.sleep(300)
     let duplicate_depth = session.control_depth
@@ -187,12 +183,10 @@ async test "A2 PINGRESP timeout starts after blocked write completion" {
 async test "A2 abort clears ping state and blocked completion cannot revive it" {
   let writer = AuditV071PingWriter::new()
   let session = audit_v071_a2_session(writer).0
-  session.ping_sent = Some(-1L)
-  let item : Outgoing = {
-    bytes: encode(@codec.PingreqPacket, 4096),
-    pending: None,
-    delivery: None,
-    is_ping: true,
+  let config = audit_v071_a2_config()
+  session.queue_ping(config)
+  guard session.next_outgoing() is Some(item) else {
+    abort("queued PINGREQ missing")
   }
   @async.with_task_group(group => {
     let writing = group.spawn(() => session.write_one(item, 5000, 5000, 2))
@@ -246,4 +240,54 @@ async test "A2 pending ping preserves PUBACK and DISCONNECT control slots" {
   })
   assert_eq(writer.writes, 2)
   session.abort("test complete")
+}
+
+///|
+async test "A2 queued PINGREQ ignores PINGRESP until a write can start" {
+  let writer = AuditV071PingWriter::new()
+  writer.release()
+  let (session, peer_writer) = audit_v071_a2_session(writer)
+  let config = audit_v071_a2_config(timeout_ms=100)
+  let client = new_client(config, DeliveryBook::new(), None)
+  client.ready = true
+  session.queue_ping(config)
+  assert_eq(session.ping_sent, Some(ping_queued()))
+  @async.with_task_group(group => {
+    let reading = group.spawn(() => client.read_loop(session))
+    // The first frame is an unsolicited/old response while this generation's
+    // PINGREQ is still queued. The following PUBLISH is an ordering fence that
+    // proves read_loop processed the preceding PINGRESP before the dequeue.
+    peer_writer.write(encode(@codec.PingrespPacket, 4096))
+    peer_writer.write(
+      encode(
+        @codec.PublishPacket({
+          topic: "audit/ping-order",
+          payload: b"fence",
+          qos: @codec.QoS0,
+          message_id: None,
+          retain: false,
+          dup: false,
+        }),
+        4096,
+      ),
+    )
+    while client.event_depth == 0 {
+      @async.pause()
+    }
+    assert_eq(session.ping_sent, Some(ping_queued()))
+    guard session.next_outgoing() is Some(ping) else {
+      abort("queued PINGREQ missing")
+    }
+    assert_true(session.write_one(ping, 5000, 5000, 2))
+    assert_true(session.ping_sent is Some(sent) && sent >= 0L)
+    try {
+      session.heartbeat_task(config)
+      abort("missing response after the real PINGREQ write must time out")
+    } catch {
+      PingResponseTimeout(_) => ()
+      error => abort("wrong heartbeat result: \{error}")
+    }
+    assert_false(session.alive)
+    reading.cancel()
+  })
 }
