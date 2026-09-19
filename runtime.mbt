@@ -969,7 +969,7 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
               return
             }
           }
-        RuntimePingresp => session.ping_sent = None
+        RuntimePingresp => session.receive_pingresp()
         RuntimeDisconnect(reason) => {
           session.abort_with(ServerDisconnected(reason))
           return

@@ -62,6 +62,8 @@ jobs:
         run: MOON="$(command -v moon)" python tests/mqtt5_runtime.py
       - name: HA host consumer
         run: MOON="$(command -v moon)" python tests/ha_relay.py
+      - name: HA transient publication boundaries
+        run: MOON="$(command -v moon)" python -W error::ResourceWarning tests/ha_relay_transient.py
       - name: Recoverable QoS 1
         run: MOON="$(command -v moon)" python tests/recoverable_qos1.py
       - name: Durable outbox process recovery
