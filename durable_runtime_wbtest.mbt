@@ -63,6 +63,10 @@ fn durable_runtime_session(
     deliveries: {},
     reserved_deliveries: deliveries.reserved,
     delivery_slots: 0,
+    qos1_outstanding: 0,
+    receive_maximum: 65535,
+    parked_business: None,
+    outgoing_limit: 65536,
     delivery_changed: @cond_var.Cond(),
     next_id: 1,
     alive: true,
@@ -94,6 +98,7 @@ async fn durable_runtime_client(
   let client = new_client(config, deliveries, Some(runtime))
   let (session, peer_writer) = durable_runtime_session(config, deliveries, writer)
   client.session = Some(session)
+  client.negotiated = Some(negotiated_settings(config, []))
   client.ready = true
   client.generation = 1
   (client, session, outbox, peer_writer)

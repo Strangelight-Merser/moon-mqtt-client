@@ -21,6 +21,7 @@ fn delivery_test_record(
     start_deadline: None,
     ack_deadline: None,
     terminal_cause: None,
+    acknowledged_reason: None,
     durable: None,
   }
 }
@@ -63,6 +64,10 @@ fn delivery_test_session(
     deliveries: {},
     reserved_deliveries: reserved,
     delivery_slots: 0,
+    qos1_outstanding: 0,
+    receive_maximum: 65535,
+    parked_business: None,
+    outgoing_limit: 65536,
     delivery_changed: @cond_var.Cond(),
     next_id: 1,
     alive: true,
@@ -95,7 +100,7 @@ fn delivery_test_client(config : Config) -> Client {
     last_disconnect: None,
     backoff: ReconnectBackoff::new(1),
     stop_reason: None,
-    negotiated: None,
+    negotiated: Some(negotiated_settings(config, [])),
   }
   let session = delivery_test_session(reserved=deliveries.reserved)
   client.session = Some(session)
@@ -417,6 +422,10 @@ async test "unexpected PUBACK settles recoverable handle and releases ownership"
     deliveries: attached,
     reserved_deliveries: client.deliveries.reserved,
     delivery_slots: 1,
+    qos1_outstanding: 0,
+    receive_maximum: 65535,
+    parked_business: None,
+    outgoing_limit: 65536,
     delivery_changed: @cond_var.Cond(),
     next_id: 1,
     alive: true,

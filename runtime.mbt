@@ -263,6 +263,10 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
         deliveries: {},
         reserved_deliveries: self.deliveries.reserved,
         delivery_slots: 0,
+        qos1_outstanding: 0,
+        receive_maximum: negotiated.receive_maximum,
+        parked_business: None,
+        outgoing_limit: negotiated.max_packet_size,
         delivery_changed: @cond_var.Cond(),
         next_id: 1,
         alive: true,
@@ -293,10 +297,8 @@ async fn Client::replay_deliveries(self : Client, session : Session) -> Unit {
     Some(value) => value
     None => raise NotConnected
   }
-  let incompatibility : String? = if records.length() >
-    negotiated.receive_maximum {
-    Some("recovered QoS 1 deliveries exceed negotiated Receive Maximum")
-  } else if !records.is_empty() && negotiated.maximum_qos == AtMostOnce {
+  let incompatibility : String? = if !records.is_empty() &&
+    negotiated.maximum_qos == AtMostOnce {
     Some("recovered QoS 1 deliveries exceed negotiated Maximum QoS")
   } else if !negotiated.retain_available && records.any(value => value.retain) {
     Some("recovered retained delivery conflicts with Retain Available=0")
@@ -812,8 +814,12 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                       if session.delivery_slots > 0 {
                         session.delivery_slots -= 1
                       }
+                      session.return_publish_credit()
                       if reason.code < 128 {
-                        self.deliveries.acknowledge(delivery)
+                        self.deliveries.acknowledge(
+                          delivery,
+                          reason=Some(reason),
+                        )
                       } else {
                         self.deliveries.reject(delivery, reason)
                       }
@@ -828,8 +834,9 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                   if session.delivery_slots > 0 {
                     session.delivery_slots -= 1
                   }
+                  session.return_publish_credit()
                   if reason.code < 128 {
-                    self.deliveries.acknowledge(delivery)
+                    self.deliveries.acknowledge(delivery, reason=Some(reason))
                   } else {
                     self.deliveries.reject(delivery, reason)
                   }
@@ -841,6 +848,7 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
               match session.pending.get(message_id) {
                 Some(request) if request.kind is Publish1 && request.started => {
                   session.pending.remove(message_id)
+                  session.return_publish_credit()
                   if reason.code < 128 {
                     request.finish(Ok(Published(Accepted(reason))))
                   } else {
@@ -939,15 +947,10 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                       reason_string: diagnostic.reason_string,
                     })
                   }
-                  for value in values {
-                    if value.code >= 128 {
-                      session.pending.remove(message_id)
-                      request.finish(Err(BrokerRejected(value)))
-                      return
+                  for i in 0..<topics.length() {
+                    if values[i].code < 128 {
+                      self.subscriptions.remove(topics[i])
                     }
-                  }
-                  for topic in topics {
-                    self.subscriptions.remove(topic)
                   }
                   session.pending.remove(message_id)
                   request.finish(Ok(Unsubscriptions(values)))

@@ -311,6 +311,7 @@ pub async fn[T] with_durable_client(
       start_deadline: None,
       ack_deadline: None,
       terminal_cause: None,
+      acknowledged_reason: None,
       durable: Some({ runtime, expires_at_ms: stored.expires_at_ms, }),
     }
     if deliveries.active.contains(record.delivery_id) ||
@@ -562,7 +563,9 @@ async fn Session::request(
   } else {
     self.allocate(inflight_limit.unwrap_or(config.max_inflight))
   }
-  let wire_limit = packet_limit.unwrap_or(config.max_packet_size)
+  let wire_limit = packet_limit
+    .unwrap_or(config.max_packet_size)
+    .min(self.outgoing_limit)
   let bytes = encode_wire(config.protocol, packet(id), properties, wire_limit)
   let request : Pending = {
     id,
@@ -582,7 +585,7 @@ async fn Session::request(
   // owner of the wake-up, so the closure is passed in by the caller.
   defer (if request.result is None { abort_session("request cancelled") })
   if !(kind is Disconnect) {
-    let accepted = self.outgoing.try_put({
+    let accepted = self.enqueue_business({
       bytes,
       pending: Some(request),
       delivery: None,
@@ -759,7 +762,6 @@ pub async fn Client::publish_detailed(
       )
     }),
     packet_limit=Some(negotiated.max_packet_size),
-    inflight_limit=Some(negotiated.receive_maximum),
     on_unknown=() => self.note_unknown(),
   )
   match reply {
@@ -817,7 +819,7 @@ pub fn Client::submit_delivery(
     raise ProtocolError("outgoing payload exceeds packet limit")
   }
   if self.deliveries.active.length() + session.pending.length() >=
-    negotiated.receive_maximum {
+    self.config.max_inflight {
     raise Backpressure("inflight limit reached")
   }
   let packet_id = self.deliveries.allocate_packet_id(session)
@@ -839,6 +841,7 @@ pub fn Client::submit_delivery(
     start_deadline: None,
     ack_deadline: None,
     terminal_cause: None,
+    acknowledged_reason: None,
     durable: None,
   }
   // Encode before mutating ownership so an invalid topic/packet bound leaves no
@@ -853,7 +856,7 @@ pub fn Client::submit_delivery(
   )
   session.deliveries[packet_id] = record
   session.delivery_slots += 1
-  let accepted = session.outgoing.try_put({
+  let accepted = session.enqueue_business({
     bytes,
     pending: None,
     delivery: Some(record),
@@ -935,7 +938,7 @@ pub async fn Client::submit_durable_delivery(
       )
     }
     if self.deliveries.active.length() + session.pending.length() >=
-      negotiated.receive_maximum {
+      self.config.max_inflight {
       raise Backpressure("inflight limit reached")
     }
     let packet_id = self.deliveries.allocate_packet_id(session)
@@ -957,6 +960,7 @@ pub async fn Client::submit_durable_delivery(
       start_deadline: None,
       ack_deadline: None,
       terminal_cause: None,
+      acknowledged_reason: None,
       durable: None,
     }
     // Reserve the MQTT identifier before the first SQLite suspension so an
@@ -1142,7 +1146,12 @@ async fn Client::subscribe_on(
 
 ///|
 pub async fn Client::unsubscribe(self : Client, topics : Array[String]) -> Unit {
-  ignore(self.unsubscribe_detailed(topics))
+  let reasons = self.unsubscribe_detailed(topics)
+  for reason in reasons {
+    if reason.code >= 128 {
+      raise BrokerRejected(reason)
+    }
+  }
 }
 
 ///|

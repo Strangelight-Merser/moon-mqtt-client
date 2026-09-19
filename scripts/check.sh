@@ -17,3 +17,4 @@ export MOON PYTHON
 "$PYTHON" tests/durable_outbox.py
 "$PYTHON" tests/ha_relay.py
 "$PYTHON" tests/mqtt5_codec.py
+"$PYTHON" tests/mqtt5_runtime.py

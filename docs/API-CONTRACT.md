@@ -279,7 +279,14 @@ Outgoing publish properties are copied before suspension. Message Expiry is
 converted once to an absolute deadline, then recomputed immediately before the
 socket write, including after durable storage commits. Properties count toward
 the negotiated packet limit and, for durable rows, toward the configured
-payload-plus-property byte bound. Recovered rows retain the same deadline.
+payload-plus-property byte bound (the canonical empty property section costs
+zero metadata bytes; every nonempty section is charged in full). Recovered rows
+retain the same deadline.
+
+Detailed subscription/unsubscription operations return every per-topic reason,
+including mixed success and rejection. The Unit unsubscribe wrapper raises
+`BrokerRejected` if any topic was rejected; only successful removals update the
+desired subscription set. A rejection does not terminate the reader.
 
 Negative PUBACK completes an ordinary request as `BrokerRejected`. For durable
 work, the outbox DELETE commits before the packet identifier, payload and handle
@@ -287,8 +294,10 @@ are released; the handle reaches `Rejected(BrokerReason)`. Like a positive
 PUBACK, this does not create permanent completion history, and a process crash
 after receiving the ACK but before DELETE can replay the row.
 
-Receive Maximum limits admitted QoS 1 work while the separate bounded control
-queue remains available for PUBACK, PINGREQ and DISCONNECT. Maximum Packet Size,
+Receive Maximum limits QoS 1 publications awaiting PUBACK on the current
+connection. Local max_inflight bounds admitted work; queued and recovered work
+waits for credit in FIFO order. A parked queue head still occupies its bounded
+slot. The separate bounded control queue remains available for PUBACK, PINGREQ and DISCONNECT. Maximum Packet Size,
 Maximum QoS, Retain Available and Server Keep Alive constrain the current
 generation. A server DISCONNECT ends that scope with `ServerDisconnected` and
 is not retried in the same scope. A first `Session Present=true` is accepted

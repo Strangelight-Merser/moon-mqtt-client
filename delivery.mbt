@@ -110,6 +110,7 @@ priv struct DeliveryRecord {
   mut start_deadline : Int64?
   mut ack_deadline : Int64?
   mut terminal_cause : ClientError?
+  mut acknowledged_reason : BrokerReason?
   mut durable : DurableRecordMeta?
 }
 
@@ -149,7 +150,7 @@ fn DeliveryRecord::status(self : DeliveryRecord) -> DeliveryStatus {
     terminal_cause: self.terminal_cause,
     broker_reason: match self.phase {
       Rejected(reason) => Some(reason)
-      _ => None
+      _ => self.acknowledged_reason
     },
     packet_id: self.packet_id,
     attempts: self.attempts,
@@ -181,13 +182,18 @@ pub async fn DeliveryHandle::wait(self : DeliveryHandle) -> DeliveryStatus {
 fn DeliveryRecord::packet(
   self : DeliveryRecord,
   limit? : Int? = None,
+  dup? : Bool? = None,
 ) -> Bytes raise ClientError {
   guard self.topic is Some(topic) && self.payload is Some(payload) else {
     raise Closed
   }
-  let now_ms = match self.durable {
-    Some(meta) => (meta.runtime.now_ms)()
-    None => durable_now_ms()
+  let now_ms = if self.message_expiry_at_ms is None {
+    0L
+  } else {
+    match self.durable {
+      Some(meta) => (meta.runtime.now_ms)()
+      None => durable_now_ms()
+    }
   }
   encode_wire(
     self.protocol,
@@ -197,7 +203,7 @@ fn DeliveryRecord::packet(
       qos: @codec.QoS1,
       message_id: Some(self.packet_id),
       retain: self.retain,
-      dup: self.ever_started,
+      dup: dup.unwrap_or(self.ever_started),
     }),
     publish_properties_wire(self.properties, self.message_expiry_at_ms, now_ms),
     limit.unwrap_or(self.wire_limit),
@@ -264,10 +270,14 @@ fn DeliveryRecord::detach(
 }
 
 ///|
-fn DeliveryRecord::finish_acknowledged(self : DeliveryRecord) -> Unit {
+fn DeliveryRecord::finish_acknowledged(
+  self : DeliveryRecord,
+  reason? : BrokerReason? = None,
+) -> Unit {
   if !self.phase.terminal() {
     self.start_deadline = None
     self.ack_deadline = None
+    self.acknowledged_reason = reason
     self.phase = Acknowledged
     self.topic = None
     self.payload = None
@@ -334,8 +344,9 @@ fn DeliveryBook::remove_record(
 fn DeliveryBook::acknowledge(
   self : DeliveryBook,
   record : DeliveryRecord,
+  reason? : BrokerReason? = None,
 ) -> Unit {
-  record.finish_acknowledged()
+  record.finish_acknowledged(reason~)
   self.remove_record(record)
 }
 

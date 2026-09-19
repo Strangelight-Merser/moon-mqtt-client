@@ -115,3 +115,54 @@ test "durable identity binds protocol and session options" {
   assert_not_eq(durable_identity(mqtt311), durable_identity(mqtt5))
   assert_not_eq(durable_identity(mqtt5), durable_identity(mqtt5_longer))
 }
+
+///|
+test "credit-stalled FIFO head stays within the business queue bound" {
+  let session = test_session()
+  defer session.abort("test complete")
+  session.qos1_outstanding = session.receive_maximum
+  // Non-PUBLISH requests do not consume receive credit.
+  let subscribe : Outgoing = {
+    bytes: b"subscribe",
+    pending: Some(test_pending(1, Subscribe([]))),
+    delivery: None,
+    is_ping: false,
+  }
+  assert_true(session.enqueue_business(subscribe))
+  session.business_depth += 1
+  assert_true(session.next_outgoing() is Some(_))
+  for i in 0..<8 {
+    assert_true(
+      session.enqueue_business({
+        bytes: b"publish",
+        pending: Some(test_pending(i + 2, Publish1)),
+        delivery: None,
+        is_ping: false,
+      }),
+    )
+    session.business_depth += 1
+  }
+  assert_true(session.next_outgoing() is None)
+  assert_eq(session.business_depth, 8)
+  assert_false(session.enqueue_business(subscribe))
+  session.control(@codec.PubackPacket({ message_id: 7, }), 1024)
+  assert_eq(session.next_outgoing().unwrap().bytes, b"\x40\x02\x00\x07")
+  session.return_publish_credit()
+  assert_true(session.next_outgoing() is Some(_))
+  assert_eq(session.business_depth, 7)
+}
+
+///|
+test "negotiated maximum packet size also bounds control packets" {
+  let session = test_session(outgoing_limit=3)
+  defer session.abort("test complete")
+  let config = Config::new("localhost", "control-bound", protocol=Mqtt5)
+  try {
+    session.control_wire(@codec.PubackPacket({ message_id: 7, }), config)
+    abort("oversized control packet was queued")
+  } catch {
+    ProtocolError(_) => ()
+    _ => abort("wrong control packet bound error")
+  }
+  assert_eq(session.control_depth, 0)
+}

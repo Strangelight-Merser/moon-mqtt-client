@@ -15,7 +15,6 @@ import {
   "moonbitlang/core/env",
   "moonbitlang/core/ref",
   "zbhzs1/moonbit-mqtt" @codec,
-  "Strangelight-Merser/moon-mqtt-client/internal/mqtt5" @mqtt5,
 }
 
 import {

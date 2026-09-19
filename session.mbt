@@ -65,7 +65,9 @@ priv struct Session {
   reserved_deliveries : Map[Int, DeliveryRecord]
   mut delivery_slots : Int
   mut qos1_outstanding : Int
+  outgoing_limit : Int
   receive_maximum : Int
+  mut parked_business : Outgoing?
   delivery_changed : @cond_var.Cond
   mut next_id : Int
   mut alive : Bool
@@ -154,6 +156,8 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
     }
     self.deliveries.clear()
     self.delivery_slots = 0
+    self.qos1_outstanding = 0
+    self.parked_business = None
     self.delivery_changed.broadcast()
   }
 }
@@ -222,7 +226,12 @@ fn Session::control_wire(
   if !self.alive {
     raise NotConnected
   }
-  let encoded = encode_wire(config.protocol, packet, [], config.max_packet_size)
+  let encoded = encode_wire(
+    config.protocol,
+    packet,
+    [],
+    config.max_packet_size.min(self.outgoing_limit),
+  )
   let accepted = self.control_queue.try_put({
     bytes: encoded,
     pending: None,
@@ -259,12 +268,19 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
     }
     None => ()
   }
-  if self.qos1_outstanding >= self.receive_maximum {
-    return None
+  let business = match self.parked_business {
+    Some(item) => Some(item)
+    None => self.outgoing.try_get() catch { _ => return None }
   }
-  let business = self.outgoing.try_get() catch { _ => return None }
   match business {
     Some(item) => {
+      let requires_credit = item.delivery is Some(_) ||
+        (item.pending is Some(request) && request.kind is Publish1)
+      if requires_credit && self.qos1_outstanding >= self.receive_maximum {
+        self.parked_business = Some(item)
+        return None
+      }
+      self.parked_business = None
       if self.business_depth > 0 {
         self.business_depth -= 1
       }
@@ -287,7 +303,7 @@ async fn Session::enqueue_delivery(
   while self.alive &&
         delivery.generation == Some(self.generation) &&
         !delivery.phase.terminal() {
-    let accepted = self.outgoing.try_put({
+    let accepted = self.enqueue_business({
       bytes,
       pending: None,
       delivery: Some(delivery),
@@ -331,6 +347,11 @@ async fn Session::write_one(
   write_timeout_ms : Int,
   reconnect_attempts : Int,
 ) -> Bool {
+  // Snapshot DUP before durable possible-write persistence changes the record.
+  let was_started = match item.delivery {
+    Some(delivery) => delivery.ever_started
+    None => false
+  }
   let timed_out_before_write = match item.pending {
     Some(request) =>
       operation_timeout_ms.to_int64() <= @async.now() - request.queued_at
@@ -485,12 +506,9 @@ async fn Session::write_one(
     }
     None => ()
   }
-  if item.pending is Some(request) {
-    mark_started(request)
-  }
   try {
     let bytes = match item.delivery {
-      Some(delivery) => delivery.packet()
+      Some(delivery) => delivery.packet(dup=Some(was_started))
       None =>
         match item.pending {
           Some(request) =>
@@ -500,6 +518,13 @@ async fn Session::write_one(
             }
           None => item.bytes
         }
+    }
+    if item.pending is Some(request) {
+      mark_started(request)
+    }
+    if item.delivery is Some(_) ||
+      (item.pending is Some(request) && request.kind is Publish1) {
+      self.qos1_outstanding += 1
     }
     @async.with_timeout(write_timeout_ms, () => self.writer.write(bytes))
   } catch {
@@ -727,4 +752,21 @@ async fn Session::heartbeat(
         }
     }
   }
+}
+
+///|
+/// The parked FIFO head still occupies a bounded business slot.
+fn Session::enqueue_business(self : Session, item : Outgoing) -> Bool raise {
+  match self.outgoing.kind {
+    @aqueue.Blocking(limit) if self.business_depth >= limit => false
+    _ => self.outgoing.try_put(item)
+  }
+}
+
+///|
+fn Session::return_publish_credit(self : Session) -> Unit {
+  if self.qos1_outstanding > 0 {
+    self.qos1_outstanding -= 1
+  }
+  self.delivery_changed.broadcast()
 }

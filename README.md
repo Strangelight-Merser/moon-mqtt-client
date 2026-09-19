@@ -246,13 +246,38 @@ Message Expiry、Response Topic、Correlation Data 和有序 User Properties。�
 抛出 `BrokerRejected`。`subscribe_detailed` 和 `unsubscribe_detailed` 保留每项数字 reason code，
 旧接口继续提供原有投影语义，负 UNSUBACK 不会被当成成功。`negotiated_settings()` 只返回当前
 连接代次的 Receive Maximum、Maximum Packet Size、Maximum QoS、Retain Available、
-Server Keep Alive 和 Session Expiry。违反协商限制的本地工作在写入前以 `DeliveryRejected`
-拒绝；`BrokerRejected` 只表示实际收到的负 broker reason。
+Server Keep Alive 和 Session Expiry。本地 QoS/retain 限制以 `DeliveryRejected` 拒绝，
+超出报文大小限制以 `ProtocolError` 拒绝，均不发送该报文；`BrokerRejected` 只表示实际收到的负 broker reason。
 
 durable MQTT 5 delivery 将完整规范化属性段和一次计算的 Message Expiry 绝对期限写入 SQLite。
 成功或负 PUBACK 都先提交删除，再释放 packet ID 并完成 handle，因此不保存永久完成历史；两者
 都有“broker 已发 ACK、进程在 DELETE 前崩溃”这一不可避免的重复窗口。durable 文件还单独保存
 known-session 标记，空 outbox 不会丢失 session 身份证据。旧或未知 schema 只读拒绝，不迁移。
+
+Receive Maximum 只限制当前连接中等待 PUBACK 的 QoS 1 报文数。本地有界队列可继续接纳工作，
+随后按顺序等待发送额度；PUBACK、PINGREQ 和 DISCONNECT 使用独立控制队列。
+
+```moonbit
+let config = @mqtt.Config::new("127.0.0.1", "requester", protocol=@mqtt.Mqtt5)
+@mqtt.with_client(config, async fn(client) {
+  let receipt = client.publish_detailed(
+    "service/request", b"status", qos=@mqtt.AtLeastOnce,
+    properties=@mqtt.PublishProperties::new(
+      message_expiry_secs=Some(30L),
+      response_topic=Some("service/reply"),
+      correlation_data=Some(b"request-1"),
+      user_properties=[("source", "moonbit")],
+    ),
+  )
+  match receipt {
+    @mqtt.Accepted(reason) => println("PUBACK reason=\{reason.code}")
+    @mqtt.Written => println("written")
+  }
+})
+```
+
+本地运行完整 MQTT 5 原生客户端、独立协议对端与 Mosquitto/Paho 验收：
+`.venv/bin/python tests/mqtt5_runtime.py`。该检查也包含在 `scripts/check.sh` 与双平台 CI 中。
 
 ## 更多使用场景
 
@@ -295,7 +320,7 @@ MOONBIT_ASYNC_CHECK_FD_LEAK=1 .venv/bin/python tests/soak.py \
   --duration 1800 --cycles 100 --artifacts tests/integration/artifacts/soak
 ```
 
-已记录的验证包括 26 项单元测试、12 项集成测试、10 项协议故障测试、4 个状态同步场景、
+早期 v0.2 版本记录的验证包括 26 项单元测试、12 项集成测试、10 项协议故障测试、4 个状态同步场景、
 EMQX 互操作，以及 30 分钟、100 次断线恢复的压力测试。长测的 RSS/FD 资源采样不可用，
 尚不能据此确认持续负载下没有资源泄漏。
 
