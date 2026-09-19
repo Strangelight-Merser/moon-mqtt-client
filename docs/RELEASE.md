@@ -6,11 +6,15 @@ was checked during the project decision on 2026-09-14; the organizer's final
 notices govern acceptance. Unknown or unexecuted items are marked as such and are
 not claimed as complete.
 
+## v0.7.0 publication
+
+[v0.7.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.0) published at2026-09-19T02:39:35Z. PR #3 merged the completed host roadmap, tag `v0.7.0` points to `bc93570`, and Mooncakes `Strangelight-Merser/moon-mqtt-client@0.7.0` is installable. Candidate and merge trees match; both-platform CI, fresh registry TCP/mTLS and26 roadmap consumer cases passed. Runtime retains four nonfatal warnings. See [release notes](RELEASE-NOTES-v0.7.0.md) for capabilities/API boundaries and [validation](VALIDATION.md) for exact evidence. All three public assets were anonymously downloaded and verified against local bytes and GitHub SHA256 digests. Actual HA/ESP32 and competition participant actions remain separate.
+
 ## v0.3.0 publication
 
 v0.3.0 published at 2026-09-19T02:19:45Z: [https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0). `Strangelight-Merser/async-tls@0.1.0` was published first, followed by `Strangelight-Merser/moon-mqtt-client@0.3.0`; both publish commands returned200 OK. Unmodified `tests/consumer_smoke.py --registry` then passed TCP and mTLS QoS1 round trips in fresh temporary modules without local workspace overrides. Four public release assets were downloaded without authentication and matched both local bytes and GitHub SHA256 digests.
 
-Tagv0.3.0 targets merged commita7fe72350831f3af409f36b3c78499cb141bf111, whose Git tree exactly matches CI-accepted eeb93be40ba19020df1a9effcdd8771c5f132104. [CI35356886328](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35356886328) passed. Checksums are attached to the release. This release contains native MQTT3.1.1/mTLS; the broader roadmap remains on its separate development branch.
+Tagv0.3.0 targets merged commita7fe72350831f3af409f36b3c78499cb141bf111, whose Git tree exactly matches CI-accepted eeb93be40ba19020df1a9effcdd8771c5f132104. [CI35356886328](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35356886328) passed. Checksums are attached to the release. This release contains native MQTT3.1.1/mTLS; the broader roadmap was subsequently integrated and published as v0.7.0 above.
 
 ## Historical engineering and distribution checklist
 

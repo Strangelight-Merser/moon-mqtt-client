@@ -1,5 +1,13 @@
 # Executed validation
 
+## v0.7.0 publication acceptance — 2026-09-19 UTC
+
+Candidate `ce77a3c3493a292549a538af394ac175bf47dce7` passed [PR CI35415973508](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35415973508) and push CI35415955398 on Linux/macOS. The suite coverage is the same as the native roadmap results below; optional rolling-toolchain compatibility was not run. PR #3 merged as `bc93570ebd3e3034511126342f84c87876088ebc`; both trees equal `3aab0b04dbbec4bc6fe955f2c096a63cbd817f48`.
+
+All 156 files in the final publication ZIP matched candidate Git bytes. The extracted-package consumer passed 26 cases. After `moon publish` returned `200 OK`, unchanged `tests/consumer_smoke.py --registry` passed separate TCP/mTLS round trips. `tests/registry_roadmap.py` then passed MQTT5 runtime12, WS peers6, actual EMQX WS/WSS4 and HA host4 from fresh Mooncakes consumers, with zero failures/errors/skips and no local library override. Executable entry sources alone are copied; all runtime and example libraries resolve from the installed package. FD-leak checks were enabled. Actual HA/ESP32 and long-duration v0.7 soak were not run.
+
+[v0.7.0 release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.0) targets the exact merge. All three public assets were anonymously downloaded and verified against local bytes and GitHub SHA256 digests. Evidence files and artifact hashes are recorded in [STATE](exec/STATE.md).
+
 ## Native roadmap candidate — 2026-09-18
 
 Development branch `codex/roadmap-native`, exact tested head `d5e5fb01f33358843fb1e251ad86b03acd687bea` passed [hosted CI35414746155](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35414746155) on macOS and Ubuntu. Both platforms passed native140, Mosquitto/Paho25, protocol faults10, separate-module TCP/mTLS consumers, recoverable QoS1 (5), durable process recovery (4), HA host consumer (4), MQTT5 codec roundtrip, production MQTT5 runtime (12) and WebSocket peers (6). Ubuntu additionally passed EMQX (4) and native WS/WSS (4). Fixed toolchain remains moon0.1.20260904/moonc0.10.12+1634b282e. Latest-toolchain compatibility was not run by this push workflow.
@@ -8,7 +16,7 @@ MQTT5 evidence includes independent broker metadata exchange, binary/repeated pr
 
 Local complete `scripts/check.sh`, subsequent focused native140 and EMQX WS/WSS checks passed. Exact logs, source/diff fingerprints, model dispatch limits and earlier failures remain in [execution state](exec/STATE.md). The original acceptance assertions and time budgets were preserved; required private fixture initialization and explicitly authorized source-copy/readiness corrections are documented there.
 
-PR#2 was merged externally at2026-09-18T15:02:39Z, and subsequent explicit publication authorization has now been completed: async-tls0.1.0 and MQTT0.3.0 published; unchanged fresh-module registry TCP/mTLS consumer passed. [v0.3.0 release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0) and all four anonymous asset downloads were verified. The earlier missing-version attempt is historical. The later roadmap branch remains unpublished; actual hardware and its next version/integration remain separate work.
+PR#2 was merged externally at2026-09-18T15:02:39Z, and subsequent explicit publication authorization has now been completed: async-tls0.1.0 and MQTT0.3.0 published; unchanged fresh-module registry TCP/mTLS consumer passed. [v0.3.0 release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0) and all four anonymous asset downloads were verified. The earlier missing-version attempt is historical. The later roadmap is now published as v0.7.0, recorded above; actual hardware remains separate work.
 
 ## Historical v0.2.0 validation
 

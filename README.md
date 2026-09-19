@@ -11,7 +11,7 @@
 
 ## 安装与构建
 
-当前源码版本为 **0.7.0**，提供 TCP/TLS、WS/WSS、可恢复 QoS 1、SQLite 持久 outbox 和 MQTT 5 应用子集。
+当前发布版本为 [**0.7.0**](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.0)，提供 TCP/TLS、WS/WSS、可恢复 QoS 1、SQLite 持久 outbox 和 MQTT 5 应用子集。
 发布与注册表安装状态见 [执行状态](docs/exec/STATE.md)，源码能力不代表已发布。添加注册表依赖的命令为：
 
 ```sh

@@ -227,6 +227,8 @@ M1 / done / root: exact-head hosted35414746155 passed macOS/Ubuntu, including ru
 
 V0.3 publication / done / root: latest explicit authorization exercised for prepared eeb93be packages. TLS0.1 then MQTT0.3 returned200 OK; unchanged fresh-module registry TCP/mTLS passed. Tagv0.3.0=a7fe723 (same accepted source tree), GitHub release2026-09-19T02:19:45Z, all4 public assets byte/hash verified. Main docs-onlycf883bf records completion; STATE links evidence. No real hardware or roadmap-feature publication claim.
 
-## R7 — Publish the completed native roadmap (in_progress)
+## R7 — Publish the completed native roadmap (done)
 
 Owner root; Luna requested gpt-5.6-luna/medium audits stale public docs read-only (completed), actual model metadata unavailable. Baseadee7c6, maincf883bf merged5141eef. WHY: users need installable WS/WSS, recoverable/durable QoS1 and MQTT5 rather than only a development branch. Select0.7.0 per roadmap endpoint, no fake intermediate releases. Scope version/packaging/docs and independent package/registry consumer; runtime already accepted d5e5fb0, not expanded. Preserve default3.1.1 and original behavioral assertions. Acceptance: versioned candidate CI, exact package consumer MQTT5+WS/WSS+HA26 cases, reviewed merge, published registry default TCP/mTLS and same26, release assets/hash verification. Hardware remains outside.
+
+R7 / done / root: candidate ce77a3c, PR#3 merge/tag bc93570, push35415955398 and PR35415973508 both-platform CI passed. Mooncakes0.7 published200 OK; original default TCP/mTLS consumers and26 roadmap registry cases passed without overrides/skips. Release and checksum evidence in STATE. Luna completed bounded docs audit; actual requested-model bindings remain unconfirmed. Next external task is actual HA/ESP32 acceptance after access/board/pin/network information is supplied.
