@@ -2,16 +2,16 @@
 
 [![原生客户端检查](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml)
 
-面向 MoonBit 的原生异步 MQTT 3.1.1 客户端。连接现有 MQTT 消息服务器（broker），
+面向 MoonBit 的原生异步 MQTT 客户端，默认 MQTT 3.1.1，可显式选择 MQTT 5 应用子集。连接现有 MQTT 消息服务器（broker），
 订阅设备或应用事件，发布命令与状态，无需为每个应用单独编写 socket 收发循环。
 
 本项目复用 **zbhzs1/moonbit-mqtt** 的报文编解码，在 **moonbitlang/async** 之上实现
-连接生命周期、TLS 传输、请求跟踪、心跳和 clean session 断线重连。
+连接生命周期、TCP/TLS/WS/WSS、请求跟踪、心跳、会话恢复与持久投递。
 目前属于早期实现，尚未通过 MQTT 协议一致性认证。
 
 ## 安装与构建
 
-源码基线为 **0.3.0**，支持双向 TLS（mTLS）；本开发分支继续实现原生 WS/WSS。
+当前源码版本为 **0.7.0**，提供 TCP/TLS、WS/WSS、可恢复 QoS 1、SQLite 持久 outbox 和 MQTT 5 应用子集。
 发布与注册表安装状态见 [执行状态](docs/exec/STATE.md)，源码能力不代表已发布。添加注册表依赖的命令为：
 
 ```sh
@@ -66,9 +66,9 @@ python3 -m venv .venv
 
 ## 支持范围
 
-- 原生 TCP/TLS，以及开发分支的 WS/WSS；TLS 支持系统根证书或自定义 PEM CA。
+- 原生 TCP/TLS，以及 WS/WSS；TLS 支持系统根证书或自定义 PEM CA。
 - 可选双向 TLS（mTLS）：PEM 证书链 + 未加密私钥；`Plain` 不能搭配客户端身份。
-- MQTT 3.1.1、QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
+- 默认 MQTT 3.1.1，可选 MQTT 5 应用子集；QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
 - 订阅与取消订阅确认，包括逐主题的订阅拒绝结果。
 - 有上限的发送队列、事件队列、报文大小和并发请求数。
 - 默认 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
@@ -78,7 +78,7 @@ python3 -m venv .venv
 - 任务和 socket 的生命周期由回调作用域管理。回调正常返回或调用 `disconnect()` 时
   发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
 
-暂不支持 QoS 2、MQTT 5、通用离线接收队列、加密私钥、
+暂不支持 QoS 2、Topic Alias、Subscription Identifiers、Enhanced AUTH、通用离线接收队列、加密私钥、
 浏览器和微控制器目标。
 
 ## 原生 WebSocket
@@ -276,7 +276,7 @@ let config = @mqtt.Config::new("127.0.0.1", "requester", protocol=@mqtt.Mqtt5)
 })
 ```
 
-本地运行完整 MQTT 5 原生客户端、独立协议对端与 Mosquitto/Paho 验收：
+本地运行MQTT 5 应用子集原生客户端、独立协议对端与 Mosquitto/Paho 验收：
 `.venv/bin/python tests/mqtt5_runtime.py`。该检查也包含在 `scripts/check.sh` 与双平台 CI 中。
 
 ## 更多使用场景

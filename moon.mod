@@ -1,6 +1,6 @@
 name = "Strangelight-Merser/moon-mqtt-client"
 
-version = "0.3.0"
+version = "0.7.0"
 
 repository = "https://github.com/Strangelight-Merser/moon-mqtt-client"
 
@@ -8,7 +8,7 @@ license = "Apache-2.0"
 
 readme = "README.md"
 
-description = "Native asynchronous MQTT 3.1.1 client with QoS 0/1 and clean-session reconnect"
+description = "Native MQTT 3.1.1/5 client with WS/WSS and bounded recoverable QoS 1 delivery"
 
 preferred_target = "native"
 

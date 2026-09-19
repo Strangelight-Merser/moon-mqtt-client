@@ -1,6 +1,6 @@
 # Execution state
 
-Updated: 2026-09-18. Expanded authorized host/software roadmap: **done**. W1/Q1/D1/H1 host software and M1 runtime are done. Actual HA/ESP32 gates remain open. The separately authorized v0.3 registry/publication gates are now done.
+Updated: 2026-09-18. Expanded authorized host/software implementation: **done**. Roadmap release R7: **in_progress**. W1/Q1/D1/H1 host software and M1 runtime are done. Actual HA/ESP32 gates remain open. The separately authorized v0.3 registry/publication gates are now done.
 
 ## Authorization and active baselines
 
@@ -91,3 +91,13 @@ User explicitly authorized the prepared packages. Root published async-tls0.1.0 
 [v0.3.0 release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0) published2026-09-19T02:19:45Z. Tagv0.3.0 targets mergea7fe723; source tree1e54ac08f5e07323a609f3cc3dc89ba6d526baf5 equals accepted eeb93be. Four assets (TLS ZIP, MQTT ZIP, source archive, SHA256SUMS) downloaded anonymously and verified byte-identical and against GitHub digests. One urllib TLS-handshake timeout was resolved using bounded curl IPv4 download with normal certificate checks; no integrity check was bypassed.
 
 Evidence in `_build/exec-mqtt5/`: `publish-tls01-result.json`, `publish-mqtt03.log`, `registry-v03-published-acceptance.log`, `github-release-v03.json`, `public-download-verification.json`, `release-assets/`. Both package hashes equal the preauthorized candidates. Main release documentation updated in docs-onlycf883bf; original code checkout remains untouched. Original ignored paused release state was backed up then marked complete. This release does not include or merge the later roadmap branch. No further publication action is pending for v0.3.
+
+## R7 roadmap publication — in_progress
+
+The latest user request to continue the remaining work, following explicit publication authorization, authorizes integrating and publishing the completed roadmap. Root selects v0.7.0, the planned endpoint; W1/Q1/D1/H1/M1 ship together, without invented v0.4–v0.6 releases. This is packaging/version integration, not a new architecture expansion or hardware authorization.
+
+Base adee7c6; merged main cf883bf as5141eef. Only STATE/TASKS conflicted; retained the authoritative roadmap state, which already contains completed v0.3 publication evidence. Runtime .mbt/moon.pkg bytes remain identical to tested d5e5fb0. Candidate updates version/description, stale capability docs, includes shipped architecture contracts, and adds standalone package/registry consumer verification reusing unchanged runtime, WS/WSS and HA assertions.
+
+Luna /root/baseline (retained requested gpt-5.6-luna/medium, actual metadata unconfirmed) successfully audited release-facing docs this turn; identified obsolete MQTT5 unsupported/WS development statements and overbroad full-MQTT5 wording. Root implements release integration and validation. Package consumer copies executable entry sources only; runtime and example libraries come from the extracted ZIP before publication or Mooncakes afterward. No local-library substitution is permitted in registry mode. Extracted-package consumer passed26/26 behavioral cases (no skips); `packaged-consumer.json` records source=extracted package and workspace_override=true. Registry acceptance remains pending publication. Evidence `_build/release-v0.7.0/`.
+
+Next: candidate CI, PR integration, publish exact verified package, fresh registry default TCP/mTLS and roadmap consumer suites, tag/release/public asset verification, state closure. No repeat TLS package publication.

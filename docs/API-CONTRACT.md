@@ -260,7 +260,7 @@ disconnects, cumulative unknown outcomes, and the most recent disconnect reason.
 It contains no credentials and no message bodies, and the client does not depend
 on any monitoring service to produce it.
 
-## Native WebSocket transport (development branch)
+## Native WebSocket transport
 
 `Config.transport` selects `Tcp` (default) or `WebSocket(path)`. TLS remains a separate setting: `Plain` gives WS, while `SystemRoots`/`CustomCA` gives WSS with the existing optional client identity. Existing publish completion semantics do not change. PUBACK never means a downstream device executed a command.
 

@@ -2,7 +2,8 @@
 
 这是一个 MoonBit 原生 MQTT 客户端库：让 MoonBit 程序连接现有消息服务器，
 接收设备/应用消息，执行自己的规则，再发布结果。底层编解码复用现有开源包；
-本项目实现异步连接、收发、确认、心跳、TLS、断线重连和失败语义。
+本项目实现异步连接、收发、确认、心跳、TLS、断线重连和失败语义。默认 MQTT 3.1.1，
+同时提供 MQTT 5 应用子集、原生 WS/WSS、可恢复 QoS 1 和 SQLite 持久 outbox。
 
 已公开在 [GitHub](https://github.com/Strangelight-Merser/moon-mqtt-client)，
 注册表版本与安装验证记录见 [Releases](https://github.com/Strangelight-Merser/moon-mqtt-client/releases)。
@@ -51,5 +52,7 @@
 
 QoS 1 成功只表示收到 broker 的 PUBACK，不表示机器人或设备真的执行。
 若数据已开始发送但断线或确认超时，API 返回 `OutcomeUnknown`，由业务查询或重发幂等命令。
-重连使用新的 clean session 并恢复订阅；离线期间可能缺消息，不自动重放旧命令。
+默认重连使用新的 clean session 并恢复订阅；离线期间可能缺消息，不自动重放旧命令。
+显式选择 ResumeSession 与 delivery handle 后可恢复 QoS 1；持久化另需 with_durable_client。
+这些模式的会话丢失、过期和重复投递边界见运行时契约。
 取消未完成请求会中止当前连接（保守语义），并保证每个请求以“未发送”或“未知”结束。
