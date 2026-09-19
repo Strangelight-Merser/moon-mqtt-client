@@ -41,6 +41,11 @@ pub(all) suberror DurableStoreError {
 } derive(@debug.Debug)
 
 // Types and methods
+pub(all) struct BrokerReason {
+  code : Int
+  reason_string : String?
+} derive(Eq, @debug.Debug)
+
 type Client
 pub async fn Client::disconnect(Self) -> Unit
 pub async fn Client::next_event(Self) -> Event
@@ -145,9 +150,36 @@ pub(all) struct Message {
   generation : Int
 } derive(@debug.Debug)
 
+pub(all) struct NegotiatedSettings {
+  receive_maximum : Int
+  max_packet_size : Int
+  maximum_qos : QoS
+  retain_available : Bool
+  keep_alive_secs : Int
+  session_expiry_secs : Int64
+} derive(@debug.Debug)
+
 pub(all) enum NetworkTransport {
   Tcp
   WebSocket(String)
+} derive(Eq, @debug.Debug)
+
+pub(all) enum ProtocolVersion {
+  Mqtt311
+  Mqtt5
+} derive(Eq, @debug.Debug)
+
+pub(all) struct PublishProperties {
+  message_expiry_secs : Int64?
+  response_topic : String?
+  correlation_data : Bytes?
+  user_properties : Array[(String, String)]
+} derive(Eq, @debug.Debug)
+pub fn PublishProperties::new(message_expiry_secs? : Int64?, response_topic? : String?, correlation_data? : Bytes?, user_properties? : Array[(String, String)]) -> Self
+
+pub(all) enum PublishReceipt {
+  Written
+  Accepted(BrokerReason)
 } derive(Eq, @debug.Debug)
 
 pub(all) enum QoS {
