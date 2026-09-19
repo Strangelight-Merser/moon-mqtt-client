@@ -1,6 +1,6 @@
 # Execution state
 
-Updated: 2026-09-18. Status: W1 done; Q1 and D1 in_progress. Expanded roadmap remains in_progress. J1/C1/R2 done.
+Updated: 2026-09-18. Status: W1 and Q1 done; D1 and H1 in_progress. Expanded roadmap remains in_progress. J1/C1/R2 done.
 
 ## Expanded scope and active checkout
 
@@ -88,3 +88,11 @@ M1 implementation boundary approved in docs/architecture/MQTT5-SUBSET.md; root c
 Q1 hosted7d01032/run35410348751: macOS allpassed; Ubuntu recovery5 and other gates passed but native WSS publish CONNECT returned ConnectionRefused. Publisher branch lacked broker diagnostic retention (now fixed). Exact hosted refusal reason remains unknown; no retry-as-proof claim. Linuxx86 native against running ARM broker passed10 (`linux-wss-diagnostic.log`). Fresh emulatedx86 broker runs failed4/5, but logs identify a distinct environment quicer NIF startup failure; do not attribute that emulator defect to hosted Linux. They do prove the fixture accepted CONNACK before overall broker boot could fail. Added boot-complete barrier plus actual granted SUBACK/QoS1 route on WS and WSS; no native assertion/timeout/retry changes. Local nativeWS4 passed (`boot-ready-ws-interop.log`). Store integrated full original check also passed (`_build/exec-outbox/store-full-check.log`). New hosted head still required.
 
 H1 root isolated worktree `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-ha-host`, branchcodex/ha-host-consumer, baseb8a7cc5. New HA relay example protocol work started, preserving the existing thermostat demo and its tests. Mandatory command expiry and fresh native-entropy IDs; no hardware code/GPIO assumption. Not yet accepted.
+
+Q1 accepted on fb487729f16795a543a46537a363e372c639b99c: hosted35410891723 bothmacOS/Ubuntu success; root checked exacthead/job conclusions and retained full metadata/log at `_build/exec-qos1/ci-fb48772.{json,log}`. This head includes reviewedstore seam, native94, originalbroker/fault/scenarios/consumers, recovery5, WSraw6 andUbuntuEMQX4/WS4. Prior7d01032 hostedCONNECT refusal remains a missing-detail historical incident; completed broker boot/routing now required and publisher-failure logs retained. Do not claim the distinct emulatedx86 quicer failure explains hostedrefusal.
+
+H1 host candidate8a51005 integrated: newexamples/ha_relay controller + independentnative simulator, HA discovery/birth, nonoptimistic state, both availability/LWT, entropy IDs, boundedexpiring commands and correlated feedback. Existing thermostat example unchanged. Localisolatednative96 and Paho/Mosquitto4 passed; `_build/exec-ha/{native,interop-final}.log` inH1worktree. Includescontrollerrestart preservingONwithoutcommandreplay, validretained/expiredcommandrejection, PUBACKwithoutfeedbacknotconfirmed, devicecrashLWT. NewH1 test addedmandatorylocal/hostedchecks; integratedheadverificationpending. ActualHAinstance/ESP32 remainunverified andnotdone.
+
+H1 integrated fullcheck passed native96, originalbroker25/fault10/scenarios/TCP+mTLSconsumers, recovery5 andHAhost4; `_build/exec-ha/integrated-full-check.log`. Rootsemanticreview noted no command replay on ambiguous outcome/restart and no hardwareclaim; hostCI pending.
+
+D1 runtime firstcompilegreen but root earlyreview found reservation rollback before encode, storagecause lost through stringabort, stalegenerationwrite afterDBawait, and protectedACKcommit racing synchronousfinish_all. Sentfour blockers toSol forimplementation+regressions; D1notaccepted. RequestedSol/causes reactivation rejected twice by environment threadlimit; boundedM1codec implementation awaits availableSol orroot progress. Luna spec verification restarted successfully.

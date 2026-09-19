@@ -56,6 +56,8 @@ jobs:
           MOON="$(command -v moon)" python tests/protocol_faults.py
           MOON="$(command -v moon)" python tests/scenario_smoke.py
           MOON="$(command -v moon)" python tests/consumer_smoke.py
+      - name: HA host consumer
+        run: MOON="$(command -v moon)" python tests/ha_relay.py
       - name: Recoverable QoS 1
         run: MOON="$(command -v moon)" python tests/recoverable_qos1.py
       - name: EMQX interoperability

@@ -83,7 +83,7 @@
 - Acceptance: native WS/WSS including CLI, independent broker interoperability, malformed handshake/non-binary/fragmentation/close and resource-bound tests, original native/broker checks. No claims from Python-only models.
 - References: bundle ROADMAP P1/v0.4 and ACCEPTANCE_CRITERIA v0.4; OASIS MQTT 3.1.1 section 6; RFC 6455.
 
-## Q1 — Reconnect-resilient QoS 1 (in_progress)
+## Q1 — Reconnect-resilient QoS 1 (done)
 
 - Depends on reviewed W1. Separate connection generation, logical session and delivery identity; retain outgoing in-flight only when protocol permits, explicit broker-session loss, packet ID and DUP rules, waiter/protocol lifetime separation. Root approves public contract before Sol implementation.
 
@@ -95,7 +95,7 @@
 
 - Depends on Q1/D1 evidence. Scope reason codes, session/message expiry, negotiated receive/packet limits, user properties and request/response metadata. No QoS 2 or full-spec claim.
 
-## H1 — Host-side HA/ESP32 consumer and reconciliation (planned)
+## H1 — Host-side HA/ESP32 consumer and reconciliation (in_review)
 
 - Host-side implementation, simulator and instructions can proceed without hardware. Do not hardcode GPIO or equate PUBACK with physical completion; reconcile unknown delivery by correlated state queries. Board/HA access and actual published-package/hardware acceptance remain pending external prerequisites.
 
@@ -180,3 +180,5 @@ D1 store seam in_review: integratedd2fa265/native94 pass, root concurrency defec
 Owner /root/jitter, retained requested Sol/high; actual runtime metadata unconfirmed. New isolated worktree `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-durable-runtime`, branch codex/durable-runtime, baseb8a7cc5. Root approved the completed read-only seam review: one concrete outbox and client-level gate; outer cancellation protection covers each DB commit and memory publication; recovered handles constructed before dial and returned with callback; no requirement for a separate pre-dial user callback. Add nested typed DurableStorage cause, block terminal rows before settlement, preserve pending rows on normal closure, close only after all store-using tasks end. Root owns integration and global state.
 
 Scope core runtime/client/session/delivery/types, new durable API/driver/tests, necessary private fixture-field updates and public contract docs. Store internals may be minimally extended for targeted expiry/transition checks. No MQTT5, WS/TLS policy changes, old assertion weakening, global exec edits, push or recursion. Acceptance includes actual native process crash/reopen and retained broker session, no send after failed persistence, expiry/session-loss quarantine, cancellation/ACK ordering, bounded capacity and original regressions. Public recovered record inspection stays bounded and immutable; do not expose connection/store internals. W1/Q1 hosted regression currently being diagnosed by root is a final integration gate, not an excuse to overwrite transport policy.
+
+H1 root-owned host implementation: isolatedbaseb8a7cc5, candidate8a51005, newnativecontroller/simulator/commonprotocol/README and independentbroker test. Nooriginaldemo/testassertions changed. Fourrealbrokerprocesscasespassed; integratedmandatorychecks/CI pending. Hardware/actualHA/publishedregistry gatesremainopen. Q1donebinds fb48772/CI35410891723 bothplatforms.
