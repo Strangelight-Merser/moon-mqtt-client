@@ -91,11 +91,11 @@
 
 - Depends on Q1 delivery semantics. Evaluate SQLite as single backend; stable ID, restart recovery, bounded storage, expiry, disk-full/corruption, documented duplicate window. No generic storage framework.
 
-## M1 — Application-driven MQTT 5 subset (planned)
+## M1 — Application-driven MQTT 5 subset (in_progress)
 
 - Depends on Q1/D1 evidence. Scope reason codes, session/message expiry, negotiated receive/packet limits, user properties and request/response metadata. No QoS 2 or full-spec claim.
 
-## H1 — Host-side HA/ESP32 consumer and reconciliation (in_review)
+## H1 — Host-side HA/ESP32 consumer and reconciliation (host software done)
 
 - Host-side implementation, simulator and instructions can proceed without hardware. Do not hardcode GPIO or equate PUBACK with physical completion; reconcile unknown delivery by correlated state queries. Board/HA access and actual published-package/hardware acceptance remain pending external prerequisites.
 
@@ -184,3 +184,13 @@ Scope core runtime/client/session/delivery/types, new durable API/driver/tests, 
 H1 root-owned host implementation: isolatedbaseb8a7cc5, candidate8a51005, newnativecontroller/simulator/commonprotocol/README and independentbroker test. Nooriginaldemo/testassertions changed. Fourrealbrokerprocesscasespassed; integratedmandatorychecks/CI pending. Hardware/actualHA/publishedregistry gatesremainopen. Q1donebinds fb48772/CI35410891723 bothplatforms.
 
 M1 codec root-owned isolatedworktree moon-mqtt-mqtt5/baseff2bcc8: newinternal/mqtt5+codecprobe/tests; packet/direction/property/reason validation and compactforms, outgoing3fieldreuse/incoming5parser. Native103passed andactualMosquitto/Paho5 bidirectionalmetadata passed. Lunaindependentboundedtableauditrunning; productionruntime/sessionnegotiation/durablemetadata notyetimplemented. Rootenforcesupdated first-connectionSP rule fromMQTT5section3.2.2.1.1.
+
+### M1 runtime integration card (planned)
+
+WHY: expose the accepted MQTT5 wire seam through the production client, preserve recoverable semantics and support request/response metadata. Owner Sol /root/jitter after D1 candidate handoff; requested gpt-5.6-sol/high, actual model unconfirmed. Root approves API/semantics and integrates; Luna /root/baseline (requested gpt-5.6-luna/medium) maps current callsites read-only. Runtime workspace/base will bind the integrated D1 candidate plus codec7297317; do not implement against stale D1 core.
+
+Read docs/architecture/MQTT5-SUBSET.md and DURABLE-OUTBOX.md. Scope protocol types, adapter, handshake/read/write/request paths, delivery metadata/store schema and new focused tests/driver/docs. Do not modify WS/TLS ownership or global exec files. Preserve default3.1.1 and ordinary publish completion semantics, immutable expiry, same-ID/DUP, control priority and bounded admission. No compatibility schema migration, generic property map, automatic redirect/session reset, QoS2 or hardware.
+
+Acceptance: explicit5 selection, typed numeric reasons incl negativePUBACK and0x10, incoming/outgoing metadata, negotiated ReceiveMaximum/packet/QoS/retain/keepalive, durable properties and known logical-session ownership, conservative terminal handling. Raw peer proves credit/control ordering, first-SP rejection, negativeACK, negotiated limits and expiry. Real Mosquitto/Paho proves production metadata and persistent/process recovery. Root runs integrated original3.1.1/D1/HA/WS checks and hostedCI. Escalate contract conflicts; return commits, actual commands/logs and unverified paths.
+
+D1 independent reviewer /root/durable_review requested gpt-5.6-sol/high with fork none; spawn succeeded after earlier causes task disappeared from live-agent listing. Actual model metadata remains unavailable. Read-only current D1 patch review, no shared builds/broker/writes. Root independently prepares M1 raw-peer acceptance in tests/mqtt5_runtime.py; only Python syntax checked so far, driver/runtime are still absent and no passing M1 runtime claim is made.

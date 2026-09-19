@@ -1,6 +1,6 @@
 # Execution state
 
-Updated: 2026-09-18. Status: W1 and Q1 done; D1 and H1 in_progress. Expanded roadmap remains in_progress. J1/C1/R2 done.
+Updated: 2026-09-18. Status: W1, Q1 and H1 host software done; D1 runtime in_review; M1 codec integrated and runtime planned. Actual HA/ESP32 and release gates remain open. Expanded roadmap remains in_progress. J1/C1/R2 done.
 
 ## Expanded scope and active checkout
 
@@ -104,3 +104,5 @@ M1 root implementation in isolated `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-mq
 M1 codec seam native103passed, isolatedrealMosquitto/Paho5 bidirectionalmetadata passed (`moon-mqtt-mqtt5/_build/exec-mqtt5/{native-all,codec-interop}.log`). Luna cross-checking literalproperty/reason tables; runtimeintegrationpending. H1hostsoftwaredone atacceptedff2bcc8, hardware/actualHA stillblockedonexternalprerequisites.
 
 M1codec candidatef893e90 integrated afterrootwire review andLuna literal tableaudit. Audit `_build/exec-mqtt5/codec-table-audit.md` found no wrong property/reason tables. EmptyTopic+TopicAlias remains outside advertisedcapability (TopicAliasMaximum=0); not silentlyenabled. Native103andcodecMosquitto/Paho roundtrip bind isolatedcandidate. Requiredlocal/CI codecprobe nowadded; combinedruntime acceptance stillpending.
+
+D1 resumed review: Sol reports native root-package68 and process/broker3 passed after admission reservation rollback, fail-stop storage errors, generation checks, serialized ACK/teardown, endpoint/auth identity and post-COMMIT expiry fixes. Root found another watchdog expiry/ACK gate race and requested atomic revalidation/settlement plus regression; process crash after PUBACK before DELETE is also still required. These reports are candidate evidence, not D1 acceptance. No broker tests are running in root checkout while Sol runs its isolated full check.
