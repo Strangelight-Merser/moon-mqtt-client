@@ -2,8 +2,8 @@
 
 ## Authorized continuation (2026-09-19)
 
-- R8 RUNNING: root publishes the accepted v0.7.1 after current Linux/macOS CI (including HA fault tests), independent extracted-package acceptance, merge/tree equality, registry clean-install acceptance and anonymous asset verification. Luna owns local package checks. Existing A0–A4 stop notes below describe the completed prior request and are superseded only by this explicit release/B-stage authorization.
-- B1 PLANNED: Sol drafts a short durable recovery ADR for root decision; schema2 unchanged; then explicit inspect/export and controlled resolution, crash recovery and independent review. Separate branch, no v0.7.1 scope expansion.
+- R8 DONE: v0.7.1 merged/tagged at fa89f2f, Mooncakes published, Linux/macOS CI passed, extracted package 26/26, registry TCP/mTLS + roadmap26 + HA faults4 passed. All three GitHub assets anonymously downloaded and byte-verified. STATE records exact hashes and evidence. Historical A-stage stop notes below are superseded by the explicit release/B-stage authorization.
+- B1 IN DESIGN REVIEW: Sol drafted the durable recovery ADR; independent review informs root decision; schema2 unchanged; then explicit inspect/export and controlled resolution, crash recovery and independent review. Separate branch, no v0.7.1 scope expansion.
 - B2 BLOCKED ON DEVICE: user says hardware arrives tomorrow. Prepare independent consumer and evidence checklist only; actual HA/board/GPIO/firmware/serial inputs remain unknown. No HIL claim or automatic wakeup.
 - B3 PLANNED: root defines explicit reconnect reasons; Sol implements after B1, preserving takeover/auth/protocol terminal handling and no automatic redirects.
 

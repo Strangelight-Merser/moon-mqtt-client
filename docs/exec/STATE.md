@@ -4,9 +4,13 @@
 
 The user explicitly authorized CI, push/PR/merge, package publication and registry/public-asset acceptance, then B1–B3. Schema 2 must remain unchanged. Root owns release actions and integration; Sol prepares the B1 ADR before implementation; Luna validates the package and prepares B2 host handoff. Physical hardware is unavailable until tomorrow per the user: HIL is waiting on the device and board/pin/framework details, with no GPIO assumptions or scheduled automation.
 
-R8 release is RUNNING from c5e83cb. Only CI wiring for the new HA fault suite and release state/documents may change before publication; accepted implementation remains ce85684. Original acceptance tests remain unchanged. B1/B3 software will be developed separately after this release; no next-stage functionality enters v0.7.1.
+R8 release is **DONE**. [PR #4](https://github.com/Strangelight-Merser/moon-mqtt-client/pull/4) merged as `fa89f2fa8fb151e94db570bddf253fb11365bb19`; its tree exactly equals CI candidate `c84bc44b3736f48a439d3cb14533c905a0b20e1a`. Push CI `35430955576` and PR CI `35430992414` passed Linux/macOS, including the new HA fault step; Linux EMQX and native WS/WSS passed. Accepted implementation remains ce85684; original acceptance tests and schema 2 are unchanged.
 
-## A0–A4 v0.7.1 local candidate — DONE (2026-09-19)
+Mooncakes `0.7.1` publish returned HTTP 200. Extracted-package consumer acceptance passed 26/26 after starting the previously stopped Docker Desktop; the initial Docker-unavailable attempt is retained. Fresh registry TCP/mTLS passed, registry roadmap 26/26 passed, and registry HA transient 4/4 passed without workspace overrides. Controller/simulator entrypoints fetched from Mooncakes matched release ZIP and repository bytes. All three [v0.7.1 release assets](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.1) were anonymously downloaded and matched local files. Tag points to the merge commit. Package ZIP SHA256: `55bbb25e91957382496ff5699c68e410a80825c5d75f1cf1b54858184092078b`; source archive SHA256: `5bfc78f171d5c76371b6e76c700e24cfb702bfab500e0bb950023c9c0805ea72`.
+
+Evidence: `_build/release-v0.7.1/{ci-*.json,ci-*.log,PACKAGE-EVIDENCE.md,REGISTRY-EVIDENCE.md,registry-roadmap.json,registry-ha-transient.json,public-assets.json,SHA256SUMS,publish.log}`. Only actual HA/ESP32/GPIO/HIL remains NOT_RUN. B1/B3 software proceeds separately in `/Users/huaiyi/Documents/ChatGPT/moon-mqtt-recovery-v08`; no next-stage functionality enters v0.7.1. B1 ADR is under independent design review; B2 waits for devices.
+
+## Historical A0–A4 v0.7.1 local candidate — DONE (2026-09-19)
 
 This request is complete within local candidate scope. No push, merge, publication, schema 2 change, B task, production service or hardware operation is authorized or performed this round. Historical release authorization below does not extend this scope.
 
