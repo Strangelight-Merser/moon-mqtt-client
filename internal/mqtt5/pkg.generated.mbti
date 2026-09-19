@@ -9,7 +9,11 @@ import {
 // Values
 pub fn decode(Bytes, Int) -> Packet raise CodecError
 
+pub fn decode_publish_properties(Bytes, Int) -> Array[Property] raise CodecError
+
 pub fn encode(@moonbit-mqtt.Packet, Array[Property], Int) -> Bytes raise CodecError
+
+pub fn encode_publish_properties(Array[Property], Int) -> Bytes raise CodecError
 
 // Errors
 pub(all) suberror CodecError {
