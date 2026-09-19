@@ -82,3 +82,7 @@
 - Investigate first TLS CONNECT write/CONNACK read error path, especially raw socket errors. Preserve malformed-MQTT ProtocolError and cancellation behavior. Require deterministic regression and original failing integration entry, then integrated checks and fresh hosted CI.
 
 - Implemented explicit encrypted CONNECT/CONNACK OSError/TLS/EOF classification; malformed MQTT, plain TCP and timeouts unchanged. Root reviewed actual diff; before mapping regression failed, after fix native58 and full original local check passed. Hosted raw cause remains unknown; no claim to have reproduced the intermittent CI occurrence. New hosted CI pending.
+
+## v0.3 publication (done)
+
+User explicitly authorized prepared packages. Root published TLS0.1 then MQTT0.3 (200 OK), passed unchanged registry TCP/mTLS consumer, tagged identical merged treea7fe723 and created [v0.3.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0). All four public assets passed anonymous byte/hash verification. STATE contains exact source/artifact evidence and separate roadmap/hardware boundaries.
