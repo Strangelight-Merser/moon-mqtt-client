@@ -8,7 +8,7 @@ MQTT5 evidence includes independent broker metadata exchange, binary/repeated pr
 
 Local complete `scripts/check.sh`, subsequent focused native140 and EMQX WS/WSS checks passed. Exact logs, source/diff fingerprints, model dispatch limits and earlier failures remain in [execution state](exec/STATE.md). The original acceptance assertions and time budgets were preserved; required private fixture initialization and explicitly authorized source-copy/readiness corrections are documented there.
 
-PR#2 was merged externally at2026-09-18T15:02:39Z, but a fresh registry consumer attempt still cannot resolve `moon-mqtt-client@0.3.0`. Consequently registry mTLS was not run. The roadmap branch is not published. Actual hardware, registry installation and release remain separate gates.
+PR#2 was merged externally at2026-09-18T15:02:39Z, and subsequent explicit publication authorization has now been completed: async-tls0.1.0 and MQTT0.3.0 published; unchanged fresh-module registry TCP/mTLS consumer passed. [v0.3.0 release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0) and all four anonymous asset downloads were verified. The earlier missing-version attempt is historical. The later roadmap branch remains unpublished; actual hardware and its next version/integration remain separate work.
 
 ## Historical v0.2.0 validation
 

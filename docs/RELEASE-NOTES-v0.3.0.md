@@ -1,5 +1,11 @@
 # v0.3.0 — 双向 TLS
 
+## 发布完成
+
+已发布至 Mooncakes：`async-tls@0.1.0`、`moon-mqtt-client@0.3.0`。全新临时消费模块的 TCP/mTLS 消息往返均通过。[GitHub Release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0) 提供两个包、完整源码和校验和；四个公开附件均已匿名下载并逐字节核对。标签指向已合并的 `a7fe723`，与验收源码 `eeb93be` 的 Git tree 相同。
+
+下方旧验收过程中的“注册表尚未执行”等表述是历史记录，本节给出当前结果。
+
 ## 新增与修复
 
 - 新增 `ClientIdentity`：PEM 客户端证书链与未加密私钥，支持双向 TLS。

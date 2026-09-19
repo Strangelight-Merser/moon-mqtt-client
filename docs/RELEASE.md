@@ -1,4 +1,4 @@
-# Release and competition checklist (v0.2.0)
+# Release and competition checklist
 
 Passing local tests is separate from completing the competition's submission and
 distribution requirements. The [official charter](https://bxup9uklfcb.feishu.cn/wiki/Dx4Bwd6D1i3GfHkajQCcF7SznEd)
@@ -6,12 +6,18 @@ was checked during the project decision on 2026-09-14; the organizer's final
 notices govern acceptance. Unknown or unexecuted items are marked as such and are
 not claimed as complete.
 
-## Engineering and distribution
+## v0.3.0 publication
+
+v0.3.0 published at 2026-09-19T02:19:45Z: [https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0). `Strangelight-Merser/async-tls@0.1.0` was published first, followed by `Strangelight-Merser/moon-mqtt-client@0.3.0`; both publish commands returned200 OK. Unmodified `tests/consumer_smoke.py --registry` then passed TCP and mTLS QoS1 round trips in fresh temporary modules without local workspace overrides. Four public release assets were downloaded without authentication and matched both local bytes and GitHub SHA256 digests.
+
+Tagv0.3.0 targets merged commita7fe72350831f3af409f36b3c78499cb141bf111, whose Git tree exactly matches CI-accepted eeb93be40ba19020df1a9effcdd8771c5f132104. [CI35356886328](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35356886328) passed. Checksums are attached to the release. This release contains native MQTT3.1.1/mTLS; the broader roadmap remains on its separate development branch.
+
+## Historical engineering and distribution checklist
 
 | Requirement | State | Evidence / remaining action |
 |---|---|---|
 | MoonBit main implementation | Done | Client runtime, contracts and demo processes are MoonBit; Python only provides independent tests. |
-| Version and API | v0.3.0 local RC | `moon.mod` at 0.3.0 on `codex/v0.3-mtls`; `pkg.generated.mbti` includes `ClientIdentity` and `TlsFailure`. Not published. v0.2.0 remains the last registry release. |
+| Version and API | v0.3.0 published | `ClientIdentity` and `TlsFailure`; current publication and registry acceptance are recorded above. |
 | Reusable scope | Done | Native MQTT 3.1.1 QoS 0/1 client; no application-specific topic coupling in the library. |
 | Primary scenario | Done | `examples/mqtt_demo` + `demo.py`: 4 scenarios, simulated device, Paho observer, one command. |
 | Three complete scenarios | Done | `docs/SCENARIOS.md`: state-sync thermostat, Frigate alert contract, ROS bridge contract. |

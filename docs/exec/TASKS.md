@@ -4,8 +4,8 @@
 
 - done: J1/C1/R2 v0.3 reliability; W1 native WS/WSS; Q1 recoverable QoS1; D1 SQLite durable outbox; H1 host controller/simulator; M1 application-facing MQTT5 runtime.
 - Final acceptance: d5e5fb01f33358843fb1e251ad86b03acd687bea / [CI35414746155](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35414746155), both platforms success, native140 and runtime12 plus original suites. Evidence/details and model dispatch limitations in STATE.
-- blocked external validation: actual HA/ESP32 requires board/pins/access. Registry0.3 install actually attempted and failed: version unavailable; mTLS registry stage not run.
-- planned pending authorization: publish verified async-tls0.1 then MQTT0.3 packages from merged eeb93be, registry checks and release assets; separately review/merge/version the roadmap branch. PR#2 is already merged by repository owner, live-confirmed.
+- blocked external validation: actual HA/ESP32 requires board/pins/access. v0.3 registry TCP/mTLS now passed after publication; the earlier missing-version attempt remains historical evidence.
+- done after explicit authorization: TLS0.1 then MQTT0.3 publication, fresh registry TCP/mTLS, v0.3 tag/release and four anonymous asset checks. Separate follow-up: roadmap version/integration decision. PR#2 was already merged by repository owner.
 - Historical task cards below retain their original stage labels; this handoff and STATE are authoritative for current completion.
 
 ## C1 — Preserve terminal disconnect causes (done)
@@ -224,3 +224,5 @@ M1 takeover / in_progress / root: store7302bcb (integratede5e21b5) passed isolat
 M1 / in_review / root implementation head a46f0648f1c139d142e88e52116e2a4d38c5e119: complete local scripts/check.sh passed (native139, broker25, protocol faults10, scenario/external TCP+mTLS consumer, recovery5, durable4, HA4, codec roundtrip, M1 runtime11), final native140 with control bound regression, WSraw6 and actual EMQX WS/WSS4 passed. Additional raw reconnect test passed1/1: server credit drops2→1; both retained deliveries replay in order, same IDs/DUP, no quarantine and no second PUBLISH until first ACK. Final hosted-head gates pending. Logs in STATE.
 
 M1 / done / root: exact-head hosted35414746155 passed macOS/Ubuntu, including runtime12 and native140, independent logs inspected. All selected host milestones closed. Live PR#2 is merged (external owner action), while registry0.3 is unavailable. Prepared and byte-verified two v0.3/TLS publication archives; no publication executed. STATE lists precise external prerequisites and artifact evidence.
+
+V0.3 publication / done / root: latest explicit authorization exercised for prepared eeb93be packages. TLS0.1 then MQTT0.3 returned200 OK; unchanged fresh-module registry TCP/mTLS passed. Tagv0.3.0=a7fe723 (same accepted source tree), GitHub release2026-09-19T02:19:45Z, all4 public assets byte/hash verified. Main docs-onlycf883bf records completion; STATE links evidence. No real hardware or roadmap-feature publication claim.
