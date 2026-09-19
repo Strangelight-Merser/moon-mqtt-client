@@ -86,7 +86,7 @@ async test "WebSocket disconnect waits for peer closure after MQTT completion" {
   let peer_closed = [false]
   client.session = Some(session)
   @async.with_task_group(group => {
-    group.spawn_bg(() => session.write_loop(500, 200))
+    group.spawn_bg(() => session.write_loop(500, 200, 0))
     group.spawn_bg(async fn() {
       while !session.pending.contains(0) {
         @async.sleep(1)
@@ -114,7 +114,7 @@ async test "WebSocket disconnect bounds a silent peer and closes resources" {
   let session = cause_test_session(SlowCauseWriter::{})
   client.session = Some(session)
   @async.with_task_group(group => {
-    group.spawn_bg(() => session.write_loop(500, 100))
+    group.spawn_bg(() => session.write_loop(500, 100, 0))
     @async.with_timeout(500, () => client.disconnect())
   })
   assert_true(!session.alive)
@@ -139,13 +139,13 @@ async test "no queued MQTT packet is written after DISCONNECT" {
   let request = { ..test_pending(0, Disconnect), queued_at: @async.now() }
   session.pending[0] = request
   ignore(session.control_queue.try_put({
-    bytes: b"\xe0\x00", pending: Some(request), is_ping: false,
+    bytes: b"\xe0\x00", pending: Some(request), is_ping: false, delivery: None,
   }))
   ignore(session.control_queue.try_put({
-    bytes: b"\xc0\x00", pending: None, is_ping: true,
+    bytes: b"\xc0\x00", pending: None, is_ping: true, delivery: None,
   }))
   session.control_depth = 2
-  let ended = @async.with_timeout_opt(200, () => session.write_loop(500, 100))
+  let ended = @async.with_timeout_opt(200, () => session.write_loop(500, 100, 0))
   assert_true(ended is Some(_))
   assert_eq(writer.writes.length(), 1)
   assert_eq(writer.writes[0], b"\xe0\x00")

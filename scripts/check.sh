@@ -13,3 +13,4 @@ export MOON PYTHON
 "$PYTHON" tests/protocol_faults.py
 "$PYTHON" tests/scenario_smoke.py
 "$PYTHON" tests/consumer_smoke.py
+"$PYTHON" tests/recoverable_qos1.py
