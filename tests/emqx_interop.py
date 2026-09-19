@@ -93,9 +93,170 @@ def _probe_ready(host: str, port: int, timeout: float, **tls) -> bool:
     return ready
 
 
+def _probe_authorized_route(host: str, port: int, timeout: float) -> bool:
+    subscribed = threading.Event()
+    received = threading.Event()
+    granted = [False]
+    nonce = f"{os.getpid()}-{time.monotonic_ns()}"
+    topic = f"it/fixture-ready/{nonce}"
+    payload = nonce.encode()
+    probe = paho.Client(
+        paho.CallbackAPIVersion.VERSION2,
+        client_id=f"emqx-route-ready-{nonce}",
+    )
+
+    def on_connect(client, userdata, flags, reason, properties):
+        if reason.is_failure:
+            subscribed.set()
+        else:
+            client.subscribe(topic, 1)
+
+    def on_subscribe(client, userdata, message_id, reasons, properties):
+        granted[0] = bool(reasons) and all(not reason.is_failure for reason in reasons)
+        subscribed.set()
+
+    def on_message(client, userdata, message):
+        if message.topic == topic and message.payload == payload:
+            received.set()
+
+    probe.on_connect = on_connect
+    probe.on_subscribe = on_subscribe
+    probe.on_message = on_message
+    try:
+        probe.connect(host, port)
+        probe.loop_start()
+        if not subscribed.wait(timeout) or not granted[0]:
+            return False
+        publication = probe.publish(topic, payload, qos=1)
+        publication.wait_for_publish(timeout)
+        return publication.is_published() and received.wait(timeout)
+    except OSError as exc:
+        _close_probe(probe, exc)
+        return False
+    finally:
+        _close_probe(probe)
+
+
+class _TcpGate:
+    def __init__(self, port: int, target_port: int):
+        self.port = port
+        self.target_port = target_port
+        self.listener = None
+        self.stop_event = None
+        self.sockets: set[socket.socket] = set()
+        self.threads: list[threading.Thread] = []
+        self.lock = threading.Lock()
+
+    def start(self) -> None:
+        stop_event = threading.Event()
+        listener = socket.socket()
+        try:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            listener.bind(("127.0.0.1", self.port))
+            listener.listen()
+            listener.settimeout(0.2)
+        except BaseException:
+            listener.close()
+            raise
+        acceptor = threading.Thread(
+            target=self._accept,
+            args=(listener, stop_event),
+            daemon=True,
+        )
+        with self.lock:
+            self.stop_event = stop_event
+            self.listener = listener
+            self.threads = [acceptor]
+            acceptor.start()
+
+    def _accept(self, listener: socket.socket, stop_event: threading.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                source, _ = listener.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            if stop_event.is_set():
+                source.close()
+                return
+            try:
+                target = socket.create_connection(
+                    ("127.0.0.1", self.target_port),
+                    timeout=1,
+                )
+                target.settimeout(None)
+            except OSError:
+                source.close()
+                continue
+            with self.lock:
+                if stop_event.is_set():
+                    source.close()
+                    target.close()
+                    return
+                self.sockets.update((source, target))
+                for first, second in ((source, target), (target, source)):
+                    copier = threading.Thread(
+                        target=self._copy,
+                        args=(first, second, stop_event),
+                        daemon=True,
+                    )
+                    self.threads.append(copier)
+                    copier.start()
+
+    def _copy(self, source: socket.socket, target: socket.socket,
+              stop_event: threading.Event) -> None:
+        try:
+            while not stop_event.is_set():
+                chunk = source.recv(65536)
+                if not chunk:
+                    return
+                target.sendall(chunk)
+        except OSError:
+            return
+        finally:
+            for stream in (source, target):
+                try:
+                    stream.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                stream.close()
+            with self.lock:
+                self.sockets.discard(source)
+                self.sockets.discard(target)
+
+    def stop(self) -> None:
+        with self.lock:
+            if self.stop_event is not None:
+                self.stop_event.set()
+            listener = self.listener
+            self.listener = None
+            sockets = list(self.sockets)
+            self.sockets.clear()
+            threads = list(self.threads)
+        if listener is not None:
+            listener.close()
+        for stream in sockets:
+            try:
+                stream.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            stream.close()
+        deadline = time.monotonic() + 2
+        for thread in threads:
+            if thread is not threading.current_thread():
+                thread.join(max(0, deadline - time.monotonic()))
+        with self.lock:
+            self.stop_event = None
+            self.threads.clear()
+
+
 class Emqx:
     def __init__(self):
         self.port = h.free_port()
+        self.probe_port = h.free_port()
+        self.gate = _TcpGate(self.port, self.probe_port)
+        self.boots = 0
         self.name = f"moon-mqtt-emqx-{os.getpid()}"
         self.temp = Path(tempfile.mkdtemp(prefix="moon-mqtt-emqx-"))
         (self.temp / "acl.conf").write_text(
@@ -121,24 +282,27 @@ class Emqx:
         self._remove_container()
         subprocess.run([
             "docker", "run", "--detach", "--name", self.name,
-            "--publish", f"127.0.0.1:{self.port}:1883",
+            "--publish", f"127.0.0.1:{self.probe_port}:1883",
             "--env", "EMQX_AUTHORIZATION__NO_MATCH=deny",
             "--env", "EMQX_AUTHORIZATION__DENY_ACTION=ignore",
             "--volume", f"{self.temp / 'acl.conf'}:/opt/emqx/etc/acl.conf:ro",
             image,
         ], check=True, stdout=subprocess.DEVNULL)
-        h.wait_port(self.port, 30)
+        h.wait_port(self.probe_port, 30)
         self.wait_healthy()
         self.wait_mqtt()
+        self.gate.start()
 
     def wait_healthy(self) -> None:
         end = time.monotonic() + 45
         while time.monotonic() < end:
             result = subprocess.run(
-                ["docker", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}running{{end}}", self.name],
+                ["docker", "logs", self.name],
                 text=True, capture_output=True,
             )
-            if result.returncode == 0 and result.stdout.strip() in {"healthy", "running"}:
+            logs = result.stdout + result.stderr
+            if result.returncode == 0 and logs.count("EMQX 5.8.8 is running now!") > self.boots:
+                self.boots += 1
                 return
             time.sleep(.25)
         raise TimeoutError(f"EMQX container {self.name} did not become healthy")
@@ -146,21 +310,24 @@ class Emqx:
     def wait_mqtt(self) -> None:
         end = time.monotonic() + 30
         while time.monotonic() < end:
-            if _probe_ready("127.0.0.1", self.port, timeout=0.5):
+            if _probe_authorized_route("127.0.0.1", self.probe_port, timeout=0.5):
                 return
             time.sleep(.25)
-        raise TimeoutError(f"EMQX container {self.name} did not accept MQTT CONNECT")
+        raise TimeoutError(f"EMQX container {self.name} did not authorize MQTT routing")
 
     def stop(self) -> None:
+        self.gate.stop()
         subprocess.run(["docker", "stop", self.name], check=True, stdout=subprocess.DEVNULL)
 
     def start_existing(self) -> None:
         subprocess.run(["docker", "start", self.name], check=True, stdout=subprocess.DEVNULL)
-        h.wait_port(self.port, 30)
+        h.wait_port(self.probe_port, 30)
         self.wait_healthy()
         self.wait_mqtt()
+        self.gate.start()
 
     def close(self) -> None:
+        self.gate.stop()
         if os.environ.get("MQTT_KEEP_TEST_ARTIFACTS") == "1":
             print(f"EMQX evidence retained in container {self.name} and {self.temp}")
             return

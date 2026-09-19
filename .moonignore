@@ -1,6 +1,5 @@
 third_party/
 moon.work
-docs/architecture/
 docs/V0.3-PROGRESS.md
 tests/integration/artifacts/
 **/__pycache__/

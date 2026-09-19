@@ -33,9 +33,12 @@ def local_async_tls() -> Path:
 def copy_local_workspace(work: Path) -> None:
     library = work / 'library'
     library.mkdir()
-    for name in ['moon.mod', 'moon.pkg', 'types.mbt', 'client.mbt', 'runtime.mbt',
-                 'session.mbt', 'wire.mbt', 'LICENSE', 'NOTICE', 'README.md']:
+    for name in ['moon.mod', 'moon.pkg', 'LICENSE', 'NOTICE', 'README.md']:
         shutil.copy2(ROOT / name, library / name)
+    for source in ROOT.glob('*.mbt'):
+        if not source.name.endswith(('_test.mbt', '_wbtest.mbt')):
+            shutil.copy2(source, library / source.name)
+    shutil.copytree(ROOT / 'internal', library / 'internal')
     async_tls = local_async_tls()
     shutil.copytree(
         async_tls, work / 'async-tls',

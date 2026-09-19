@@ -4,6 +4,8 @@ struct Client {
   events : @aqueue.Queue[Event]
   changed : @cond_var.Cond
   subscriptions : Map[String, QoS]
+  deliveries : DeliveryBook
+  durable : DurableRuntime?
   mut session : Session?
   mut ready : Bool
   mut stopped : Bool
@@ -20,6 +22,7 @@ struct Client {
   /// Set when the supervisor ends because a connect-phase or terminal error
   /// should reach waiters. Normal shutdown leaves this empty so they see Closed.
   mut stop_reason : ClientError?
+  mut negotiated : NegotiatedSettings?
 }
 
 ///|
@@ -57,7 +60,7 @@ fn ReconnectBackoff::new_default_with(
 ///|
 fn ReconnectBackoff::new(seed : Int) -> ReconnectBackoff {
   // Zero is a fixed point of xorshift, so replace it with a constant.
-  { seed: if seed == 0 { 0x9E3779B9 } else { seed } }
+  { seed: if seed == 0 { 0x9E3779B9 } else { seed }, }
 }
 
 ///|
@@ -78,19 +81,82 @@ fn ReconnectBackoff::next(self : ReconnectBackoff) -> Int {
   x = x ^ (x << 5)
   self.seed = x
   // Keep jitter in 0..base/2 without depending on the sign bit.
-  ((x & 0x7FFFFFFF) % 1000)
+  (x & 0x7FFFFFFF) % 1000
 }
 
 ///|
-/// Own all client tasks within the callback's lifetime.
-pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T {
-  config.validate()
-  ignore(encode(config.connect_packet(), config.max_packet_size))
-  let client : Client = {
+fn durable_now_ms() -> Int64 {
+  @env.now().reinterpret_as_int64()
+}
+
+///|
+/// A length-prefixed versioned identity avoids delimiter collisions while
+/// binding one file to the logical MQTT endpoint and stable client identity.
+fn durable_identity(config : Config) -> String {
+  let (scheme, target) = match (config.transport, config.tls) {
+    (Tcp, Plain) => ("mqtt", "")
+    (Tcp, _) => ("mqtts", "")
+    (WebSocket(path), Plain) => ("ws", "\{@utf8.encode(path).length()}:\{path}")
+    (WebSocket(path), _) => ("wss", "\{@utf8.encode(path).length()}:\{path}")
+  }
+  let username = match config.username {
+    Some(value) => "some:\{@utf8.encode(value).length()}:\{value}"
+    None => "none"
+  }
+  let protocol = match config.protocol {
+    Mqtt311 => "311"
+    Mqtt5 => "5"
+  }
+  let policy = match config.session_policy {
+    CleanSession => "clean"
+    ResumeSession => "resume"
+  }
+  "moon-mqtt-durable-v2|\{protocol}|\{policy}|\{config.session_expiry_secs}|\{scheme}|\{@utf8.encode(config.host).length()}:\{config.host}|\{config.port}|\{target}|\{@utf8.encode(config.client_id).length()}:\{config.client_id}|\{username}"
+}
+
+///|
+fn PersistedDelivery::public_info(
+  self : PersistedDelivery,
+) -> DurableDeliveryInfo raise ClientError {
+  {
+    delivery_id: self.delivery_id,
+    packet_id: self.packet_id,
+    sequence: self.sequence,
+    topic: self.topic,
+    payload: self.payload,
+    properties: publish_properties_public(
+      @mqtt5.decode_publish_properties(
+        self.properties,
+        self.properties.length().max(1),
+      ) catch {
+        error => raise mqtt5_error(error)
+      },
+    ),
+    message_expiry_at_ms: self.message_expiry_at_ms,
+    retain: self.retain,
+    expires_at_ms: self.expires_at_ms,
+    attempts: self.attempts,
+    ever_started: self.ever_started,
+    state: match self.state {
+      Pending => DurablePending
+      Blocked => DurableBlocked(self.reason)
+    },
+  }
+}
+
+///|
+fn new_client(
+  config : Config,
+  deliveries : DeliveryBook,
+  durable : DurableRuntime?,
+) -> Client {
+  {
     config,
     events: @aqueue.Queue(kind=@aqueue.Blocking(config.receive_capacity)),
     changed: @cond_var.Cond(),
     subscriptions: {},
+    deliveries,
+    durable,
     session: None,
     ready: false,
     stopped: false,
@@ -103,7 +169,16 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     last_disconnect: None,
     backoff: ReconnectBackoff::new_default(),
     stop_reason: None,
+    negotiated: None,
   }
+}
+
+///|
+/// Own all client tasks within the callback's lifetime.
+pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T {
+  config.validate()
+  ignore(config.connect_bytes())
+  let client = new_client(config, DeliveryBook::new(), None)
   @async.with_task_group(group => {
     let worker = group.spawn(() => client.supervise())
     client.worker = Some(worker)
@@ -113,6 +188,7 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
       if client.session is Some(session) {
         session.abort("client scope ended")
       }
+      client.finish_deliveries(SessionLost("client scope ended"))
       worker.cancel()
       client.events.close(error=Closed)
       client.changed.broadcast()
@@ -122,6 +198,158 @@ pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T 
     client.disconnect()
     result
   })
+}
+
+///|
+/// Inspect a durable outbox without starting a network connection. The file is
+/// opened with the same exclusive ownership and identity checks as a client
+/// scope, then closed after all asynchronous SQLite work has settled.
+pub async fn inspect_durable_outbox(
+  options : DurableOutboxOptions,
+  config : Config,
+) -> Array[DurableDeliveryInfo] {
+  config.validate()
+  if !(config.session_policy is ResumeSession) {
+    raise InvalidConfig("durable outbox requires ResumeSession")
+  }
+  let outbox = SqliteOutbox::open(options, durable_identity(config))
+  errdefer (outbox.close() catch { _ => () })
+  let records = outbox.inspect()
+  outbox.close()
+  records.map(record => record.public_info())
+}
+
+///|
+/// Discard one record only when storage proves no write could have started.
+/// This standalone operation refuses concurrent ownership of the same file.
+pub async fn discard_durable_delivery(
+  options : DurableOutboxOptions,
+  config : Config,
+  delivery_id : String,
+) -> Unit {
+  config.validate()
+  if !(config.session_policy is ResumeSession) {
+    raise InvalidConfig("durable outbox requires ResumeSession")
+  }
+  let outbox = SqliteOutbox::open(options, durable_identity(config))
+  errdefer (outbox.close() catch { _ => () })
+  outbox.discard_never_started(delivery_id)
+  outbox.close()
+}
+
+///|
+/// Own a ResumeSession client and one concrete SQLite outbox for the callback's
+/// lifetime. Recovered handles are materialized, ordered and packet-reserved
+/// before the supervisor can dial. The callback receives those exact objects
+/// after the first connection becomes ready.
+pub async fn[T] with_durable_client(
+  options : DurableOutboxOptions,
+  config : Config,
+  action : async (Client, Array[DeliveryHandle]) -> T,
+) -> T {
+  config.validate()
+  if !(config.session_policy is ResumeSession) {
+    raise InvalidConfig("durable outbox requires ResumeSession")
+  }
+  if options.max_records > config.max_inflight {
+    raise InvalidConfig(
+      "durable max_records must not exceed client max_inflight",
+    )
+  }
+  ignore(config.connect_bytes())
+  let outbox = SqliteOutbox::open(options, durable_identity(config))
+  errdefer (outbox.close() catch { _ => () })
+  let known_session = outbox.has_known_session()
+  ignore(outbox.expire(durable_now_ms()))
+  let persisted = outbox.inspect()
+  if persisted.length() > config.max_inflight {
+    raise DurableStoreLimit(
+      "persisted durable records exceed client max_inflight",
+    )
+  }
+  for record in persisted {
+    if record.state is Blocked {
+      raise DurableStoreState(
+        "durable delivery \{record.delivery_id} is blocked: \{record.reason}",
+      )
+    }
+  }
+  let runtime : DurableRuntime = {
+    outbox,
+    gate: @semaphore.Semaphore(1),
+    recovered_requires_session_present: persisted.any(record => {
+      record.ever_started
+    }),
+    known_session,
+    now_ms: durable_now_ms,
+  }
+  let deliveries = DeliveryBook::new()
+  let recovered : Array[DeliveryHandle] = []
+  for stored in persisted {
+    let record : DeliveryRecord = {
+      delivery_id: stored.delivery_id,
+      packet_id: stored.packet_id,
+      changed: @cond_var.Cond(),
+      topic: Some(stored.topic),
+      payload: Some(stored.payload),
+      properties: publish_properties_public(
+        @mqtt5.decode_publish_properties(
+          stored.properties,
+          stored.properties.length().max(1),
+        ) catch {
+          error => raise mqtt5_error(error)
+        },
+      ),
+      message_expiry_at_ms: stored.message_expiry_at_ms,
+      retain: stored.retain,
+      protocol: config.protocol,
+      wire_limit: config.max_packet_size,
+      phase: AwaitingReconnect("recovered from durable outbox"),
+      attempts: stored.attempts,
+      generation: None,
+      ever_started: stored.ever_started,
+      start_deadline: None,
+      ack_deadline: None,
+      terminal_cause: None,
+      acknowledged_reason: None,
+      durable: Some({ runtime, expires_at_ms: stored.expires_at_ms, }),
+    }
+    if deliveries.active.contains(record.delivery_id) ||
+      deliveries.reserved.contains(record.packet_id) {
+      raise DurableStoreSchema(
+        "durable records contain duplicate delivery or packet identifiers",
+      )
+    }
+    deliveries.active[record.delivery_id] = record
+    deliveries.reserved[record.packet_id] = record
+    deliveries.order.push(record)
+    recovered.push({ record, })
+  }
+  let client = new_client(config, deliveries, Some(runtime))
+  // Error unwinding first joins the task group, then settles through the
+  // durable gate, and only the earlier outer errdefer closes SQLite.
+  errdefer client.settle_deliveries(SessionLost("durable client scope ended"))
+  let result = @async.with_task_group(group => {
+    let worker = group.spawn(() => client.supervise())
+    client.worker = Some(worker)
+    defer {
+      client.stopped = true
+      client.ready = false
+      if client.session is Some(session) {
+        session.abort("durable client scope ended")
+      }
+      worker.cancel()
+      client.events.close(error=Closed)
+      client.changed.broadcast()
+    }
+    client.wait_connected()
+    let value = action(client, recovered)
+    client.disconnect()
+    value
+  })
+  client.settle_deliveries(SessionLost("durable client scope ended"))
+  outbox.close()
+  result
 }
 
 ///|
@@ -136,11 +364,12 @@ pub fn Client::set_reconnect_seed(self : Client, seed : Int) -> Unit {
 /// Read-only runtime snapshot. Safe to call from any task; it never blocks.
 pub fn Client::stats(self : Client) -> ClientStats {
   let (business, control, inflight) = match self.session {
-    Some(session) if session.alive => (
-      session.business_depth,
-      session.control_depth,
-      session.pending.length(),
-    )
+    Some(session) if session.alive =>
+      (
+        session.business_depth,
+        session.control_depth,
+        session.pending.length() + session.delivery_slots,
+      )
     _ => (0, 0, 0)
   }
   {
@@ -158,6 +387,29 @@ pub fn Client::stats(self : Client) -> ClientStats {
 }
 
 ///|
+/// Effective limits for the currently ready physical generation.
+pub fn Client::negotiated_settings(
+  self : Client,
+) -> NegotiatedSettings raise ClientError {
+  if !self.ready {
+    raise NotConnected
+  }
+  match self.negotiated {
+    Some(value) => value
+    None if self.config.protocol is Mqtt311 =>
+      {
+        receive_maximum: self.config.max_inflight,
+        max_packet_size: self.config.max_packet_size,
+        maximum_qos: AtLeastOnce,
+        retain_available: true,
+        keep_alive_secs: self.config.keep_alive_secs,
+        session_expiry_secs: 0L,
+      }
+    None => raise NotConnected
+  }
+}
+
+///|
 fn client_error_of(error : Error) -> ClientError {
   try {
     raise error
@@ -170,7 +422,22 @@ fn client_error_of(error : Error) -> ClientError {
     NotSent(msg) => NotSent(msg)
     OutcomeUnknown(msg) => OutcomeUnknown(msg)
     ConnectionRefused(msg) => ConnectionRefused(msg)
+    BrokerRejected(reason) => BrokerRejected(reason)
+    ServerDisconnected(reason) => ServerDisconnected(reason)
     ReconnectExhausted(msg) => ReconnectExhausted(msg)
+    DeliveryRejected(msg) => DeliveryRejected(msg)
+    BrokerSessionLost(msg) => BrokerSessionLost(msg)
+    DeliveryAttemptsExhausted(msg) => DeliveryAttemptsExhausted(msg)
+    DurableStorage(error) => DurableStorage(error)
+    DurableStoreBusy(msg) => DurableStorage(DurableStoreBusy(msg))
+    DurableStoreFull(msg) => DurableStorage(DurableStoreFull(msg))
+    DurableStoreReadOnly(msg) => DurableStorage(DurableStoreReadOnly(msg))
+    DurableStoreCorrupt(msg) => DurableStorage(DurableStoreCorrupt(msg))
+    DurableStoreIo(msg) => DurableStorage(DurableStoreIo(msg))
+    DurableStoreSchema(msg) => DurableStorage(DurableStoreSchema(msg))
+    DurableStoreIdentity(msg) => DurableStorage(DurableStoreIdentity(msg))
+    DurableStoreLimit(msg) => DurableStorage(DurableStoreLimit(msg))
+    DurableStoreState(msg) => DurableStorage(DurableStoreState(msg))
     OperationTimeout(msg) => OperationTimeout(msg)
     WriteTimeout(msg) => WriteTimeout(msg)
     PingResponseTimeout(msg) => PingResponseTimeout(msg)
@@ -181,6 +448,24 @@ fn client_error_of(error : Error) -> ClientError {
     // degrading it to the generic ProtocolError fallback.
     @tls.TlsError(msg) => TlsFailure(msg)
     _ => ProtocolError(error.to_string())
+  }
+}
+
+///|
+fn durable_store_error_of(error : Error) -> DurableStoreError? {
+  try {
+    raise error
+  } catch {
+    DurableStoreBusy(msg) => Some(DurableStoreBusy(msg))
+    DurableStoreFull(msg) => Some(DurableStoreFull(msg))
+    DurableStoreReadOnly(msg) => Some(DurableStoreReadOnly(msg))
+    DurableStoreCorrupt(msg) => Some(DurableStoreCorrupt(msg))
+    DurableStoreIo(msg) => Some(DurableStoreIo(msg))
+    DurableStoreSchema(msg) => Some(DurableStoreSchema(msg))
+    DurableStoreIdentity(msg) => Some(DurableStoreIdentity(msg))
+    DurableStoreLimit(msg) => Some(DurableStoreLimit(msg))
+    DurableStoreState(msg) => Some(DurableStoreState(msg))
+    _ => None
   }
 }
 
@@ -247,12 +532,25 @@ fn Client::active(self : Client) -> Session raise ClientError {
 }
 
 ///|
+/// Internal pre-ready access used while restoring subscriptions.
+fn Client::wire_packet_limit(self : Client) -> Int {
+  match self.negotiated {
+    Some(value) => value.max_packet_size
+    None => self.config.max_packet_size
+  }
+}
+
+///|
 async fn Session::request(
   self : Session,
   config : Config,
   kind : RequestKind,
   packet : (Int) -> @codec.Packet,
   abort_session : (String) -> Unit,
+  properties? : Array[@mqtt5.Property] = [],
+  refresh? : ((Int) -> Bytes raise ClientError)? = None,
+  packet_limit? : Int? = None,
+  inflight_limit? : Int? = None,
   on_unknown? : () -> Unit = () => (),
 ) -> Reply {
   if !self.alive {
@@ -263,9 +561,12 @@ async fn Session::request(
   let id = if kind is Disconnect {
     0
   } else {
-    self.allocate(config.max_inflight)
+    self.allocate(inflight_limit.unwrap_or(config.max_inflight))
   }
-  let bytes = encode(packet(id), config.max_packet_size)
+  let wire_limit = packet_limit
+    .unwrap_or(config.max_packet_size)
+    .min(self.outgoing_limit)
+  let bytes = encode_wire(config.protocol, packet(id), properties, wire_limit)
   let request : Pending = {
     id,
     kind,
@@ -273,6 +574,7 @@ async fn Session::request(
     started: false,
     result: None,
     queued_at: @async.now(),
+    refresh: refresh.map(builder => () => builder(id)),
   }
   self.pending[id] = request
   // Cancelling an in-flight request is conservative by design: the connection is
@@ -283,9 +585,10 @@ async fn Session::request(
   // owner of the wake-up, so the closure is passed in by the caller.
   defer (if request.result is None { abort_session("request cancelled") })
   if !(kind is Disconnect) {
-    let accepted = self.outgoing.try_put({
+    let accepted = self.enqueue_business({
       bytes,
       pending: Some(request),
+      delivery: None,
       is_ping: false,
     }) catch {
       _ => false
@@ -301,7 +604,12 @@ async fn Session::request(
     // DISCONNECT still completes when the business queue is full: the control
     // slots are reserved and never occupied by business traffic.
     try {
-      self.control_queue.put({ bytes, pending: Some(request), is_ping: false })
+      self.control_queue.put({
+        bytes,
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      })
       self.control_depth += 1
     } catch {
       _ => raise NotSent("control queue closed before DISCONNECT was queued")
@@ -374,37 +682,424 @@ pub async fn Client::publish(
   payload : Bytes,
   qos? : QoS = AtMostOnce,
   retain? : Bool = false,
+  properties? : PublishProperties = PublishProperties::new(),
 ) -> Unit {
+  ignore(self.publish_detailed(topic, payload, qos~, retain~, properties~))
+}
+
+///|
+/// Publish and retain the MQTT 5 broker acknowledgement reason.
+pub async fn Client::publish_detailed(
+  self : Client,
+  topic : String,
+  payload : Bytes,
+  qos? : QoS = AtMostOnce,
+  retain? : Bool = false,
+  properties? : PublishProperties = PublishProperties::new(),
+) -> PublishReceipt {
+  if self.config.session_policy is ResumeSession && qos == AtLeastOnce {
+    raise DeliveryRejected(
+      "QoS 1 publish under ResumeSession requires submit_delivery",
+    )
+  }
   let session = self.active()
+  let negotiated = self.negotiated_settings()
+  if qos == AtLeastOnce && negotiated.maximum_qos == AtMostOnce {
+    raise DeliveryRejected("publish was not sent: negotiated Maximum QoS is 0")
+  }
+  if retain && !negotiated.retain_available {
+    raise DeliveryRejected(
+      "publish was not sent: negotiated Retain Available is 0",
+    )
+  }
   if payload.length() > self.config.max_packet_size - 4 {
     raise ProtocolError("outgoing payload exceeds packet limit")
   }
-  ignore(
-    session.request(
-      self.config,
-      if qos == AtMostOnce {
-        Publish0
+  let owned = properties.owned()
+  match owned.message_expiry_secs {
+    Some(value) if value < 0L || value > 4294967295L =>
+      raise InvalidConfig("message_expiry_secs must be in 0..4294967295")
+    _ => ()
+  }
+  let expiry_at = owned.message_expiry_secs.map(seconds => {
+    durable_now_ms() + seconds * 1000L
+  })
+  let make_packet = id => {
+    @codec.PublishPacket({
+      topic,
+      payload,
+      qos: qos.wire(),
+      message_id: if qos == AtMostOnce {
+        None
       } else {
-        Publish1
+        Some(id)
       },
-      id => {
-        @codec.PublishPacket({
-          topic,
-          payload,
-          qos: qos.wire(),
-          message_id: if qos == AtMostOnce {
-            None
-          } else {
-            Some(id)
-          },
-          retain,
-          dup: false,
-        })
-      },
-      reason => self.abort_session(reason),
-      on_unknown=() => self.note_unknown(),
-    ),
+      retain,
+      dup: false,
+    })
+  }
+  let wire_properties = publish_properties_wire(
+    owned,
+    expiry_at,
+    durable_now_ms(),
   )
+  let reply = session.request(
+    self.config,
+    if qos == AtMostOnce {
+      Publish0
+    } else {
+      Publish1
+    },
+    make_packet,
+    reason => self.abort_session(reason),
+    properties=wire_properties,
+    refresh=Some(fn(id) -> Bytes raise ClientError {
+      encode_wire(
+        self.config.protocol,
+        make_packet(id),
+        publish_properties_wire(owned, expiry_at, durable_now_ms()),
+        negotiated.max_packet_size,
+      )
+    }),
+    packet_limit=Some(negotiated.max_packet_size),
+    on_unknown=() => self.note_unknown(),
+  )
+  match reply {
+    Published(receipt) => receipt
+    _ => raise ProtocolError("wrong publish completion")
+  }
+}
+
+///|
+/// Atomically admit one reconnect-resilient QoS 1 delivery. Admission is
+/// connected-only and never becomes an offline queue.
+pub fn Client::submit_delivery(
+  self : Client,
+  delivery_id : String,
+  topic : String,
+  payload : Bytes,
+  retain? : Bool = false,
+  properties? : PublishProperties = PublishProperties::new(),
+) -> DeliveryHandle raise ClientError {
+  if !(self.config.session_policy is ResumeSession) {
+    raise DeliveryRejected("submit_delivery requires ResumeSession")
+  }
+  if self.durable is Some(_) {
+    raise DeliveryRejected(
+      "durable client scopes require submit_durable_delivery",
+    )
+  }
+  if !valid_delivery_id(delivery_id) {
+    raise DeliveryRejected("delivery_id must contain 1..128 UTF-8 bytes")
+  }
+  if self.deliveries.active.contains(delivery_id) {
+    raise DeliveryRejected("duplicate active delivery_id: \{delivery_id}")
+  }
+  let session = self.active()
+  let negotiated = self.negotiated_settings()
+  if negotiated.maximum_qos == AtMostOnce {
+    raise DeliveryRejected("delivery was not sent: negotiated Maximum QoS is 0")
+  }
+  if retain && !negotiated.retain_available {
+    raise DeliveryRejected(
+      "delivery was not sent: negotiated Retain Available is 0",
+    )
+  }
+  let owned = properties.owned()
+  match owned.message_expiry_secs {
+    Some(value) if value < 0L || value > 4294967295L =>
+      raise InvalidConfig("message_expiry_secs must be in 0..4294967295")
+    _ => ()
+  }
+  let now_ms = durable_now_ms()
+  let message_expiry_at_ms = owned.message_expiry_secs.map(value => {
+    now_ms + value * 1000L
+  })
+  if payload.length() > self.config.max_packet_size - 4 {
+    raise ProtocolError("outgoing payload exceeds packet limit")
+  }
+  if self.deliveries.active.length() + session.pending.length() >=
+    self.config.max_inflight {
+    raise Backpressure("inflight limit reached")
+  }
+  let packet_id = self.deliveries.allocate_packet_id(session)
+  let record : DeliveryRecord = {
+    delivery_id,
+    packet_id,
+    changed: @cond_var.Cond(),
+    topic: Some(topic),
+    payload: Some(payload),
+    properties: owned,
+    message_expiry_at_ms,
+    retain,
+    protocol: self.config.protocol,
+    wire_limit: self.wire_packet_limit(),
+    phase: Queued,
+    attempts: 0,
+    generation: None,
+    ever_started: false,
+    start_deadline: None,
+    ack_deadline: None,
+    terminal_cause: None,
+    acknowledged_reason: None,
+    durable: None,
+  }
+  // Encode before mutating ownership so an invalid topic/packet bound leaves no
+  // active ID, packet reservation, or queue entry behind.
+  let bytes = record.packet(limit=Some(record.wire_limit))
+  self.deliveries.active[delivery_id] = record
+  self.deliveries.reserved[packet_id] = record
+  self.deliveries.order.push(record)
+  record.attach(
+    session.generation,
+    @async.now() + self.config.operation_timeout_ms.to_int64(),
+  )
+  session.deliveries[packet_id] = record
+  session.delivery_slots += 1
+  let accepted = session.enqueue_business({
+    bytes,
+    pending: None,
+    delivery: Some(record),
+    is_ping: false,
+  }) catch {
+    _ => false
+  }
+  if !accepted {
+    session.deliveries.remove(packet_id)
+    session.delivery_slots -= 1
+    record.rollback_initial_attach()
+    self.deliveries.remove_record(record)
+    raise Backpressure("send queue full")
+  }
+  session.business_depth += 1
+  { record, }
+}
+
+///|
+/// Commit one durable QoS 1 admission before it can become visible to the
+/// network. `expires_at_ms` is an absolute Unix-millisecond deadline persisted
+/// once; cancellation after commit leaves the stable ID inspectable.
+pub async fn Client::submit_durable_delivery(
+  self : Client,
+  delivery_id : String,
+  topic : String,
+  payload : Bytes,
+  expires_at_ms : Int64,
+  retain? : Bool = false,
+  properties? : PublishProperties = PublishProperties::new(),
+) -> DeliveryHandle {
+  guard self.durable is Some(runtime) else {
+    raise DeliveryRejected(
+      "submit_durable_delivery requires a durable client scope",
+    )
+  }
+  if !valid_delivery_id(delivery_id) {
+    raise DeliveryRejected("delivery_id must contain 1..128 UTF-8 bytes")
+  }
+  if payload.length() > self.config.max_packet_size - 4 {
+    raise ProtocolError("outgoing payload exceeds packet limit")
+  }
+  let now = (runtime.now_ms)()
+  let owned = properties.owned()
+  match owned.message_expiry_secs {
+    Some(value) if value < 0L || value > 4294967295L =>
+      raise InvalidConfig("message_expiry_secs must be in 0..4294967295")
+    _ => ()
+  }
+  let message_expiry_at_ms = owned.message_expiry_secs.map(value => {
+    now + value * 1000L
+  })
+  let property_values = publish_properties_wire(
+    owned, message_expiry_at_ms, now,
+  )
+  let property_bytes = @mqtt5.encode_publish_properties(
+    property_values,
+    self.config.max_packet_size,
+  ) catch {
+    error => raise mqtt5_error(error)
+  }
+  if expires_at_ms <= now {
+    raise DeliveryRejected("durable delivery expiry must be in the future")
+  }
+  let attached : (DeliveryRecord, Session?) = runtime.transition(async fn() {
+    if self.deliveries.active.contains(delivery_id) {
+      raise DeliveryRejected("duplicate active delivery_id: \{delivery_id}")
+    }
+    let session = self.active()
+    let negotiated = self.negotiated_settings()
+    if negotiated.maximum_qos == AtMostOnce {
+      raise DeliveryRejected(
+        "delivery was not sent: negotiated Maximum QoS is 0",
+      )
+    }
+    if retain && !negotiated.retain_available {
+      raise DeliveryRejected(
+        "delivery was not sent: negotiated Retain Available is 0",
+      )
+    }
+    if self.deliveries.active.length() + session.pending.length() >=
+      self.config.max_inflight {
+      raise Backpressure("inflight limit reached")
+    }
+    let packet_id = self.deliveries.allocate_packet_id(session)
+    let record : DeliveryRecord = {
+      delivery_id,
+      packet_id,
+      changed: @cond_var.Cond(),
+      topic: Some(topic),
+      payload: Some(payload),
+      properties: owned,
+      message_expiry_at_ms,
+      retain,
+      protocol: self.config.protocol,
+      wire_limit: self.wire_packet_limit(),
+      phase: Queued,
+      attempts: 0,
+      generation: None,
+      ever_started: false,
+      start_deadline: None,
+      ack_deadline: None,
+      terminal_cause: None,
+      acknowledged_reason: None,
+      durable: None,
+    }
+    // Reserve the MQTT identifier before the first SQLite suspension so an
+    // ordinary request cannot claim it while admission commits.
+    self.deliveries.reserved[packet_id] = record
+    let mut admitted = false
+    errdefer (if !admitted { self.deliveries.reserved.remove(packet_id) })
+    ignore(record.packet(limit=Some(record.wire_limit)))
+    // Occupy the inflight capacity before SQLite can suspend. Ordinary
+    // requests do not share the durable FIFO gate, so the packet-ID
+    // reservation alone would let one of them steal the last slot while the
+    // durable COMMIT is pending.
+    session.delivery_slots += 1
+    let mut provisional_slot = true
+    errdefer (if provisional_slot && session.alive && session.delivery_slots > 0 {
+      session.delivery_slots -= 1
+      session.delivery_changed.broadcast()
+    })
+    let stored = runtime.outbox.admit(
+      delivery_id,
+      packet_id,
+      topic,
+      payload,
+      retain,
+      expires_at_ms,
+      now,
+      properties=property_bytes,
+      message_expiry_at_ms~,
+    )
+    admitted = true
+    record.durable = Some({ runtime, expires_at_ms: stored.expires_at_ms, })
+    self.deliveries.active[delivery_id] = record
+    self.deliveries.order.push(record)
+    // The connection may disappear during the durable admission. The row and
+    // handle remain admitted; a later replay owns attachment in that case.
+    let current : Session? = match self.session {
+      Some(current) if self.ready &&
+        current.alive &&
+        current.generation == session.generation => Some(current)
+      _ => None
+    }
+    match current {
+      Some(current) => {
+        runtime.outbox.record_attach(delivery_id)
+        record.attach(
+          current.generation,
+          @async.now() + self.config.operation_timeout_ms.to_int64(),
+        )
+        current.deliveries[packet_id] = record
+        // The provisional capacity reservation now belongs to this record.
+        provisional_slot = false
+        (record, Some(current))
+      }
+      None => {
+        if session.alive && session.delivery_slots > 0 {
+          session.delivery_slots -= 1
+          session.delivery_changed.broadcast()
+        }
+        provisional_slot = false
+        record.phase = AwaitingReconnect(
+          "connection changed after durable admission",
+        )
+        record.changed.broadcast()
+        (record, None)
+      }
+    }
+  }) catch {
+    error =>
+      match durable_store_error_of(error) {
+        Some(store_error) => {
+          let wrapped = DurableStorage(store_error)
+          self.record_stop(wrapped)
+          self.stopped = true
+          self.ready = false
+          match self.session {
+            Some(session) => session.abort_with(wrapped)
+            None => ()
+          }
+          self.changed.broadcast()
+          raise wrapped
+        }
+        None => raise error
+      }
+  }
+  let (record, generation) = attached
+  // protect_from_cancel deliberately completes the storage+memory transition
+  // with the task still marked cancelled. This checkpoint propagates that
+  // cancellation before any optional queue wait while leaving stable ownership.
+  @async.pause()
+  match generation {
+    Some(session) => {
+      let bytes = record.packet(limit=Some(record.wire_limit))
+      session.enqueue_delivery(record, bytes) catch {
+        error => if @async.is_cancellation_error(error) { raise error }
+        // Admission is already committed. Generation teardown detaches this
+        // record, and the supervisor retries it without rolling storage back.
+      }
+    }
+    None => ()
+  }
+  { record, }
+}
+
+///|
+fn Client::finish_deliveries(self : Client, error : Error) -> Unit {
+  // Durable settlement must serialize with ACK DELETE and other storage
+  // transitions. Async owners call settle_deliveries after their task joins.
+  if self.durable is Some(_) {
+    return
+  }
+  self.finish_deliveries_now(error)
+}
+
+///|
+fn Client::finish_deliveries_now(self : Client, error : Error) -> Unit {
+  if self.deliveries.active.is_empty() {
+    return
+  }
+  for record in self.deliveries.order {
+    if !record.phase.terminal() && record.ever_started {
+      self.unknown_outcomes += 1
+    }
+  }
+  let cause = match error {
+    // Scope shutdown is a normal close, while all supervisor terminal causes
+    // already have a public ClientError variant.
+    SessionLost(_) => Closed
+    _ => client_error_of(error)
+  }
+  self.deliveries.finish_all(session_error_reason(error), cause)
+}
+
+///|
+async fn Client::settle_deliveries(self : Client, error : Error) -> Unit {
+  match self.durable {
+    Some(runtime) =>
+      runtime.transition(fn() { self.finish_deliveries_now(error) })
+    None => self.finish_deliveries_now(error)
+  }
 }
 
 ///|
@@ -412,6 +1107,15 @@ pub async fn Client::subscribe(
   self : Client,
   topics : Array[Subscription],
 ) -> Array[SubscriptionResult] {
+  self.subscribe_detailed(topics).map(value => value.result)
+}
+
+///|
+/// Subscribe while preserving every numeric MQTT acknowledgement reason.
+pub async fn Client::subscribe_detailed(
+  self : Client,
+  topics : Array[Subscription],
+) -> Array[SubscriptionAcknowledgement] {
   self.subscribe_on(self.active(), topics.copy())
 }
 
@@ -420,28 +1124,56 @@ async fn Client::subscribe_on(
   self : Client,
   session : Session,
   topics : Array[Subscription],
-) -> Array[SubscriptionResult] {
+) -> Array[SubscriptionAcknowledgement] {
   match
-    session.request(self.config, Subscribe(topics), id => {
-      @codec.SubscribePacket({
-        message_id: id,
-        topics: topics.map(t => { topic: t.topic, qos: t.qos.wire(), }),
-      })
-    }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()) {
-    Subscriptions(results) => results
+    session.request(
+      self.config,
+      Subscribe(topics),
+      id => {
+        @codec.SubscribePacket({
+          message_id: id,
+          topics: topics.map(t => { topic: t.topic, qos: t.qos.wire(), }),
+        })
+      },
+      reason => self.abort_session(reason),
+      packet_limit=Some(self.wire_packet_limit()),
+      on_unknown=() => self.note_unknown(),
+    ) {
+    SubscriptionsDetailed(results) => results
     _ => raise ProtocolError("wrong subscribe completion")
   }
 }
 
 ///|
 pub async fn Client::unsubscribe(self : Client, topics : Array[String]) -> Unit {
+  let reasons = self.unsubscribe_detailed(topics)
+  for reason in reasons {
+    if reason.code >= 128 {
+      raise BrokerRejected(reason)
+    }
+  }
+}
+
+///|
+/// Unsubscribe while preserving numeric MQTT 5 reason codes.
+pub async fn Client::unsubscribe_detailed(
+  self : Client,
+  topics : Array[String],
+) -> Array[BrokerReason] {
   let session = self.active()
   let topics = topics.copy()
-  ignore(
-    session.request(self.config, Unsubscribe(topics), id => {
-      @codec.UnsubscribePacket({ message_id: id, topics, })
-    }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()),
-  )
+  match
+    session.request(
+      self.config,
+      Unsubscribe(topics),
+      id => @codec.UnsubscribePacket({ message_id: id, topics, }),
+      reason => self.abort_session(reason),
+      packet_limit=Some(self.wire_packet_limit()),
+      on_unknown=() => self.note_unknown(),
+    ) {
+    Unsubscriptions(reasons) => reasons
+    _ => raise ProtocolError("wrong unsubscribe completion")
+  }
 }
 
 ///|
@@ -456,6 +1188,7 @@ pub async fn Client::disconnect(self : Client) -> Unit {
     if self.session is Some(session) {
       session.abort("client disconnected")
     }
+    self.finish_deliveries(SessionLost("client disconnected"))
     if self.worker is Some(worker) {
       worker.cancel()
     }
@@ -464,13 +1197,24 @@ pub async fn Client::disconnect(self : Client) -> Unit {
   }
   if self.session is Some(session) && session.alive {
     ignore(
-      session.request(
-        self.config,
-        Disconnect,
-        _ => @codec.DisconnectPacket,
-        reason => self.abort_session(reason),
-      ),
+      session.request(self.config, Disconnect, _ => @codec.DisconnectPacket, reason => {
+        self.abort_session(reason)
+      }),
     )
+    // EMQX closes after processing MQTT DISCONNECT. Give the peer a bounded
+    // chance to close before tearing down WebSocket framing: an immediate
+    // Close can discard already-received MQTT frames in that broker.
+    // MQTT requires the client to close, so a silent peer is bounded by
+    // write_timeout_ms and unconditional cleanup closes the transport.
+    // The reader answers any received WebSocket Close during this interval.
+    if self.config.transport is WebSocket(_) && session.alive {
+      @async.with_timeout_opt(self.config.write_timeout_ms, async fn() {
+        while session.alive {
+          self.changed.wait()
+        }
+      })
+      |> ignore
+    }
   }
   if self.session is Some(session) {
     session.abort("client disconnected")
@@ -483,4 +1227,5 @@ pub async fn Client::disconnect(self : Client) -> Unit {
       _ => ()
     }
   }
+  self.settle_deliveries(SessionLost("client disconnected"))
 }

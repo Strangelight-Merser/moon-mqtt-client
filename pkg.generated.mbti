@@ -6,7 +6,13 @@ import {
 }
 
 // Values
+pub async fn discard_durable_delivery(DurableOutboxOptions, Config, String) -> Unit
+
+pub async fn inspect_durable_outbox(DurableOutboxOptions, Config) -> Array[DurableDeliveryInfo]
+
 pub async fn[T] with_client(Config, async (Client) -> T) -> T
+
+pub async fn[T] with_durable_client(DurableOutboxOptions, Config, async (Client, Array[DeliveryHandle]) -> T) -> T
 
 // Errors
 pub(all) suberror ClientError {
@@ -18,22 +24,51 @@ pub(all) suberror ClientError {
   NotSent(String)
   OutcomeUnknown(String)
   ConnectionRefused(String)
+  BrokerRejected(BrokerReason)
+  ServerDisconnected(BrokerReason)
   ReconnectExhausted(String)
+  DeliveryRejected(String)
+  BrokerSessionLost(String)
+  DeliveryAttemptsExhausted(String)
+  DurableStorage(DurableStoreError)
   OperationTimeout(String)
   WriteTimeout(String)
   PingResponseTimeout(String)
   TlsFailure(String)
 } derive(@debug.Debug)
 
+pub(all) suberror DurableStoreError {
+  DurableStoreBusy(String)
+  DurableStoreFull(String)
+  DurableStoreReadOnly(String)
+  DurableStoreCorrupt(String)
+  DurableStoreIo(String)
+  DurableStoreSchema(String)
+  DurableStoreIdentity(String)
+  DurableStoreLimit(String)
+  DurableStoreState(String)
+} derive(@debug.Debug)
+
 // Types and methods
+pub(all) struct BrokerReason {
+  code : Int
+  reason_string : String?
+} derive(Eq, @debug.Debug)
+
 type Client
 pub async fn Client::disconnect(Self) -> Unit
+pub fn Client::negotiated_settings(Self) -> NegotiatedSettings raise ClientError
 pub async fn Client::next_event(Self) -> Event
-pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool) -> Unit
+pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool, properties? : PublishProperties) -> Unit
+pub async fn Client::publish_detailed(Self, String, Bytes, qos? : QoS, retain? : Bool, properties? : PublishProperties) -> PublishReceipt
 pub fn Client::set_reconnect_seed(Self, Int) -> Unit
 pub fn Client::stats(Self) -> ClientStats
+pub fn Client::submit_delivery(Self, String, String, Bytes, retain? : Bool, properties? : PublishProperties) -> DeliveryHandle raise ClientError
+pub async fn Client::submit_durable_delivery(Self, String, String, Bytes, Int64, retain? : Bool, properties? : PublishProperties) -> DeliveryHandle
 pub async fn Client::subscribe(Self, Array[Subscription]) -> Array[SubscriptionResult]
+pub async fn Client::subscribe_detailed(Self, Array[Subscription]) -> Array[SubscriptionAcknowledgement]
 pub async fn Client::unsubscribe(Self, Array[String]) -> Unit
+pub async fn Client::unsubscribe_detailed(Self, Array[String]) -> Array[BrokerReason]
 pub async fn Client::wait_connected(Self) -> Unit
 
 pub(all) struct ClientIdentity {
@@ -58,6 +93,10 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  protocol : ProtocolVersion
+  session_policy : SessionPolicy
+  session_expiry_secs : Int64
+  transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
   username : String?
@@ -77,7 +116,62 @@ pub(all) struct Config {
   reconnect_attempts : Int
   control_capacity : Int
 }
-pub fn Config::new(String, String, port? : Int, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
+pub fn Config::new(String, String, protocol? : ProtocolVersion, port? : Int, session_policy? : SessionPolicy, session_expiry_secs? : Int64, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
+
+pub struct DeliveryHandle {
+  // private fields
+}
+pub fn DeliveryHandle::id(Self) -> String
+pub fn DeliveryHandle::status(Self) -> DeliveryStatus
+pub async fn DeliveryHandle::wait(Self) -> DeliveryStatus
+
+pub(all) enum DeliveryPhase {
+  Queued
+  AwaitingAck
+  AwaitingReconnect(String)
+  Acknowledged
+  Rejected(BrokerReason)
+  TerminalNotSent(String)
+  TerminalOutcomeUnknown(String)
+} derive(Eq, @debug.Debug)
+
+pub(all) struct DeliveryStatus {
+  delivery_id : String
+  phase : DeliveryPhase
+  terminal_cause : ClientError?
+  broker_reason : BrokerReason?
+  packet_id : Int
+  attempts : Int
+  generation : Int?
+} derive(@debug.Debug)
+
+pub(all) struct DurableDeliveryInfo {
+  delivery_id : String
+  packet_id : Int
+  sequence : Int64
+  topic : String
+  payload : Bytes
+  properties : PublishProperties
+  message_expiry_at_ms : Int64?
+  retain : Bool
+  expires_at_ms : Int64
+  attempts : Int
+  ever_started : Bool
+  state : DurableDeliveryState
+} derive(@debug.Debug)
+
+pub(all) enum DurableDeliveryState {
+  DurablePending
+  DurableBlocked(String)
+} derive(Eq, @debug.Debug)
+
+pub(all) struct DurableOutboxOptions {
+  path : String
+  max_records : Int
+  max_payload_bytes : Int64
+  max_pages : Int
+}
+pub fn DurableOutboxOptions::new(String, max_records? : Int, max_payload_bytes? : Int64, max_pages? : Int) -> Self
 
 pub(all) enum Event {
   Connected(Int)
@@ -92,16 +186,59 @@ pub(all) struct Message {
   retain : Bool
   dup : Bool
   generation : Int
+  properties : PublishProperties
 } derive(@debug.Debug)
+
+pub(all) struct NegotiatedSettings {
+  receive_maximum : Int
+  max_packet_size : Int
+  maximum_qos : QoS
+  retain_available : Bool
+  keep_alive_secs : Int
+  session_expiry_secs : Int64
+} derive(@debug.Debug)
+
+pub(all) enum NetworkTransport {
+  Tcp
+  WebSocket(String)
+} derive(Eq, @debug.Debug)
+
+pub(all) enum ProtocolVersion {
+  Mqtt311
+  Mqtt5
+} derive(Eq, @debug.Debug)
+
+pub(all) struct PublishProperties {
+  message_expiry_secs : Int64?
+  response_topic : String?
+  correlation_data : Bytes?
+  user_properties : Array[(String, String)]
+} derive(Eq, @debug.Debug)
+pub fn PublishProperties::new(message_expiry_secs? : Int64?, response_topic? : String?, correlation_data? : Bytes?, user_properties? : Array[(String, String)]) -> Self
+
+pub(all) enum PublishReceipt {
+  Written
+  Accepted(BrokerReason)
+} derive(Eq, @debug.Debug)
 
 pub(all) enum QoS {
   AtMostOnce
   AtLeastOnce
 } derive(Eq, @debug.Debug)
 
+pub(all) enum SessionPolicy {
+  CleanSession
+  ResumeSession
+} derive(Eq, @debug.Debug)
+
 pub(all) struct Subscription {
   topic : String
   qos : QoS
+} derive(Eq, @debug.Debug)
+
+pub(all) struct SubscriptionAcknowledgement {
+  result : SubscriptionResult
+  reason : BrokerReason
 } derive(Eq, @debug.Debug)
 
 pub(all) enum SubscriptionResult {

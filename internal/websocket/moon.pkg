@@ -1,0 +1,17 @@
+import {
+  "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/cmp",
+  "moonbitlang/core/random",
+  "moonbitlang/core/encoding/base64",
+  "moonbitlang/async/io",
+  "moonbitlang/async/semaphore",
+  "Strangelight-Merser/async-tls" @tls,
+}
+
+supported_targets = "+native"
+
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/cond_var",
+} for "wbtest"

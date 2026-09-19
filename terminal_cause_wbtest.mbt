@@ -57,6 +57,14 @@ fn cause_test_session(writer : &@io.Writer) -> Session {
     business_depth: 0,
     control_depth: 0,
     pending: {},
+    deliveries: {},
+    reserved_deliveries: {},
+    delivery_slots: 0,
+    qos1_outstanding: 0,
+    receive_maximum: 65535,
+    parked_business: None,
+    outgoing_limit: 65536,
+    delivery_changed: @cond_var.Cond(),
     next_id: 1,
     alive: true,
     last_write: 0L,
@@ -75,6 +83,7 @@ fn cause_test_pending() -> Pending {
     started: false,
     result: None,
     queued_at: @async.now(),
+    refresh: None,
   }
 }
 
@@ -86,9 +95,15 @@ async test "write timeout remains typed and outcome stays unknown" {
   session.pending[request.id] = request
   assert_false(
     session.write_one(
-      { bytes: b"publish", pending: Some(request), is_ping: false, },
+      {
+        bytes: b"publish",
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      },
       100,
       1,
+      10,
     ),
   )
   match session.failure_reason {
@@ -111,9 +126,15 @@ async test "writer I/O failure retains its raw stored cause" {
   session.pending[request.id] = request
   assert_false(
     session.write_one(
-      { bytes: b"publish", pending: Some(request), is_ping: false, },
+      {
+        bytes: b"publish",
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      },
       100,
       50,
+      10,
     ),
   )
   match session.failure_reason {
@@ -133,6 +154,8 @@ fn cause_test_client(config : Config) -> Client {
     events: @aqueue.Queue(kind=@aqueue.Blocking(config.receive_capacity)),
     changed: @cond_var.Cond(),
     subscriptions: {},
+    deliveries: DeliveryBook::new(),
+    durable: None,
     session: None,
     ready: true,
     stopped: false,
@@ -145,6 +168,7 @@ fn cause_test_client(config : Config) -> Client {
     last_disconnect: None,
     backoff: ReconnectBackoff::new(1),
     stop_reason: None,
+    negotiated: None,
   }
 }
 
@@ -173,6 +197,14 @@ async test "malformed frame gives started QoS1 the actual unknown reason" {
     business_depth: 0,
     control_depth: 0,
     pending: {},
+    deliveries: {},
+    reserved_deliveries: client.deliveries.reserved,
+    delivery_slots: 0,
+    qos1_outstanding: 0,
+    receive_maximum: 65535,
+    parked_business: None,
+    outgoing_limit: 65536,
+    delivery_changed: @cond_var.Cond(),
     next_id: 2,
     alive: true,
     last_write: 0L,
@@ -187,6 +219,7 @@ async test "malformed frame gives started QoS1 the actual unknown reason" {
     started: true,
     result: None,
     queued_at: @async.now(),
+    refresh: None,
   }
   session.pending[request.id] = request
 

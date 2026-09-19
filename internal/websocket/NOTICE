@@ -1,0 +1,7 @@
+This package contains a native client subset derived from
+moonbitlang/async 0.21.3 websocket, Copyright 2025 International Digital
+Economy Academy, licensed under Apache-2.0.
+
+The original sources were taken from the pinned Mooncakes dependency used by
+moon-mqtt-client. See UPSTREAM_FILES.json and THIRD_PARTY.md for provenance
+and the local changes.

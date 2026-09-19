@@ -1,0 +1,67 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Strangelight-Merser/moon-mqtt-client/internal/mqtt5"
+
+import {
+  "moonbitlang/core/debug",
+  "zbhzs1/moonbit-mqtt",
+}
+
+// Values
+pub fn decode(Bytes, Int) -> Packet raise CodecError
+
+pub fn decode_publish_properties(Bytes, Int) -> Array[Property] raise CodecError
+
+pub fn encode(@moonbit-mqtt.Packet, Array[Property], Int) -> Bytes raise CodecError
+
+pub fn encode_publish_properties(Array[Property], Int) -> Bytes raise CodecError
+
+// Errors
+pub(all) suberror CodecError {
+  Malformed(String)
+  Unsupported(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) enum Packet {
+  Connack(Bool, Int, Array[Property])
+  Publish(@moonbit-mqtt.Publish, Array[Property])
+  Puback(Int, Int, Array[Property])
+  Suback(Int, Array[Int], Array[Property])
+  Unsuback(Int, Array[Int], Array[Property])
+  Pingresp
+  Disconnect(Int, Array[Property])
+} derive(@debug.Debug)
+
+pub(all) enum Property {
+  PayloadFormat(Int)
+  MessageExpiry(Int64)
+  ContentType(String)
+  ResponseTopic(String)
+  CorrelationData(Bytes)
+  SubscriptionIdentifier(Int)
+  SessionExpiry(Int64)
+  AssignedClientIdentifier(String)
+  ServerKeepAlive(Int)
+  AuthenticationMethod(String)
+  AuthenticationData(Bytes)
+  RequestProblemInformation(Int)
+  WillDelay(Int64)
+  RequestResponseInformation(Int)
+  ResponseInformation(String)
+  ServerReference(String)
+  ReasonString(String)
+  ReceiveMaximum(Int)
+  TopicAliasMaximum(Int)
+  TopicAlias(Int)
+  MaximumQoS(Int)
+  RetainAvailable(Int)
+  UserProperty(String, String)
+  MaximumPacketSize(Int64)
+  WildcardSubscriptionAvailable(Int)
+  SubscriptionIdentifiersAvailable(Int)
+  SharedSubscriptionAvailable(Int)
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits

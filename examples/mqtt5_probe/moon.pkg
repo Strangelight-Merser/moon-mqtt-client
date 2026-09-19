@@ -1,0 +1,11 @@
+import {
+  "Strangelight-Merser/moon-mqtt-client/internal/mqtt5" @five,
+  "zbhzs1/moonbit-mqtt" @codec,
+  "moonbitlang/async",
+  "moonbitlang/async/socket",
+  "moonbitlang/async/io",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+}
+supported_targets = "+native"
+pkgtype(kind: "executable")

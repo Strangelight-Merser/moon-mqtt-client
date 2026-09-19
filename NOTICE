@@ -10,4 +10,8 @@ Uses, as separate dependencies:
 - Strangelight-Merser/async-tls 0.1.0 (native TLS with mTLS identity), Apache-2.0
   derived from moonbitlang/async 0.21.3 TLS; linked locally via moon.work until published
 
-No dependency source is vendored in the moon-mqtt-client source distribution.
+Includes a modified native WebSocket client subset from moonbitlang/async 0.21.3,
+Copyright 2025 International Digital Economy Academy, Apache-2.0.
+See internal/websocket/NOTICE, LICENSE, THIRD_PARTY.md and UPSTREAM_FILES.json
+for original attribution, source fingerprints and modifications.
+The separately distributed async-tls source remains excluded from this package.

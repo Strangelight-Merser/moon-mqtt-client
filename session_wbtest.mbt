@@ -1,5 +1,5 @@
 ///|
-fn test_session(next_id? : Int = 1) -> Session {
+fn test_session(next_id? : Int = 1, outgoing_limit? : Int = 65536) -> Session {
   let (reader, raw_writer) = @io.pipe()
   let writer = @io.BufferedWriter::new(raw_writer, size=16)
   {
@@ -15,6 +15,14 @@ fn test_session(next_id? : Int = 1) -> Session {
     business_depth: 0,
     control_depth: 0,
     pending: {},
+    deliveries: {},
+    reserved_deliveries: {},
+    delivery_slots: 0,
+    qos1_outstanding: 0,
+    receive_maximum: 65535,
+    parked_business: None,
+    outgoing_limit,
+    delivery_changed: @cond_var.Cond(),
     next_id,
     alive: true,
     last_write: 0L,
@@ -34,6 +42,7 @@ fn test_pending(id : Int, kind : RequestKind) -> Pending {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
 }
 
@@ -48,6 +57,7 @@ test "reserved control slots stay usable when the business queue is full" {
       session.outgoing.try_put({
         bytes: b"publish",
         pending: Some(request),
+        delivery: None,
         is_ping: false,
       }),
     )
@@ -58,6 +68,7 @@ test "reserved control slots stay usable when the business queue is full" {
     session.outgoing.try_put({
       bytes: b"overflow",
       pending: None,
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -76,6 +87,7 @@ test "abort zeroes the queue occupancy mirrors" {
     session.outgoing.try_put({
       bytes: b"business",
       pending: None,
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -117,6 +129,7 @@ test "control packets are dequeued before business traffic in FIFO order" {
     session.outgoing.try_put({
       bytes: b"one",
       pending: Some(first),
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -125,6 +138,7 @@ test "control packets are dequeued before business traffic in FIFO order" {
     session.outgoing.try_put({
       bytes: b"two",
       pending: Some(second),
+      delivery: None,
       is_ping: false,
     }),
   )
@@ -156,6 +170,7 @@ test "abort classifies unsent and started pending requests" {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   let started : Pending = {
     id: 2,
@@ -164,6 +179,7 @@ test "abort classifies unsent and started pending requests" {
     started: true,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   session.pending[unsent.id] = unsent
   session.pending[started.id] = started
@@ -192,6 +208,7 @@ test "packet id allocation wraps and skips occupied identifiers" {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   session.pending[65535] = occupied
 
@@ -210,6 +227,7 @@ test "packet id allocation enforces inflight limit" {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   session.pending[3] = pending
 

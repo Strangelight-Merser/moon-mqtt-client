@@ -1,4 +1,16 @@
-# Executed validation — v0.2.0
+# Executed validation
+
+## Native roadmap candidate — 2026-09-18
+
+Development branch `codex/roadmap-native`, exact tested head `d5e5fb01f33358843fb1e251ad86b03acd687bea` passed [hosted CI35414746155](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35414746155) on macOS and Ubuntu. Both platforms passed native140, Mosquitto/Paho25, protocol faults10, separate-module TCP/mTLS consumers, recoverable QoS1 (5), durable process recovery (4), HA host consumer (4), MQTT5 codec roundtrip, production MQTT5 runtime (12) and WebSocket peers (6). Ubuntu additionally passed EMQX (4) and native WS/WSS (4). Fixed toolchain remains moon0.1.20260904/moonc0.10.12+1634b282e. Latest-toolchain compatibility was not run by this push workflow.
+
+MQTT5 evidence includes independent broker metadata exchange, binary/repeated properties, SIGKILL restart with original packet IDs/DUP and decreasing expiry, empty-outbox session identity, negative ACK persistence, mixed subscription reasons, receive-credit control priority and reduced credit on reconnect. These are host protocol/storage results, not actual ESP32/HA-instance or package-publication claims. The current runtime keeps four nonfatal unused-helper/field warnings; no zero-warning claim is made.
+
+Local complete `scripts/check.sh`, subsequent focused native140 and EMQX WS/WSS checks passed. Exact logs, source/diff fingerprints, model dispatch limits and earlier failures remain in [execution state](exec/STATE.md). The original acceptance assertions and time budgets were preserved; required private fixture initialization and explicitly authorized source-copy/readiness corrections are documented there.
+
+PR#2 was merged externally at2026-09-18T15:02:39Z, and subsequent explicit publication authorization has now been completed: async-tls0.1.0 and MQTT0.3.0 published; unchanged fresh-module registry TCP/mTLS consumer passed. [v0.3.0 release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.3.0) and all four anonymous asset downloads were verified. The earlier missing-version attempt is historical. The later roadmap branch remains unpublished; actual hardware and its next version/integration remain separate work.
+
+## Historical v0.2.0 validation
 
 Platform: macOS arm64. MoonBit: `moon 0.1.20260904 (94521db 2026-09-04)`,
 `moonc v0.10.12+1634b282e` (2026-09-07). Independent peers: Mosquitto 2.0.22,

@@ -2,14 +2,23 @@ import {
   "moonbitlang/async",
   "moonbitlang/async/aqueue",
   "moonbitlang/async/cond_var",
+  "moonbitlang/async/semaphore",
   "moonbitlang/async/socket",
   "Strangelight-Merser/async-tls" @tls,
+  "Strangelight-Merser/moon-mqtt-client/internal/mqtt5" @mqtt5,
+  "Strangelight-Merser/moon-mqtt-client/internal/websocket" @ws,
   "moonbitlang/async/io",
   "moonbitlang/async/os_error",
+  "moonbit-community/sqlite3" @sqlite3,
   "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "moonbitlang/core/ref",
   "zbhzs1/moonbit-mqtt" @codec,
 }
+
+import {
+  "moonbitlang/async/fs",
+} for "wbtest"
 
 supported_targets = "+native"

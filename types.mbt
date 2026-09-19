@@ -12,6 +12,14 @@ pub(all) enum TlsMode {
 } derive(@debug.Debug)
 
 ///|
+/// Network framing used for MQTT bytes. TLS is configured independently, so
+/// `WebSocket(path)` with `TlsMode::Plain` is WS and with a TLS mode is WSS.
+pub(all) enum NetworkTransport {
+  Tcp
+  WebSocket(String)
+} derive(Eq, @debug.Debug)
+
+///|
 /// PEM client certificate presented during a TLS handshake.
 /// `certificate_chain_file` is the leaf followed by any intermediates.
 /// `private_key_file` must be an unencrypted PEM key. Files are re-read on
@@ -49,6 +57,7 @@ pub(all) struct Message {
   retain : Bool
   dup : Bool
   generation : Int
+  properties : PublishProperties
 } derive(@debug.Debug)
 
 ///|
@@ -68,7 +77,16 @@ pub(all) suberror ClientError {
   NotSent(String)
   OutcomeUnknown(String)
   ConnectionRefused(String)
+  BrokerRejected(BrokerReason)
+  ServerDisconnected(BrokerReason)
   ReconnectExhausted(String)
+  DeliveryRejected(String)
+  BrokerSessionLost(String)
+  DeliveryAttemptsExhausted(String)
+  /// A durable outbox operation failed. The nested error preserves whether
+  /// operator action should address contention, capacity, integrity, identity,
+  /// or I/O before the outbox is reopened.
+  DurableStorage(DurableStoreError)
   /// The request's total `operation_timeout_ms` expired. Raised through the
   /// request as `NotSent` (never written) or `OutcomeUnknown` (write started).
   OperationTimeout(String)
@@ -113,6 +131,10 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  protocol : ProtocolVersion
+  session_policy : SessionPolicy
+  session_expiry_secs : Int64
+  transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
   username : String?
@@ -143,7 +165,11 @@ pub(all) struct Config {
 pub fn Config::new(
   host : String,
   client_id : String,
+  protocol? : ProtocolVersion = Mqtt311,
   port? : Int = 1883,
+  session_policy? : SessionPolicy = CleanSession,
+  session_expiry_secs? : Int64 = 0L,
+  transport? : NetworkTransport = Tcp,
   tls? : TlsMode = Plain,
   client_identity? : ClientIdentity? = None,
   username? : String? = None,
@@ -167,6 +193,10 @@ pub fn Config::new(
     host,
     port,
     client_id,
+    protocol,
+    session_policy,
+    session_expiry_secs,
+    transport,
     tls,
     client_identity,
     username,
@@ -197,9 +227,79 @@ fn QoS::wire(self : QoS) -> @codec.QoS {
 }
 
 ///|
+fn valid_http_host(host : String) -> Bool {
+  let bytes = @utf8.encode(host)
+  if bytes.length() > 1024 {
+    return false
+  }
+  for byte in bytes {
+    let value = byte.to_int()
+    if value < 0x21 ||
+      value > 0x7e ||
+      byte is (b'/' | b'?' | b'#' | b'@') {
+      return false
+    }
+  }
+  true
+}
+
+///|
+fn valid_websocket_path(path : String) -> Bool {
+  let bytes = @utf8.encode(path)
+  if bytes.length() == 0 || bytes.length() > 8192 || bytes[0] != b'/' {
+    return false
+  }
+  for byte in bytes {
+    let value = byte.to_int()
+    // Request targets are emitted verbatim. Require an ASCII URI with all
+    // non-ASCII and unsafe characters percent-encoded by the caller. Fragments
+    // are client-side URI syntax and must never be sent to the server.
+    if value < 0x21 || value > 0x7e || byte == b'#' {
+      return false
+    }
+  }
+  true
+}
+
+///|
 fn Config::validate(self : Config) -> Unit raise ClientError {
   if self.host.is_empty() || self.client_id.is_empty() {
     raise InvalidConfig("host and stable client_id must be non-empty")
+  }
+  if self.session_expiry_secs < 0L || self.session_expiry_secs > 4294967295L {
+    raise InvalidConfig("session_expiry_secs must be in 0..4294967295")
+  }
+  match self.protocol {
+    Mqtt311 =>
+      if self.session_expiry_secs != 0L {
+        raise InvalidConfig("session_expiry_secs requires MQTT 5")
+      }
+    Mqtt5 =>
+      match self.session_policy {
+        CleanSession =>
+          if self.session_expiry_secs != 0L {
+            raise InvalidConfig("MQTT 5 clean sessions require zero session expiry")
+          }
+        ResumeSession =>
+          if self.session_expiry_secs == 0L {
+            raise InvalidConfig("MQTT 5 resumed sessions require nonzero session expiry")
+          }
+      }
+  }
+  match self.transport {
+    Tcp => ()
+    WebSocket(path) => {
+      if !valid_http_host(self.host) {
+        raise InvalidConfig(
+          "WebSocket host must be a bounded ASCII authority without URI delimiters",
+        )
+      }
+      if !valid_websocket_path(path) {
+        raise InvalidConfig(
+          "WebSocket path must be a bounded ASCII request target beginning with /; percent-encode non-ASCII bytes",
+        )
+      }
+    }
   }
   if self.port <= 0 || self.port > 65535 {
     raise InvalidConfig("invalid port")
@@ -223,6 +323,15 @@ fn Config::validate(self : Config) -> Unit raise ClientError {
     self.reconnect_attempts < 0 {
     raise InvalidConfig(
       "invalid timeout, capacity, packet limit or reconnect policy",
+    )
+  }
+  // ResumeSession counts the initial attachment in addition to reconnects.
+  // Reject only the one Int value whose attachment budget is unrepresentable;
+  // CleanSession retains its existing accepted range.
+  if self.session_policy is ResumeSession &&
+    self.reconnect_attempts == 0x7FFFFFFF {
+    raise InvalidConfig(
+      "ResumeSession reconnect_attempts is too large to represent its attachment budget",
     )
   }
   if self.will is Some(will) &&

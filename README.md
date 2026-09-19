@@ -2,16 +2,17 @@
 
 [![原生客户端检查](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml/badge.svg?branch=main)](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/workflows/check.yml)
 
-面向 MoonBit 的原生异步 MQTT 3.1.1 客户端。连接现有 MQTT 消息服务器（broker），
+面向 MoonBit 的原生异步 MQTT 客户端，默认 MQTT 3.1.1，可显式选择 MQTT 5 应用子集。连接现有 MQTT 消息服务器（broker），
 订阅设备或应用事件，发布命令与状态，无需为每个应用单独编写 socket 收发循环。
 
 本项目复用 **zbhzs1/moonbit-mqtt** 的报文编解码，在 **moonbitlang/async** 之上实现
-连接生命周期、TLS 传输、请求跟踪、心跳和 clean session 断线重连。
+连接生命周期、TCP/TLS/WS/WSS、请求跟踪、心跳、会话恢复与持久投递。
 目前属于早期实现，尚未通过 MQTT 协议一致性认证。
 
 ## 安装与构建
 
-当前版本：**0.3.0**，支持双向 TLS（mTLS）。在 MoonBit 项目中添加依赖：
+当前源码版本为 **0.7.0**，提供 TCP/TLS、WS/WSS、可恢复 QoS 1、SQLite 持久 outbox 和 MQTT 5 应用子集。
+发布与注册表安装状态见 [执行状态](docs/exec/STATE.md)，源码能力不代表已发布。添加注册表依赖的命令为：
 
 ```sh
 moon add Strangelight-Merser/moon-mqtt-client
@@ -65,18 +66,41 @@ python3 -m venv .venv
 
 ## 支持范围
 
-- 原生 TCP，以及验证服务器身份的 TLS；支持系统根证书或自定义 PEM CA。
+- 原生 TCP/TLS，以及 WS/WSS；TLS 支持系统根证书或自定义 PEM CA。
 - 可选双向 TLS（mTLS）：PEM 证书链 + 未加密私钥；`Plain` 不能搭配客户端身份。
-- MQTT 3.1.1、QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
+- 默认 MQTT 3.1.1，可选 MQTT 5 应用子集；QoS 0/1、保留消息、遗嘱消息（Last Will）和用户名/密码认证。
 - 订阅与取消订阅确认，包括逐主题的订阅拒绝结果。
 - 有上限的发送队列、事件队列、报文大小和并发请求数。
-- 仅支持 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
-  `Connected(generation)` 事件。
+- 默认 `CleanSession=true`：重连创建新会话，恢复已确认的订阅，随后发出
+  `Connected(generation)` 事件。可显式选择 `ResumeSession`，通过投递句柄在同一
+  进程作用域内恢复未确认的 QoS 1 发布；原生 beta 还可选择 SQLite durable
+  outbox，在进程重启后恢复同一逻辑会话中的显式投递。
 - 任务和 socket 的生命周期由回调作用域管理。回调正常返回或调用 `disconnect()` 时
   发送 DISCONNECT；回调异常或被取消时直接关闭传输连接。
 
-暂不支持 QoS 2、MQTT 5、持久会话、离线队列、跨连接重传、加密私钥、
-WebSocket，以及浏览器和微控制器目标。
+暂不支持 QoS 2、Topic Alias、Subscription Identifiers、Enhanced AUTH、通用离线接收队列、加密私钥、
+浏览器和微控制器目标。
+
+## 原生 WebSocket
+
+配置 `transport=WebSocket("/mqtt")`，由 `tls` 决定 WS 或 WSS；WSS 使用同一套服务器验证与可选客户端身份配置。服务端必须选择 `mqtt` 子协议。只接收二进制消息，MQTT 包可以跨 WebSocket 帧和消息，报文大小仍受 `max_packet_size` 限制。
+
+```moonbit
+let config = @mqtt.Config::new(
+  "broker.example.com", "native-wss-client", port=8084,
+  transport=@mqtt.WebSocket("/mqtt"), tls=@mqtt.SystemRoots,
+)
+```
+
+CLI 为现有命令增加 `--ws-path`；以下需要已配置 WSS 的 broker：
+
+```sh
+./scripts/moon.sh run examples/mqtt_demo/cli --target native -- \
+  publish --host broker.example.com --port 8084 --ws-path /mqtt --tls \
+  -t lab/state -m ON --qos 1
+```
+
+私有 CA 使用 `--ca`，双向 TLS 再提供 `--cert` 与 `--key`。客户端不协商 WebSocket 压缩扩展，不提供 HTTP 代理或浏览器适配。开发验收命令与实际结果记录在 [执行任务](docs/exec/TASKS.md)。
 
 ## API 示例
 
@@ -99,6 +123,64 @@ async fn main {
   })
 }
 ```
+
+需要对 PUBACK 丢失或短暂断线进行有界恢复时，显式使用持久会话与投递句柄：
+
+```moonbit
+let config = @mqtt.Config::new(
+  "127.0.0.1", "exclusive-stable-client-id",
+  session_policy=@mqtt.ResumeSession,
+)
+@mqtt.with_client(config, async fn(client) {
+  let delivery = client.submit_delivery(
+    "command-20260918-001", "lab/command", @utf8.encode("ON"),
+  )
+  let status = delivery.wait()
+  // Acknowledged means a matching broker PUBACK was received. Reconcile
+  // TerminalOutcomeUnknown with application state before issuing a new command.
+  match status.terminal_cause {
+    Some(@mqtt.BrokerSessionLost(_)) => () // establish a new logical session
+    Some(@mqtt.DeliveryAttemptsExhausted(_)) => () // reconcile before retry
+    _ => ()
+  }
+})
+```
+
+`submit_delivery` 只在连接就绪时非阻塞接收，受现有发送队列和 `max_inflight`
+上限约束，不是离线队列。断线后仅在 broker 返回 `Session Present=true` 时，才按原
+packet ID 和顺序重发；已经开始写入的发布设置 `DUP=1`。等待句柄被取消不会取消投递。
+该能力只保存当前进程作用域内已接收的投递，要求稳定 client ID 由单一客户端独占；它不
+恢复进程重启前的内存，也不保证设备执行或应用层恰好一次。
+
+需要跨进程保存这些显式投递时，使用具体的 SQLite durable outbox。绝对过期时间由应用
+以 Unix 毫秒给出；scope 打开时先恢复句柄和 packet ID，再开始连接。下面另将
+`moonbitlang/core/env` 导入为 `@env`，为新投递设置 30 秒期限：
+
+```moonbit
+let outbox = @mqtt.DurableOutboxOptions::new("./commands.sqlite3")
+let config = @mqtt.Config::new(
+  "127.0.0.1", "exclusive-stable-client-id",
+  session_policy=@mqtt.ResumeSession,
+)
+@mqtt.with_durable_client(outbox, config, async fn(client, recovered) {
+  let delivery = if recovered.is_empty() {
+    client.submit_durable_delivery(
+      "command-20260918-002", "lab/command", @utf8.encode("OFF"),
+      @env.now().reinterpret_as_int64() + 30000L,
+    )
+  } else {
+    recovered[0]
+  }
+  ignore(delivery.wait())
+})
+```
+
+admission、generation attach、首次可能写入和 PUBACK 删除都先提交 SQLite，再公开对应
+内存状态或执行网络写。正常关闭保留未完成记录；broker session 丢失、协议错误或预算耗尽
+会留下 blocked 记录。`inspect_durable_outbox` 可在不连接 broker 时检查，
+`discard_durable_delivery` 只允许删除可证明从未开始写入的记录。该能力仍是 MQTT QoS 1
+至少一次恢复：PUBACK 到达但 SQLite 删除尚未提交时崩溃，重启后可能重复发送，不能据此
+断言设备执行恰好一次。
 
 `with_client` 在首次连接成功后调用回调；首次连接、CONNACK 或 TLS 失败会直接返回给调用方。
 连接曾经建立后发生的故障会触发有次数上限的重试。`wait_connected()` 可等待重连完成；
@@ -153,6 +235,50 @@ PUBACK、PINGREQ、DISCONNECT 等协议控制报文使用预留且有上限的�
 `Client::stats()` 返回只读快照：连接代次与状态、业务/控制/事件队列占用、待完成请求数、
 重连和断线次数、结果未知次数及最近一次断线原因。快照不包含凭据和消息正文，也不依赖监控服务。
 
+## MQTT 5 子集
+
+默认协议仍是 MQTT 3.1.1。选择 `protocol=Mqtt5` 后，clean session 必须使用零
+Session Expiry；resume session 必须配置非零 `session_expiry_secs`。`Message` 保留
+Message Expiry、Response Topic、Correlation Data 和有序 User Properties。发布端在接纳时复制
+这些值，并从同一个绝对期限计算每次写入的剩余 Message Expiry。
+
+`publish_detailed` 返回 `Written` 或含数字 PUBACK reason code 的 `Accepted`；负 PUBACK
+抛出 `BrokerRejected`。`subscribe_detailed` 和 `unsubscribe_detailed` 保留每项数字 reason code，
+旧接口继续提供原有投影语义，负 UNSUBACK 不会被当成成功。`negotiated_settings()` 只返回当前
+连接代次的 Receive Maximum、Maximum Packet Size、Maximum QoS、Retain Available、
+Server Keep Alive 和 Session Expiry。本地 QoS/retain 限制以 `DeliveryRejected` 拒绝，
+超出报文大小限制以 `ProtocolError` 拒绝，均不发送该报文；`BrokerRejected` 只表示实际收到的负 broker reason。
+
+durable MQTT 5 delivery 将完整规范化属性段和一次计算的 Message Expiry 绝对期限写入 SQLite。
+成功或负 PUBACK 都先提交删除，再释放 packet ID 并完成 handle，因此不保存永久完成历史；两者
+都有“broker 已发 ACK、进程在 DELETE 前崩溃”这一不可避免的重复窗口。durable 文件还单独保存
+known-session 标记，空 outbox 不会丢失 session 身份证据。旧或未知 schema 只读拒绝，不迁移。
+
+Receive Maximum 只限制当前连接中等待 PUBACK 的 QoS 1 报文数。本地有界队列可继续接纳工作，
+随后按顺序等待发送额度；PUBACK、PINGREQ 和 DISCONNECT 使用独立控制队列。
+
+```moonbit
+let config = @mqtt.Config::new("127.0.0.1", "requester", protocol=@mqtt.Mqtt5)
+@mqtt.with_client(config, async fn(client) {
+  let receipt = client.publish_detailed(
+    "service/request", b"status", qos=@mqtt.AtLeastOnce,
+    properties=@mqtt.PublishProperties::new(
+      message_expiry_secs=Some(30L),
+      response_topic=Some("service/reply"),
+      correlation_data=Some(b"request-1"),
+      user_properties=[("source", "moonbit")],
+    ),
+  )
+  match receipt {
+    @mqtt.Accepted(reason) => println("PUBACK reason=\{reason.code}")
+    @mqtt.Written => println("written")
+  }
+})
+```
+
+本地运行MQTT 5 应用子集原生客户端、独立协议对端与 Mosquitto/Paho 验收：
+`.venv/bin/python tests/mqtt5_runtime.py`。该检查也包含在 `scripts/check.sh` 与双平台 CI 中。
+
 ## 更多使用场景
 
 [从这里开始](docs/START_HERE.zh-CN.md) 提供阅读与运行顺序。
@@ -194,7 +320,7 @@ MOONBIT_ASYNC_CHECK_FD_LEAK=1 .venv/bin/python tests/soak.py \
   --duration 1800 --cycles 100 --artifacts tests/integration/artifacts/soak
 ```
 
-已记录的验证包括 26 项单元测试、12 项集成测试、10 项协议故障测试、4 个状态同步场景、
+早期 v0.2 版本记录的验证包括 26 项单元测试、12 项集成测试、10 项协议故障测试、4 个状态同步场景、
 EMQX 互操作，以及 30 分钟、100 次断线恢复的压力测试。长测的 RSS/FD 资源采样不可用，
 尚不能据此确认持续负载下没有资源泄漏。
 

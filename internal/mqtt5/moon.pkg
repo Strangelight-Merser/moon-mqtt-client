@@ -1,0 +1,5 @@
+import {
+  "zbhzs1/moonbit-mqtt" @codec,
+  "moonbitlang/core/encoding/utf8",
+}
+supported_targets = "+native"

@@ -10,7 +10,9 @@ priv enum RequestKind {
 ///|
 priv enum Reply {
   Done
-  Subscriptions(Array[SubscriptionResult])
+  Published(PublishReceipt)
+  SubscriptionsDetailed(Array[SubscriptionAcknowledgement])
+  Unsubscriptions(Array[BrokerReason])
 }
 
 ///|
@@ -23,6 +25,7 @@ priv struct Pending {
   /// Monotonic time the request was accepted, used as the start of the
   /// `operation_timeout_ms` budget (queue time counts).
   queued_at : Int64
+  refresh : (() -> Bytes raise ClientError)?
 }
 
 ///|
@@ -32,6 +35,7 @@ priv struct Pending {
 priv struct Outgoing {
   bytes : Bytes
   pending : Pending?
+  delivery : DeliveryRecord?
   is_ping : Bool
 }
 
@@ -53,6 +57,18 @@ priv struct Session {
   mut business_depth : Int
   mut control_depth : Int
   pending : Map[Int, Pending]
+  /// Recoverable deliveries attached to this physical generation. The client
+  /// owns their lifetime; this map only routes PUBACK and generation teardown.
+  deliveries : Map[Int, DeliveryRecord]
+  /// Shared logical-session reservations, including deliveries detached while
+  /// reconnecting. Ordinary request allocation must always skip them.
+  reserved_deliveries : Map[Int, DeliveryRecord]
+  mut delivery_slots : Int
+  mut qos1_outstanding : Int
+  outgoing_limit : Int
+  receive_maximum : Int
+  mut parked_business : Outgoing?
+  delivery_changed : @cond_var.Cond
   mut next_id : Int
   mut alive : Bool
   mut last_write : Int64
@@ -88,7 +104,16 @@ fn session_error_reason(error : Error) -> String {
     NotSent(reason) => reason
     OutcomeUnknown(reason) => reason
     ConnectionRefused(reason) => reason
+    BrokerRejected(reason) =>
+      "broker rejected request with reason code \{reason.code}"
+    ServerDisconnected(reason) =>
+      "server disconnected with reason code \{reason.code}"
     ReconnectExhausted(reason) => reason
+    DeliveryRejected(reason) => reason
+    BrokerSessionLost(reason) => reason
+    DeliveryAttemptsExhausted(reason) => reason
+    DurableStorage(error) => @debug.to_string(error)
+    DeliveryAttemptTimeout(reason) => reason
     OperationTimeout(reason) => reason
     WriteTimeout(reason) => reason
     PingResponseTimeout(reason) => reason
@@ -126,6 +151,14 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
       request.finish(Err(error))
     }
     self.pending.clear()
+    for _, delivery in self.deliveries {
+      delivery.detach(self.generation, reason)
+    }
+    self.deliveries.clear()
+    self.delivery_slots = 0
+    self.qos1_outstanding = 0
+    self.parked_business = None
+    self.delivery_changed.broadcast()
   }
 }
 
@@ -137,13 +170,13 @@ fn Session::allocate(
   if !self.alive {
     raise NotConnected
   }
-  if self.pending.length() >= max_inflight {
+  if self.pending.length() + self.delivery_slots >= max_inflight {
     raise Backpressure("inflight limit reached")
   }
   for _ in 0..<65535 {
     let id = self.next_id
     self.next_id = if id == 65535 { 1 } else { id + 1 }
-    if !self.pending.contains(id) {
+    if !self.pending.contains(id) && !self.reserved_deliveries.contains(id) {
       return id
     }
   }
@@ -167,6 +200,42 @@ fn Session::control(
   let accepted = self.control_queue.try_put({
     bytes: encoded,
     pending: None,
+    delivery: None,
+    is_ping,
+  }) catch {
+    _ => false
+  }
+  if accepted {
+    self.control_depth += 1
+  } else {
+    raise ProtocolError(
+      "control queue exhausted; terminating instead of dropping a control packet",
+    )
+  }
+}
+
+///|
+/// Protocol-aware control encoding. MQTT 5 control packets always pass through
+/// the MQTT 5 encoder; the legacy helper remains for MQTT 3.1.1 tests.
+fn Session::control_wire(
+  self : Session,
+  packet : @codec.Packet,
+  config : Config,
+  is_ping? : Bool = false,
+) -> Unit raise ClientError {
+  if !self.alive {
+    raise NotConnected
+  }
+  let encoded = encode_wire(
+    config.protocol,
+    packet,
+    [],
+    config.max_packet_size.min(self.outgoing_limit),
+  )
+  let accepted = self.control_queue.try_put({
+    bytes: encoded,
+    pending: None,
+    delivery: None,
     is_ping,
   }) catch {
     _ => false
@@ -199,15 +268,58 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
     }
     None => ()
   }
-  let business = self.outgoing.try_get() catch { _ => return None }
+  let business = match self.parked_business {
+    Some(item) => Some(item)
+    None => self.outgoing.try_get() catch { _ => return None }
+  }
   match business {
     Some(item) => {
+      let requires_credit = item.delivery is Some(_) ||
+        (item.pending is Some(request) && request.kind is Publish1)
+      if requires_credit && self.qos1_outstanding >= self.receive_maximum {
+        self.parked_business = Some(item)
+        return None
+      }
+      self.parked_business = None
       if self.business_depth > 0 {
         self.business_depth -= 1
       }
+      // A replay waiting for a bounded business slot can now try admission.
+      // The mirror describes actual queue occupancy, never blocked producers.
+      self.delivery_changed.broadcast()
       Some(item)
     }
     None => None
+  }
+}
+
+///|
+/// Queue an already-admitted replay without widening the configured queue.
+async fn Session::enqueue_delivery(
+  self : Session,
+  delivery : DeliveryRecord,
+  bytes : Bytes,
+) -> Unit {
+  while self.alive &&
+        delivery.generation == Some(self.generation) &&
+        !delivery.phase.terminal() {
+    let accepted = self.enqueue_business({
+      bytes,
+      pending: None,
+      delivery: Some(delivery),
+      is_ping: false,
+    }) catch {
+      _ => false
+    }
+    if accepted {
+      self.business_depth += 1
+      return
+    }
+    self.delivery_changed.wait()
+  }
+  match self.failure_reason {
+    Some(error) => raise error
+    None => raise Closed
   }
 }
 
@@ -233,7 +345,13 @@ async fn Session::write_one(
   item : Outgoing,
   operation_timeout_ms : Int,
   write_timeout_ms : Int,
+  reconnect_attempts : Int,
 ) -> Bool {
+  // Snapshot DUP before durable possible-write persistence changes the record.
+  let was_started = match item.delivery {
+    Some(delivery) => delivery.ever_started
+    None => false
+  }
   let timed_out_before_write = match item.pending {
     Some(request) =>
       operation_timeout_ms.to_int64() <= @async.now() - request.queued_at
@@ -257,11 +375,158 @@ async fn Session::write_one(
       }
     None => ()
   }
-  if item.pending is Some(request) {
-    mark_started(request)
+  match item.delivery {
+    Some(delivery) => {
+      if delivery.phase.terminal() ||
+        delivery.generation != Some(self.generation) {
+        return true
+      }
+      if delivery.start_deadline is Some(deadline) && @async.now() >= deadline {
+        let detail = "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not begin its socket write within operation_timeout_ms=\{operation_timeout_ms} on attempt \{delivery.attempts}"
+        let error : Error = if delivery.attempts > reconnect_attempts {
+          DeliveryAttemptsExhausted(detail)
+        } else {
+          DeliveryAttemptTimeout(detail)
+        }
+        self.abort_with(error)
+        return false
+      }
+      match delivery.durable {
+        Some(meta) => {
+          let original_start_deadline = delivery.start_deadline
+          let transition = meta.runtime.transition(async fn() {
+            let transition_now = (meta.runtime.now_ms)()
+            if delivery.message_expiry_at_ms is Some(deadline) &&
+              transition_now >= deadline {
+              let error = DeliveryRejected(
+                "durable delivery \{delivery.delivery_id} Message Expiry elapsed before its first possible write",
+              )
+              meta.runtime.outbox.block(
+                delivery.delivery_id,
+                session_error_reason(error),
+              )
+              delivery.finish_terminal(session_error_reason(error), error)
+              return Some(error)
+            }
+            match
+              meta.runtime.outbox.expire_one(
+                delivery.delivery_id,
+                transition_now,
+              ) {
+              ExpiryStillPending => {
+                if !delivery.ever_started {
+                  meta.runtime.outbox.record_may_write(delivery.delivery_id)
+                }
+                delivery.mark_started()
+                None
+              }
+              ExpiryRemoved => {
+                let error = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired before its first possible write",
+                )
+                delivery.finish_terminal(session_error_reason(error), error)
+                Some(error)
+              }
+              ExpiryBlocked => {
+                let error = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired after a possible write",
+                )
+                delivery.finish_terminal(session_error_reason(error), error)
+                Some(error)
+              }
+            }
+          }) catch {
+            error => {
+              if @async.is_cancellation_error(error) {
+                raise error
+              }
+              match durable_store_error_of(error) {
+                Some(store_error) => Some(DurableStorage(store_error))
+                None => Some(client_error_of(error))
+              }
+            }
+          }
+          match transition {
+            Some(error) => {
+              self.abort_with(error)
+              return false
+            }
+            None => ()
+          }
+          // The durable transition can suspend while another task ends this
+          // physical generation. A conservative possible-write bit may remain,
+          // but dead-generation bytes must never reach its socket.
+          if !self.alive ||
+            delivery.generation != Some(self.generation) ||
+            delivery.phase.terminal() {
+            return false
+          }
+          // Both SQLite calls above may suspend. Recheck immutable wall expiry
+          // and the original monotonic queue budget after the final COMMIT and
+          // immediately before the socket write.
+          let wall_now = (meta.runtime.now_ms)()
+          if wall_now >= meta.expires_at_ms {
+            let error : Error = meta.runtime.transition(async fn() {
+              ignore(
+                meta.runtime.outbox.expire_one(delivery.delivery_id, wall_now),
+              )
+              let expired = DeliveryRejected(
+                "durable delivery \{delivery.delivery_id} expired after possible-write persistence and before socket write",
+              )
+              delivery.finish_terminal(session_error_reason(expired), expired)
+              expired
+            }) catch {
+              store_error => {
+                if @async.is_cancellation_error(store_error) {
+                  raise store_error
+                }
+                match durable_store_error_of(store_error) {
+                  Some(value) => DurableStorage(value)
+                  None => client_error_of(store_error)
+                }
+              }
+            }
+            self.abort_with(error)
+            return false
+          }
+          if original_start_deadline is Some(deadline) &&
+            @async.now() >= deadline {
+            let detail = "delivery \{delivery.delivery_id} packet \{delivery.packet_id} exceeded its pre-write operation budget while persisting durable possible-write state on attempt \{delivery.attempts}"
+            let error : Error = if delivery.attempts > reconnect_attempts {
+              DeliveryAttemptsExhausted(detail)
+            } else {
+              DeliveryAttemptTimeout(detail)
+            }
+            self.abort_with(error)
+            return false
+          }
+        }
+        None => delivery.mark_started()
+      }
+    }
+    None => ()
   }
   try {
-    @async.with_timeout(write_timeout_ms, () => self.writer.write(item.bytes))
+    let bytes = match item.delivery {
+      Some(delivery) => delivery.packet(dup=Some(was_started))
+      None =>
+        match item.pending {
+          Some(request) =>
+            match request.refresh {
+              Some(refresh) => refresh()
+              None => item.bytes
+            }
+          None => item.bytes
+        }
+    }
+    if item.pending is Some(request) {
+      mark_started(request)
+    }
+    if item.delivery is Some(_) ||
+      (item.pending is Some(request) && request.kind is Publish1) {
+      self.qos1_outstanding += 1
+    }
+    @async.with_timeout(write_timeout_ms, () => self.writer.write(bytes))
   } catch {
     error => {
       if @async.is_cancellation_error(error) {
@@ -283,6 +548,10 @@ async fn Session::write_one(
     }
   }
   self.last_write = @async.now()
+  if item.delivery is Some(delivery) {
+    delivery.mark_written(self.last_write + operation_timeout_ms.to_int64())
+    self.delivery_changed.broadcast()
+  }
   if item.is_ping {
     // PINGRESP timer starts here: after the PINGREQ write completed.
     self.ping_sent = Some(self.last_write)
@@ -292,7 +561,14 @@ async fn Session::write_one(
       match request.kind {
         Publish0 | Disconnect => {
           self.pending.remove(request.id)
-          request.finish(Ok(Done))
+          request.finish(
+            Ok(if request.kind is Publish0 { Published(Written) } else { Done }),
+          )
+          // No MQTT control packet may follow DISCONNECT, including a queued
+          // heartbeat or PUBACK while graceful framing shutdown is pending.
+          if request.kind is Disconnect {
+            return false
+          }
         }
         _ => ()
       }
@@ -302,35 +578,161 @@ async fn Session::write_one(
 }
 
 ///|
-async fn Session::write_loop(
+priv suberror DeliveryAttemptTimeout {
+  DeliveryAttemptTimeout(String)
+}
+
+///|
+/// One watchdog per physical generation. A waiter never owns this timer.
+async fn Session::expire_durable_delivery(
   self : Session,
-  operation_timeout_ms : Int,
-  write_timeout_ms : Int,
-) -> Unit {
-  while self.alive {
-    match self.next_outgoing() {
-      Some(item) =>
-        if !self.write_one(item, operation_timeout_ms, write_timeout_ms) {
-          return
-        }
-      None => {
-        // Neither queue has work: stay cancellable with the session task group.
-        @async.sleep(1)
+  delivery : DeliveryRecord,
+) -> Error? {
+  guard delivery.durable is Some(meta) else { return None }
+  meta.runtime.transition(async fn() {
+    // The wall-clock observation which selected this record happened before
+    // waiting for the FIFO gate. An ACK or generation teardown may have won
+    // the gate in the meantime, so both ownership and time are authoritative
+    // only after the gate is held.
+    if !self.alive ||
+      delivery.generation != Some(self.generation) ||
+      delivery.phase.terminal() ||
+      !self.deliveries.contains(delivery.packet_id) {
+      return None
+    }
+    let now_ms = (meta.runtime.now_ms)()
+    if now_ms < meta.expires_at_ms {
+      return None
+    }
+    let error : Error? = match
+      meta.runtime.outbox.expire_one(delivery.delivery_id, now_ms) {
+      // A backwards wall-clock step, or an already-settled owner observed
+      // before the checks above, is not a protocol or storage failure.
+      ExpiryStillPending => None
+      ExpiryRemoved =>
+        Some(
+          DeliveryRejected(
+            "durable delivery \{delivery.delivery_id} expired before its first possible write",
+          ),
+        )
+      ExpiryBlocked =>
+        Some(
+          DeliveryRejected(
+            "durable delivery \{delivery.delivery_id} expired after a possible write",
+          ),
+        )
+    }
+    match error {
+      Some(cause) => {
+        // Persisted expiry and the observable handle terminal state share the
+        // gate. A queued ACK can therefore win entirely or observe this
+        // already-recorded first cause, never a half-settled delivery.
+        delivery.finish_terminal(
+          session_error_reason(cause),
+          client_error_of(cause),
+        )
+        self.abort_with(cause)
+      }
+      None => ()
+    }
+    error
+  }) catch {
+    store_error => {
+      if @async.is_cancellation_error(store_error) {
+        raise store_error
+      }
+      match durable_store_error_of(store_error) {
+        Some(error) => Some(DurableStorage(error))
+        None => Some(client_error_of(store_error))
       }
     }
   }
 }
 
 ///|
-async fn Session::heartbeat(self : Session, config : Config) -> Unit {
-  if config.keep_alive_secs == 0 {
+/// One watchdog per physical generation. A waiter never owns this timer.
+async fn Session::delivery_watchdog(self : Session, config : Config) -> Unit {
+  let tick = (config.operation_timeout_ms / 4).clamp(min=10, max=250)
+  while self.alive {
+    @async.sleep(tick)
+    let now = @async.now()
+    for _, delivery in self.deliveries {
+      if delivery.durable is Some(meta) &&
+        (meta.runtime.now_ms)() >= meta.expires_at_ms {
+        match self.expire_durable_delivery(delivery) {
+          Some(error) => {
+            // Successful expiry already recorded and aborted under the gate;
+            // storage failures still need to stop this generation here.
+            self.abort_with(error)
+            raise error
+          }
+          None => ()
+        }
+      }
+      let detail : String? = match delivery.start_deadline {
+        Some(deadline) if now >= deadline =>
+          Some(
+            "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not begin its socket write within operation_timeout_ms=\{config.operation_timeout_ms} on attempt \{delivery.attempts}",
+          )
+        _ =>
+          match delivery.ack_deadline {
+            Some(deadline) if now >= deadline =>
+              Some(
+                "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not receive PUBACK in operation_timeout_ms=\{config.operation_timeout_ms} on attempt \{delivery.attempts}",
+              )
+            _ => None
+          }
+      }
+      if detail is Some(detail) {
+        let error : Error = if delivery.attempts > config.reconnect_attempts {
+          DeliveryAttemptsExhausted(detail)
+        } else {
+          DeliveryAttemptTimeout(detail)
+        }
+        self.abort_with(error)
+        raise error
+      }
+    }
+  }
+}
+
+///|
+async fn Session::write_loop(
+  self : Session,
+  operation_timeout_ms : Int,
+  write_timeout_ms : Int,
+  reconnect_attempts : Int,
+) -> Unit {
+  while self.alive {
+    match self.next_outgoing() {
+      Some(item) =>
+        if !self.write_one(
+            item, operation_timeout_ms, write_timeout_ms, reconnect_attempts,
+          ) {
+          return
+        }
+      None =>
+        // Neither queue has work: stay cancellable with the session task group.
+        @async.sleep(1)
+    }
+  }
+}
+
+///|
+async fn Session::heartbeat(
+  self : Session,
+  config : Config,
+  keep_alive_secs? : Int? = None,
+) -> Unit {
+  let keep_alive = keep_alive_secs.unwrap_or(config.keep_alive_secs)
+  if keep_alive == 0 {
     // Remains cancellable with the surrounding session task group.
     while self.alive {
       @async.sleep(60000)
     }
     return
   }
-  let interval = config.keep_alive_secs * 1000
+  let interval = keep_alive * 1000
   let tick = (interval / 4).clamp(min=10, max=250)
   while self.alive {
     @async.sleep(tick)
@@ -346,8 +748,25 @@ async fn Session::heartbeat(self : Session, config : Config) -> Unit {
         if now - self.last_write >= (interval / 2).to_int64() {
           // `ping_sent` is only set after the PINGREQ has left the write loop,
           // so a queued ping can never be mistaken for a lost PINGRESP.
-          self.control(@codec.PingreqPacket, config.max_packet_size, is_ping=true)
+          self.control_wire(@codec.PingreqPacket, config, is_ping=true)
         }
     }
   }
+}
+
+///|
+/// The parked FIFO head still occupies a bounded business slot.
+fn Session::enqueue_business(self : Session, item : Outgoing) -> Bool raise {
+  match self.outgoing.kind {
+    @aqueue.Blocking(limit) if self.business_depth >= limit => false
+    _ => self.outgoing.try_put(item)
+  }
+}
+
+///|
+fn Session::return_publish_credit(self : Session) -> Unit {
+  if self.qos1_outstanding > 0 {
+    self.qos1_outstanding -= 1
+  }
+  self.delivery_changed.broadcast()
 }
