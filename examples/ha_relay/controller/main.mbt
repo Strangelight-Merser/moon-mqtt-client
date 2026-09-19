@@ -12,7 +12,7 @@ async fn announce(client : @mqtt.Client, prefix : String, entity : String) -> Un
 /// disconnect may happen after the write starts, so transient failures leave
 /// the value dirty and let the next connected loop retry the idempotent
 /// metadata publication.  Physical commands never use this state.
-struct DirtyMetadata {
+priv struct DirtyMetadata {
   mut discovery : Bool
   mut availability : String?
   mut state : String?
