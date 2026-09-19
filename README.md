@@ -235,6 +235,25 @@ PUBACK、PINGREQ、DISCONNECT 等协议控制报文使用预留且有上限的�
 `Client::stats()` 返回只读快照：连接代次与状态、业务/控制/事件队列占用、待完成请求数、
 重连和断线次数、结果未知次数及最近一次断线原因。快照不包含凭据和消息正文，也不依赖监控服务。
 
+## MQTT 5 子集
+
+默认协议仍是 MQTT 3.1.1。选择 `protocol=Mqtt5` 后，clean session 必须使用零
+Session Expiry；resume session 必须配置非零 `session_expiry_secs`。`Message` 保留
+Message Expiry、Response Topic、Correlation Data 和有序 User Properties。发布端在接纳时复制
+这些值，并从同一个绝对期限计算每次写入的剩余 Message Expiry。
+
+`publish_detailed` 返回 `Written` 或含数字 PUBACK reason code 的 `Accepted`；负 PUBACK
+抛出 `BrokerRejected`。`subscribe_detailed` 和 `unsubscribe_detailed` 保留每项数字 reason code，
+旧接口继续提供原有投影语义，负 UNSUBACK 不会被当成成功。`negotiated_settings()` 只返回当前
+连接代次的 Receive Maximum、Maximum Packet Size、Maximum QoS、Retain Available、
+Server Keep Alive 和 Session Expiry。违反协商限制的本地工作在写入前以 `DeliveryRejected`
+拒绝；`BrokerRejected` 只表示实际收到的负 broker reason。
+
+durable MQTT 5 delivery 将完整规范化属性段和一次计算的 Message Expiry 绝对期限写入 SQLite。
+成功或负 PUBACK 都先提交删除，再释放 packet ID 并完成 handle，因此不保存永久完成历史；两者
+都有“broker 已发 ACK、进程在 DELETE 前崩溃”这一不可避免的重复窗口。durable 文件还单独保存
+known-session 标记，空 outbox 不会丢失 session 身份证据。旧或未知 schema 只读拒绝，不迁移。
+
 ## 更多使用场景
 
 [从这里开始](docs/START_HERE.zh-CN.md) 提供阅读与运行顺序。

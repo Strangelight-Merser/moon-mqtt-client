@@ -51,6 +51,8 @@ pub(all) struct DurableDeliveryInfo {
   sequence : Int64
   topic : String
   payload : Bytes
+  properties : PublishProperties
+  message_expiry_at_ms : Int64?
   retain : Bool
   expires_at_ms : Int64
   attempts : Int
@@ -66,6 +68,7 @@ priv struct DurableRuntime {
   outbox : SqliteOutbox
   gate : @semaphore.Semaphore
   recovered_requires_session_present : Bool
+  mut known_session : Bool
   /// Wall clock seam keeps absolute-expiry transition tests deterministic.
   now_ms : () -> Int64
 }
@@ -95,7 +98,11 @@ priv struct DeliveryRecord {
   changed : @cond_var.Cond
   mut topic : String?
   mut payload : Bytes?
+  properties : PublishProperties
+  message_expiry_at_ms : Int64?
   retain : Bool
+  protocol : ProtocolVersion
+  mut wire_limit : Int
   mut phase : DeliveryPhase
   mut attempts : Int
   mut generation : Int?
@@ -122,17 +129,16 @@ priv struct DeliveryBook {
 
 ///|
 fn DeliveryBook::new() -> DeliveryBook {
-  {
-    active: {},
-    reserved: {},
-    order: [],
-    next_packet_id: 1,
-  }
+  { active: {}, reserved: {}, order: [], next_packet_id: 1, }
 }
 
 ///|
 fn DeliveryPhase::terminal(self : DeliveryPhase) -> Bool {
-  self is (Acknowledged | Rejected(_) | TerminalNotSent(_) | TerminalOutcomeUnknown(_))
+  self
+  is (Acknowledged
+  | Rejected(_)
+  | TerminalNotSent(_)
+  | TerminalOutcomeUnknown(_))
 }
 
 ///|
@@ -141,7 +147,10 @@ fn DeliveryRecord::status(self : DeliveryRecord) -> DeliveryStatus {
     delivery_id: self.delivery_id,
     phase: self.phase,
     terminal_cause: self.terminal_cause,
-    broker_reason: match self.phase { Rejected(reason) => Some(reason); _ => None },
+    broker_reason: match self.phase {
+      Rejected(reason) => Some(reason)
+      _ => None
+    },
     packet_id: self.packet_id,
     attempts: self.attempts,
     generation: self.generation,
@@ -169,11 +178,19 @@ pub async fn DeliveryHandle::wait(self : DeliveryHandle) -> DeliveryStatus {
 }
 
 ///|
-fn DeliveryRecord::packet(self : DeliveryRecord, limit : Int) -> Bytes raise ClientError {
+fn DeliveryRecord::packet(
+  self : DeliveryRecord,
+  limit? : Int? = None,
+) -> Bytes raise ClientError {
   guard self.topic is Some(topic) && self.payload is Some(payload) else {
     raise Closed
   }
-  encode(
+  let now_ms = match self.durable {
+    Some(meta) => (meta.runtime.now_ms)()
+    None => durable_now_ms()
+  }
+  encode_wire(
+    self.protocol,
     @codec.PublishPacket({
       topic,
       payload,
@@ -182,7 +199,8 @@ fn DeliveryRecord::packet(self : DeliveryRecord, limit : Int) -> Bytes raise Cli
       retain: self.retain,
       dup: self.ever_started,
     }),
-    limit,
+    publish_properties_wire(self.properties, self.message_expiry_at_ms, now_ms),
+    limit.unwrap_or(self.wire_limit),
   )
 }
 
@@ -257,7 +275,8 @@ fn DeliveryRecord::finish_acknowledged(self : DeliveryRecord) -> Unit {
   }
 }
 
-///| Publish a broker rejection only after any durable DELETE has committed.
+///|
+/// Publish a broker rejection only after any durable DELETE has committed.
 fn DeliveryRecord::finish_rejected(
   self : DeliveryRecord,
   reason : BrokerReason,

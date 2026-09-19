@@ -1,4 +1,5 @@
-///| Internal protocol-neutral events; MQTT 5 is decoded by its own codec first.
+///|
+/// Internal protocol-neutral events; MQTT 5 is decoded by its own codec first.
 priv enum RuntimePacket {
   RuntimePublish(@codec.Publish, PublishProperties)
   RuntimePuback(Int, BrokerReason)
@@ -17,11 +18,13 @@ fn normalize_packet(packet : IncomingPacket) -> RuntimePacket {
     Incoming311(@codec.PubackPacket(value)) =>
       RuntimePuback(value.message_id, { code: 0, reason_string: None, })
     Incoming311(@codec.SubackPacket(value)) => {
-      let reasons = value.return_codes.map(code => match code {
-        @codec.SuccessQoS0 => 0
-        @codec.SuccessQoS1 => 1
-        @codec.SuccessQoS2 => 2
-        @codec.Failure => 128
+      let reasons = value.return_codes.map(code => {
+        match code {
+          @codec.SuccessQoS0 => 0
+          @codec.SuccessQoS1 => 1
+          @codec.SuccessQoS2 => 2
+          @codec.Failure => 128
+        }
       })
       RuntimeSuback(value.message_id, reasons, { code: 0, reason_string: None, })
     }
@@ -101,8 +104,7 @@ async fn mqtt_connect_exchange(
         @io.ReaderClosed | @tls.ConnectionClosed =>
           raise TlsFailure("TLS transport closed during MQTT connect")
         @tls.TlsError(message) => raise TlsFailure(message)
-        @os_error.OSError(_) =>
-          raise TlsFailure(@tls.describe_tls_error(error))
+        @os_error.OSError(_) => raise TlsFailure(@tls.describe_tls_error(error))
         _ => raise error
       }
     }
@@ -124,6 +126,7 @@ fn websocket_handshake_error(error : Error, encrypted : Bool) -> Error {
 }
 
 ///|
+
 ///|
 async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
   @async.with_timeout(self.config.connect_timeout_ms, () => {
@@ -147,15 +150,10 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
         let tls = try {
           match self.config.client_identity {
             Some(id) =>
-              @tls.Tls::client(
-                tcp,
-                host=self.config.host,
-                trust~,
-                identity={
-                  certificate_chain_file: id.certificate_chain_file,
-                  private_key_file: id.private_key_file,
-                },
-              )
+              @tls.Tls::client(tcp, host=self.config.host, trust~, identity={
+                certificate_chain_file: id.certificate_chain_file,
+                private_key_file: id.private_key_file,
+              })
             None => @tls.Tls::client(tcp, host=self.config.host, trust~)
           }
         } catch {
@@ -196,10 +194,7 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
           path,
         ) catch {
           error =>
-            raise websocket_handshake_error(
-              error,
-              !(self.config.tls is Plain),
-            )
+            raise websocket_handshake_error(error, !(self.config.tls is Plain))
         }
         let ws_reader = WebSocketReader::new(websocket)
         let ws_writer : WebSocketWriter = { conn: websocket, }
@@ -226,18 +221,21 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
         if self.config.session_policy is CleanSession && ack.session_present {
           raise ProtocolError("CleanSession=true CONNACK set Session Present")
         }
-        (ack.session_present, {
-          receive_maximum: self.config.max_inflight,
-          max_packet_size: self.config.max_packet_size,
-          maximum_qos: AtLeastOnce,
-          retain_available: true,
-          keep_alive_secs: self.config.keep_alive_secs,
-          session_expiry_secs: 0L,
-        })
+        (
+          ack.session_present,
+          {
+            receive_maximum: self.config.max_inflight,
+            max_packet_size: self.config.max_packet_size,
+            maximum_qos: AtLeastOnce,
+            retain_available: true,
+            keep_alive_secs: self.config.keep_alive_secs,
+            session_expiry_secs: 0L,
+          },
+        )
       }
       Incoming5(@mqtt5.Connack(present, reason, properties)) => {
         if reason != 0 {
-          raise ConnectionRefused("MQTT 5 CONNACK reason code \{reason}")
+          raise BrokerRejected(broker_reason(reason, properties))
         }
         if self.config.session_policy is CleanSession && present {
           raise ProtocolError("CleanSession=true CONNACK set Session Present")
@@ -247,33 +245,40 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
       _ => raise ProtocolError("expected CONNACK")
     }
     self.generation += 1
-    ({
-      generation: self.generation,
-      reader,
-      writer,
-      close_transport,
-      outgoing: @aqueue.Queue(kind=@aqueue.Blocking(self.config.send_capacity)),
-      control_queue: @aqueue.Queue(
-        kind=@aqueue.Blocking(self.config.control_capacity),
-      ),
-      business_depth: 0,
-      control_depth: 0,
-      pending: {},
-      deliveries: {},
-      reserved_deliveries: self.deliveries.reserved,
-      delivery_slots: 0,
-      delivery_changed: @cond_var.Cond(),
-      next_id: 1,
-      alive: true,
-      last_write: @async.now(),
-      ping_sent: None,
-      early_messages: [],
-      failure_reason: None,
-    }, session_present, negotiated)
+    (
+      {
+        generation: self.generation,
+        reader,
+        writer,
+        close_transport,
+        outgoing: @aqueue.Queue(
+          kind=@aqueue.Blocking(self.config.send_capacity),
+        ),
+        control_queue: @aqueue.Queue(
+          kind=@aqueue.Blocking(self.config.control_capacity),
+        ),
+        business_depth: 0,
+        control_depth: 0,
+        pending: {},
+        deliveries: {},
+        reserved_deliveries: self.deliveries.reserved,
+        delivery_slots: 0,
+        delivery_changed: @cond_var.Cond(),
+        next_id: 1,
+        alive: true,
+        last_write: @async.now(),
+        ping_sent: None,
+        early_messages: [],
+        failure_reason: None,
+      },
+      session_present,
+      negotiated,
+    )
   })
 }
 
 ///|
+
 ///|
 /// A generation ended because its transport was closed from inside the client
 /// (a caller-side abort), not because the supervisor was cancelled.
@@ -282,11 +287,29 @@ priv suberror SessionLost {
 }
 
 ///|
-async fn Client::replay_deliveries(
-  self : Client,
-  session : Session,
-) -> Unit {
+async fn Client::replay_deliveries(self : Client, session : Session) -> Unit {
   let records = self.deliveries.order.copy()
+  let negotiated = match self.negotiated {
+    Some(value) => value
+    None => raise NotConnected
+  }
+  let incompatibility : String? = if records.length() >
+    negotiated.receive_maximum {
+    Some("recovered QoS 1 deliveries exceed negotiated Receive Maximum")
+  } else if !records.is_empty() && negotiated.maximum_qos == AtMostOnce {
+    Some("recovered QoS 1 deliveries exceed negotiated Maximum QoS")
+  } else if !negotiated.retain_available && records.any(value => value.retain) {
+    Some("recovered retained delivery conflicts with Retain Available=0")
+  } else {
+    None
+  }
+  match incompatibility {
+    Some(detail) => {
+      let cause : Error = DeliveryRejected(detail)
+      raise self.block_durable_deliveries(cause)
+    }
+    None => ()
+  }
   for delivery in records {
     if delivery.phase.terminal() {
       continue
@@ -296,41 +319,52 @@ async fn Client::replay_deliveries(
         "delivery \{delivery.delivery_id} exhausted \{delivery.attempts} generation attempts",
       )
     }
-    let bytes = delivery.packet(self.config.max_packet_size)
+    delivery.wire_limit = self.wire_packet_limit()
     match delivery.durable {
       Some(meta) =>
-        try {
-          meta.runtime.transition(async fn() {
-            match meta.runtime.outbox.expire_one(
+        meta.runtime.transition(async fn() {
+          if delivery.message_expiry_at_ms is Some(deadline) &&
+            (meta.runtime.now_ms)() >= deadline {
+            let error = DeliveryRejected(
+              "durable delivery \{delivery.delivery_id} Message Expiry elapsed before replay",
+            )
+            meta.runtime.outbox.block(
+              delivery.delivery_id,
+              session_error_reason(error),
+            )
+            delivery.finish_terminal(session_error_reason(error), error)
+            raise error
+          }
+          match
+            meta.runtime.outbox.expire_one(
               delivery.delivery_id,
               (meta.runtime.now_ms)(),
             ) {
-              ExpiryStillPending => {
-                meta.runtime.outbox.record_attach(delivery.delivery_id)
-                delivery.attach(
-                  session.generation,
-                  @async.now() + self.config.operation_timeout_ms.to_int64(),
-                )
-                session.deliveries[delivery.packet_id] = delivery
-                session.delivery_slots += 1
-              }
-              ExpiryRemoved => {
-                let error = DeliveryRejected(
-                  "durable delivery \{delivery.delivery_id} expired before replay and was never possibly written",
-                )
-                delivery.finish_terminal(session_error_reason(error), error)
-                raise error
-              }
-              ExpiryBlocked => {
-                let error = DeliveryRejected(
-                  "durable delivery \{delivery.delivery_id} expired before replay after a possible write",
-                )
-                delivery.finish_terminal(session_error_reason(error), error)
-                raise error
-              }
+            ExpiryStillPending => {
+              meta.runtime.outbox.record_attach(delivery.delivery_id)
+              delivery.attach(
+                session.generation,
+                @async.now() + self.config.operation_timeout_ms.to_int64(),
+              )
+              session.deliveries[delivery.packet_id] = delivery
+              session.delivery_slots += 1
             }
-          })
-        } catch {
+            ExpiryRemoved => {
+              let error = DeliveryRejected(
+                "durable delivery \{delivery.delivery_id} expired before replay and was never possibly written",
+              )
+              delivery.finish_terminal(session_error_reason(error), error)
+              raise error
+            }
+            ExpiryBlocked => {
+              let error = DeliveryRejected(
+                "durable delivery \{delivery.delivery_id} expired before replay after a possible write",
+              )
+              delivery.finish_terminal(session_error_reason(error), error)
+              raise error
+            }
+          }
+        }) catch {
           error if @async.is_cancellation_error(error) => raise error
           error => raise client_error_of(error)
         }
@@ -343,6 +377,7 @@ async fn Client::replay_deliveries(
         session.delivery_slots += 1
       }
     }
+    let bytes = delivery.packet(limit=Some(delivery.wire_limit))
     session.enqueue_delivery(delivery, bytes)
   }
 }
@@ -351,10 +386,11 @@ async fn Client::replay_deliveries(
 /// Persist terminal delivery evidence before releasing packet identifiers or
 /// payloads. A store failure supersedes the initiating cause because the caller
 /// must inspect storage before attempting another network scope.
-async fn Client::block_durable_deliveries(self : Client, cause : Error) -> Error {
-  guard self.durable is Some(runtime) else {
-    return cause
-  }
+async fn Client::block_durable_deliveries(
+  self : Client,
+  cause : Error,
+) -> Error {
+  guard self.durable is Some(runtime) else { return cause }
   if cause is DurableStorage(_) {
     return cause
   }
@@ -386,8 +422,12 @@ async fn Client::block_durable_deliveries(self : Client, cause : Error) -> Error
 ///|
 /// Record heartbeat/control failures before task-group cancellation reaches the
 /// reader and outer cleanup. Cancellation itself remains ordinary teardown.
-async fn Session::heartbeat_task(self : Session, config : Config) -> Unit {
-  self.heartbeat(config) catch {
+async fn Session::heartbeat_task(
+  self : Session,
+  config : Config,
+  keep_alive_secs? : Int? = None,
+) -> Unit {
+  self.heartbeat(config, keep_alive_secs~) catch {
     PingResponseTimeout(reason) => {
       // A caller can end the session while heartbeat sleeps. Its stale timer
       // must not replace the cause that already settled this generation.
@@ -432,14 +472,48 @@ async fn Client::supervise(self : Client) -> Unit {
       self.session = Some(session)
       self.negotiated = Some(negotiated)
       defer session.abort("connection ended")
+      let locally_known = ever_ready ||
+        (match self.durable {
+          Some(runtime) => runtime.known_session
+          None => false
+        })
+      if self.config.protocol is Mqtt5 &&
+        self.config.session_policy is ResumeSession &&
+        first_connection &&
+        session_present &&
+        !locally_known {
+        raise BrokerSessionLost(
+          "broker returned Session Present=true without a locally known session",
+        )
+      }
       if self.config.session_policy is ResumeSession &&
-        (!first_connection ||
-        (self.durable is Some(runtime) &&
-        runtime.recovered_requires_session_present)) &&
+        (
+          !first_connection ||
+          (
+            self.durable is Some(runtime) &&
+            (
+              runtime.recovered_requires_session_present ||
+              runtime.known_session
+            )
+          )
+        ) &&
         !session_present {
         raise BrokerSessionLost(
           "broker returned Session Present=false while recoverable state was active",
         )
+      }
+      if self.config.protocol is Mqtt5 &&
+        self.config.session_policy is ResumeSession {
+        match self.durable {
+          Some(runtime) =>
+            if !runtime.known_session {
+              runtime.transition(async fn() {
+                runtime.outbox.mark_session_known()
+                runtime.known_session = true
+              })
+            }
+          None => ()
+        }
       }
       @async.with_task_group(group => {
         group.spawn_bg(() => {
@@ -449,7 +523,12 @@ async fn Client::supervise(self : Client) -> Unit {
             self.config.reconnect_attempts,
           )
         })
-        group.spawn_bg(() => session.heartbeat_task(self.config))
+        group.spawn_bg(() => {
+          session.heartbeat_task(
+            self.config,
+            keep_alive_secs=Some(negotiated.keep_alive_secs),
+          )
+        })
         group.spawn_bg(() => session.delivery_watchdog(self.config))
         // The read loop drives the connection lifetime. `spawn` instead of
         // `spawn_bg` matters: a failing child cannot wake a group body that is
@@ -475,8 +554,10 @@ async fn Client::supervise(self : Client) -> Unit {
           }
         }
         if self.config.session_policy is ResumeSession &&
-          (!first_connection ||
-          (self.durable is Some(_) && !self.deliveries.active.is_empty())) {
+          (
+            !first_connection ||
+            (self.durable is Some(_) && !self.deliveries.active.is_empty())
+          ) {
           self.replay_deliveries(session)
         }
         self.ready = true
@@ -558,7 +639,9 @@ async fn Client::supervise(self : Client) -> Unit {
         // Backpressure, a saturated control queue and connect-phase protocol
         // errors are terminal: retrying would hide a defect from the caller.
         match cause {
-          BrokerSessionLost(_) | DeliveryAttemptsExhausted(_) => {
+          BrokerSessionLost(_)
+          | DeliveryAttemptsExhausted(_)
+          | ServerDisconnected(_) => {
             // Recoverable handles must remain observable long enough for the
             // application callback to reconcile their terminal state. End the
             // worker normally after recording the typed stop reason instead of
@@ -574,8 +657,7 @@ async fn Client::supervise(self : Client) -> Unit {
             self.settle_deliveries(terminal)
             raise terminal
           }
-          DeliveryRejected(_) | DurableStorage(_) | ServerDisconnected(_) |
-          NotConnected => {
+          DeliveryRejected(_) | DurableStorage(_) | NotConnected => {
             // Expiry has already removed/quarantined its own row. Storage and
             // setup failures retain other pending rows for explicit reopen.
             self.record_stop(cause)
@@ -620,22 +702,25 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
     // after a partial frame header would discard parser state.
     let incoming = try {
       match self.config.transport {
-        Tcp => read_session_packet(
-          session,
-          self.config.protocol,
-          self.config.max_packet_size,
-        )
+        Tcp =>
+          read_session_packet(
+            session,
+            self.config.protocol,
+            self.config.max_packet_size,
+          )
         WebSocket(_) =>
           if session.alive {
             // WebSocket frame parsing performs multi-byte reads. Do not wrap it
             // in the TCP path's recurring 100 ms cancellation slices: a timeout
             // after a partial frame header would discard parser state. Session
             // abort closes the underlying stream and wakes this blocking read.
-            Some(read_wire_packet(
-              session.reader,
-              self.config.protocol,
-              self.config.max_packet_size,
-            ))
+            Some(
+              read_wire_packet(
+                session.reader,
+                self.config.protocol,
+                self.config.max_packet_size,
+              ),
+            )
           } else {
             None
           }
@@ -657,62 +742,63 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
     let packet : IncomingPacket = incoming.unwrap()
     let handled : Result[Unit, Error] = try {
       match normalize_packet(packet) {
-      RuntimePublish(packet, properties) => {
-        let qos = match packet.qos {
-          @codec.QoS0 => AtMostOnce
-          @codec.QoS1 => AtLeastOnce
-          @codec.QoS2 => {
-            session.abort_with(ProtocolError("QoS 2 is not supported"))
-            return
-          }
-        }
-        let message : Message = {
-          topic: packet.topic,
-          payload: packet.payload,
-          qos,
-          retain: packet.retain,
-          dup: packet.dup,
-          generation: session.generation,
-          properties,
-        }
-        if self.ready {
-          self.emit(MessageReceived(message))
-        } else {
-          if session.early_messages.length() >= self.config.receive_capacity {
-            session.abort_with(
-              Backpressure(
-                "messages arrived faster than subscription restoration",
-              ),
-            )
-            return
-          }
-          session.early_messages.push(message)
-        }
-        if packet.message_id is Some(id) && qos == AtLeastOnce {
-          session.control_wire(
-            @codec.PubackPacket({ message_id: id, }),
-            self.config,
-          ) catch {
-            error => {
-              session.abort_with(error)
+        RuntimePublish(packet, properties) => {
+          let qos = match packet.qos {
+            @codec.QoS0 => AtMostOnce
+            @codec.QoS1 => AtLeastOnce
+            @codec.QoS2 => {
+              session.abort_with(ProtocolError("QoS 2 is not supported"))
               return
             }
           }
-        }
-      }
-      RuntimePuback(message_id, reason) => {
-        match session.deliveries.get(message_id) {
-          Some(delivery) => {
-            if delivery.generation != Some(session.generation) ||
-              !(delivery.phase is AwaitingAck) {
+          let message : Message = {
+            topic: packet.topic,
+            payload: packet.payload,
+            qos,
+            retain: packet.retain,
+            dup: packet.dup,
+            generation: session.generation,
+            properties,
+          }
+          if self.ready {
+            self.emit(MessageReceived(message))
+          } else {
+            if session.early_messages.length() >= self.config.receive_capacity {
               session.abort_with(
-                ProtocolError("PUBACK arrived before recoverable PUBLISH write"),
+                Backpressure(
+                  "messages arrived faster than subscription restoration",
+                ),
               )
               return
             }
-            match delivery.durable {
-              Some(meta) =>
-                try {
+            session.early_messages.push(message)
+          }
+          if packet.message_id is Some(id) && qos == AtLeastOnce {
+            session.control_wire(
+              @codec.PubackPacket({ message_id: id, }),
+              self.config,
+            ) catch {
+              error => {
+                session.abort_with(error)
+                return
+              }
+            }
+          }
+        }
+        RuntimePuback(message_id, reason) =>
+          match session.deliveries.get(message_id) {
+            Some(delivery) => {
+              if delivery.generation != Some(session.generation) ||
+                !(delivery.phase is AwaitingAck) {
+                session.abort_with(
+                  ProtocolError(
+                    "PUBACK arrived before recoverable PUBLISH write",
+                  ),
+                )
+                return
+              }
+              match delivery.durable {
+                Some(meta) =>
                   meta.runtime.transition(async fn() {
                     // Validation before waiting for the FIFO gate is only a
                     // fast-path protocol check. Expiry or teardown may settle
@@ -733,145 +819,162 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                       }
                       session.delivery_changed.broadcast()
                     }
-                  })
-                } catch {
-                  error if @async.is_cancellation_error(error) => raise error
-                  error => raise client_error_of(error)
-                }
-              None => {
-                session.deliveries.remove(message_id)
-                if session.delivery_slots > 0 {
-                  session.delivery_slots -= 1
-                }
-                if reason.code < 128 {
-                  self.deliveries.acknowledge(delivery)
-                } else {
-                  self.deliveries.reject(delivery, reason)
-                }
-                session.delivery_changed.broadcast()
-              }
-            }
-          }
-          None =>
-            match session.pending.get(message_id) {
-              Some(request) if request.kind is Publish1 && request.started => {
-                session.pending.remove(message_id)
-                if reason.code < 128 {
-                  request.finish(Ok(Published(Accepted(reason))))
-                } else {
-                  request.finish(Err(BrokerRejected(reason)))
-                }
-              }
-              _ => {
-                session.abort_with(ProtocolError("unexpected PUBACK identifier"))
-                return
-              }
-            }
-        }
-      }
-      RuntimeSuback(message_id, return_codes, diagnostic) =>
-        match session.pending.get(message_id) {
-          Some(request) =>
-            match request.kind {
-              Subscribe(topics) if request.started &&
-                topics.length() == return_codes.length() => {
-                let results : Array[SubscriptionAcknowledgement] = []
-                for i in 0..<topics.length() {
-                  let result = match return_codes[i] {
-                    0 => Granted(AtMostOnce)
-                    1 => Granted(AtLeastOnce)
-                    code if code >= 128 => Rejected
-                    2 => {
-                      session.abort_with(
-                        ProtocolError("SUBACK granted unsupported QoS"),
-                      )
-                      return
-                    }
-                    _ => { session.abort_with(ProtocolError("invalid SUBACK reason")); return }
+                  }) catch {
+                    error if @async.is_cancellation_error(error) => raise error
+                    error => raise client_error_of(error)
                   }
-                  match result {
-                    Granted(qos) =>
-                      if qos == AtLeastOnce && topics[i].qos == AtMostOnce {
+                None => {
+                  session.deliveries.remove(message_id)
+                  if session.delivery_slots > 0 {
+                    session.delivery_slots -= 1
+                  }
+                  if reason.code < 128 {
+                    self.deliveries.acknowledge(delivery)
+                  } else {
+                    self.deliveries.reject(delivery, reason)
+                  }
+                  session.delivery_changed.broadcast()
+                }
+              }
+            }
+            None =>
+              match session.pending.get(message_id) {
+                Some(request) if request.kind is Publish1 && request.started => {
+                  session.pending.remove(message_id)
+                  if reason.code < 128 {
+                    request.finish(Ok(Published(Accepted(reason))))
+                  } else {
+                    request.finish(Err(BrokerRejected(reason)))
+                  }
+                }
+                _ => {
+                  session.abort_with(
+                    ProtocolError("unexpected PUBACK identifier"),
+                  )
+                  return
+                }
+              }
+          }
+        RuntimeSuback(message_id, return_codes, diagnostic) =>
+          match session.pending.get(message_id) {
+            Some(request) =>
+              match request.kind {
+                Subscribe(topics) if request.started &&
+                  topics.length() == return_codes.length() => {
+                  let results : Array[SubscriptionAcknowledgement] = []
+                  for i in 0..<topics.length() {
+                    let result = match return_codes[i] {
+                      0 => Granted(AtMostOnce)
+                      1 => Granted(AtLeastOnce)
+                      code if code >= 128 => Rejected
+                      2 => {
                         session.abort_with(
-                          ProtocolError("SUBACK exceeds requested QoS"),
+                          ProtocolError("SUBACK granted unsupported QoS"),
                         )
                         return
                       }
-                    Rejected => ()
+                      _ => {
+                        session.abort_with(
+                          ProtocolError("invalid SUBACK reason"),
+                        )
+                        return
+                      }
+                    }
+                    match result {
+                      Granted(qos) =>
+                        if qos == AtLeastOnce && topics[i].qos == AtMostOnce {
+                          session.abort_with(
+                            ProtocolError("SUBACK exceeds requested QoS"),
+                          )
+                          return
+                        }
+                      Rejected => ()
+                    }
+                    results.push({
+                      result,
+                      reason: {
+                        code: return_codes[i],
+                        reason_string: diagnostic.reason_string,
+                      },
+                    })
                   }
-                  results.push({ result, reason: { code: return_codes[i], reason_string: diagnostic.reason_string, }, })
-                }
-                // Commit desired subscriptions only after the whole ACK validates.
-                for i in 0..<topics.length() {
-                  if results[i].result is Granted(_) {
-                    self.subscriptions[topics[i].topic] = topics[i].qos
+                  // Commit desired subscriptions only after the whole ACK validates.
+                  for i in 0..<topics.length() {
+                    if results[i].result is Granted(_) {
+                      self.subscriptions[topics[i].topic] = topics[i].qos
+                    }
                   }
+                  session.pending.remove(message_id)
+                  request.finish(Ok(SubscriptionsDetailed(results)))
                 }
-                session.pending.remove(message_id)
-                request.finish(Ok(SubscriptionsDetailed(results)))
-              }
-              _ => {
-                session.abort_with(
-                  ProtocolError("SUBACK does not match pending request"),
-                )
-                return
-              }
-            }
-          None => {
-            session.abort_with(ProtocolError("unexpected SUBACK identifier"))
-            return
-          }
-        }
-      RuntimeUnsuback(message_id, reasons, diagnostic) =>
-        match session.pending.get(message_id) {
-          Some(request) =>
-            match request.kind {
-              Unsubscribe(topics) if request.started => {
-                if self.config.protocol is Mqtt5 && topics.length() != reasons.length() {
-                  session.abort_with(ProtocolError("UNSUBACK reason count mismatch"))
+                _ => {
+                  session.abort_with(
+                    ProtocolError("SUBACK does not match pending request"),
+                  )
                   return
                 }
-                let values = if self.config.protocol is Mqtt311 {
-                  topics.map(_ => { code: 0, reason_string: None, })
-                } else {
-                  reasons.map(code => { code, reason_string: diagnostic.reason_string, })
-                }
-                for value in values {
-                  if value.code >= 128 {
-                    session.pending.remove(message_id)
-                    request.finish(Err(BrokerRejected(value)))
+              }
+            None => {
+              session.abort_with(ProtocolError("unexpected SUBACK identifier"))
+              return
+            }
+          }
+        RuntimeUnsuback(message_id, reasons, diagnostic) =>
+          match session.pending.get(message_id) {
+            Some(request) =>
+              match request.kind {
+                Unsubscribe(topics) if request.started => {
+                  if self.config.protocol is Mqtt5 &&
+                    topics.length() != reasons.length() {
+                    session.abort_with(
+                      ProtocolError("UNSUBACK reason count mismatch"),
+                    )
                     return
                   }
+                  let values = if self.config.protocol is Mqtt311 {
+                    topics.map(_ => { code: 0, reason_string: None, })
+                  } else {
+                    reasons.map(code => {
+                      code,
+                      reason_string: diagnostic.reason_string,
+                    })
+                  }
+                  for value in values {
+                    if value.code >= 128 {
+                      session.pending.remove(message_id)
+                      request.finish(Err(BrokerRejected(value)))
+                      return
+                    }
+                  }
+                  for topic in topics {
+                    self.subscriptions.remove(topic)
+                  }
+                  session.pending.remove(message_id)
+                  request.finish(Ok(Unsubscriptions(values)))
                 }
-                for topic in topics {
-                  self.subscriptions.remove(topic)
+                _ => {
+                  session.abort_with(
+                    ProtocolError("UNSUBACK does not match pending request"),
+                  )
+                  return
                 }
-                session.pending.remove(message_id)
-                request.finish(Ok(Unsubscriptions(values)))
               }
-              _ => {
-                session.abort_with(
-                  ProtocolError("UNSUBACK does not match pending request"),
-                )
-                return
-              }
+            None => {
+              session.abort_with(
+                ProtocolError("unexpected UNSUBACK identifier"),
+              )
+              return
             }
-          None => {
-            session.abort_with(
-              ProtocolError("unexpected UNSUBACK identifier"),
-            )
-            return
           }
+        RuntimePingresp => session.ping_sent = None
+        RuntimeDisconnect(reason) => {
+          session.abort_with(ServerDisconnected(reason))
+          return
         }
-      RuntimePingresp => session.ping_sent = None
-      RuntimeDisconnect(reason) => {
-        session.abort_with(ServerDisconnected(reason))
-        return
-      }
-      RuntimeUnexpected => {
-        session.abort_with(ProtocolError("unexpected server packet"))
-        return
-      }
+        RuntimeUnexpected => {
+          session.abort_with(ProtocolError("unexpected server packet"))
+          return
+        }
       }
       Ok(())
     } catch {

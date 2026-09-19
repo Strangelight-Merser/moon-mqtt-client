@@ -9,7 +9,11 @@ fn delivery_test_record(
     changed: @cond_var.Cond(),
     topic: Some("q1/test"),
     payload: Some(b"payload"),
+    properties: PublishProperties::empty(),
+    message_expiry_at_ms: None,
     retain: false,
+    protocol: Mqtt311,
+    wire_limit: 1024,
     phase: Queued,
     attempts: 0,
     generation: None,
@@ -275,7 +279,7 @@ async test "queued delivery deadline survives control priority and stays not sen
   session.delivery_slots = 1
   assert_true(
     session.outgoing.try_put({
-      bytes: delivery.packet(1024),
+      bytes: delivery.packet(limit=Some(1024)),
       pending: None,
       delivery: Some(delivery),
       is_ping: false,
@@ -314,7 +318,7 @@ async test "dequeued expired delivery never reaches socket writer" {
   assert_false(
     session.write_one(
       {
-        bytes: delivery.packet(1024),
+        bytes: delivery.packet(limit=Some(1024)),
         pending: None,
         delivery: Some(delivery),
         is_ping: false,

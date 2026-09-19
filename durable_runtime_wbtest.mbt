@@ -87,6 +87,7 @@ async fn durable_runtime_client(
     outbox,
     gate: @semaphore.Semaphore(1),
     recovered_requires_session_present: false,
+    known_session: false,
     now_ms,
   }
   let deliveries = DeliveryBook::new()

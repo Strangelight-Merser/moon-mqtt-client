@@ -64,6 +64,8 @@ priv struct Session {
   /// reconnecting. Ordinary request allocation must always skip them.
   reserved_deliveries : Map[Int, DeliveryRecord]
   mut delivery_slots : Int
+  mut qos1_outstanding : Int
+  receive_maximum : Int
   delivery_changed : @cond_var.Cond
   mut next_id : Int
   mut alive : Bool
@@ -100,8 +102,10 @@ fn session_error_reason(error : Error) -> String {
     NotSent(reason) => reason
     OutcomeUnknown(reason) => reason
     ConnectionRefused(reason) => reason
-    BrokerRejected(reason) => "broker rejected request with reason code \{reason.code}"
-    ServerDisconnected(reason) => "server disconnected with reason code \{reason.code}"
+    BrokerRejected(reason) =>
+      "broker rejected request with reason code \{reason.code}"
+    ServerDisconnected(reason) =>
+      "server disconnected with reason code \{reason.code}"
     ReconnectExhausted(reason) => reason
     DeliveryRejected(reason) => reason
     BrokerSessionLost(reason) => reason
@@ -215,15 +219,21 @@ fn Session::control_wire(
   config : Config,
   is_ping? : Bool = false,
 ) -> Unit raise ClientError {
-  if !self.alive { raise NotConnected }
+  if !self.alive {
+    raise NotConnected
+  }
   let encoded = encode_wire(config.protocol, packet, [], config.max_packet_size)
   let accepted = self.control_queue.try_put({
     bytes: encoded,
     pending: None,
     delivery: None,
     is_ping,
-  }) catch { _ => false }
-  if accepted { self.control_depth += 1 } else {
+  }) catch {
+    _ => false
+  }
+  if accepted {
+    self.control_depth += 1
+  } else {
     raise ProtocolError(
       "control queue exhausted; terminating instead of dropping a control packet",
     )
@@ -249,6 +259,9 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
     }
     None => ()
   }
+  if self.qos1_outstanding >= self.receive_maximum {
+    return None
+  }
   let business = self.outgoing.try_get() catch { _ => return None }
   match business {
     Some(item) => {
@@ -272,8 +285,8 @@ async fn Session::enqueue_delivery(
   bytes : Bytes,
 ) -> Unit {
   while self.alive &&
-    delivery.generation == Some(self.generation) &&
-    !delivery.phase.terminal() {
+        delivery.generation == Some(self.generation) &&
+        !delivery.phase.terminal() {
     let accepted = self.outgoing.try_put({
       bytes,
       pending: None,
@@ -347,10 +360,8 @@ async fn Session::write_one(
         delivery.generation != Some(self.generation) {
         return true
       }
-      if delivery.start_deadline is Some(deadline) &&
-        @async.now() >= deadline {
-        let detail =
-          "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not begin its socket write within operation_timeout_ms=\{operation_timeout_ms} on attempt \{delivery.attempts}"
+      if delivery.start_deadline is Some(deadline) && @async.now() >= deadline {
+        let detail = "delivery \{delivery.delivery_id} packet \{delivery.packet_id} did not begin its socket write within operation_timeout_ms=\{operation_timeout_ms} on attempt \{delivery.attempts}"
         let error : Error = if delivery.attempts > reconnect_attempts {
           DeliveryAttemptsExhausted(detail)
         } else {
@@ -362,36 +373,48 @@ async fn Session::write_one(
       match delivery.durable {
         Some(meta) => {
           let original_start_deadline = delivery.start_deadline
-          let transition = try {
-            meta.runtime.transition(async fn() {
-              match meta.runtime.outbox.expire_one(
+          let transition = meta.runtime.transition(async fn() {
+            let transition_now = (meta.runtime.now_ms)()
+            if delivery.message_expiry_at_ms is Some(deadline) &&
+              transition_now >= deadline {
+              let error = DeliveryRejected(
+                "durable delivery \{delivery.delivery_id} Message Expiry elapsed before its first possible write",
+              )
+              meta.runtime.outbox.block(
                 delivery.delivery_id,
-                (meta.runtime.now_ms)(),
+                session_error_reason(error),
+              )
+              delivery.finish_terminal(session_error_reason(error), error)
+              return Some(error)
+            }
+            match
+              meta.runtime.outbox.expire_one(
+                delivery.delivery_id,
+                transition_now,
               ) {
-                ExpiryStillPending => {
-                  if !delivery.ever_started {
-                    meta.runtime.outbox.record_may_write(delivery.delivery_id)
-                  }
-                  delivery.mark_started()
-                  None
+              ExpiryStillPending => {
+                if !delivery.ever_started {
+                  meta.runtime.outbox.record_may_write(delivery.delivery_id)
                 }
-                ExpiryRemoved => {
-                  let error = DeliveryRejected(
-                    "durable delivery \{delivery.delivery_id} expired before its first possible write",
-                  )
-                  delivery.finish_terminal(session_error_reason(error), error)
-                  Some(error)
-                }
-                ExpiryBlocked => {
-                  let error = DeliveryRejected(
-                    "durable delivery \{delivery.delivery_id} expired after a possible write",
-                  )
-                  delivery.finish_terminal(session_error_reason(error), error)
-                  Some(error)
-                }
+                delivery.mark_started()
+                None
               }
-            })
-          } catch {
+              ExpiryRemoved => {
+                let error = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired before its first possible write",
+                )
+                delivery.finish_terminal(session_error_reason(error), error)
+                Some(error)
+              }
+              ExpiryBlocked => {
+                let error = DeliveryRejected(
+                  "durable delivery \{delivery.delivery_id} expired after a possible write",
+                )
+                delivery.finish_terminal(session_error_reason(error), error)
+                Some(error)
+              }
+            }
+          }) catch {
             error => {
               if @async.is_cancellation_error(error) {
                 raise error
@@ -422,22 +445,16 @@ async fn Session::write_one(
           // immediately before the socket write.
           let wall_now = (meta.runtime.now_ms)()
           if wall_now >= meta.expires_at_ms {
-            let error : Error = try {
-              meta.runtime.transition(async fn() {
-                ignore(meta.runtime.outbox.expire_one(
-                  delivery.delivery_id,
-                  wall_now,
-                ))
-                let expired = DeliveryRejected(
-                  "durable delivery \{delivery.delivery_id} expired after possible-write persistence and before socket write",
-                )
-                delivery.finish_terminal(
-                  session_error_reason(expired),
-                  expired,
-                )
-                expired
-              })
-            } catch {
+            let error : Error = meta.runtime.transition(async fn() {
+              ignore(
+                meta.runtime.outbox.expire_one(delivery.delivery_id, wall_now),
+              )
+              let expired = DeliveryRejected(
+                "durable delivery \{delivery.delivery_id} expired after possible-write persistence and before socket write",
+              )
+              delivery.finish_terminal(session_error_reason(expired), expired)
+              expired
+            }) catch {
               store_error => {
                 if @async.is_cancellation_error(store_error) {
                   raise store_error
@@ -453,8 +470,7 @@ async fn Session::write_one(
           }
           if original_start_deadline is Some(deadline) &&
             @async.now() >= deadline {
-            let detail =
-              "delivery \{delivery.delivery_id} packet \{delivery.packet_id} exceeded its pre-write operation budget while persisting durable possible-write state on attempt \{delivery.attempts}"
+            let detail = "delivery \{delivery.delivery_id} packet \{delivery.packet_id} exceeded its pre-write operation budget while persisting durable possible-write state on attempt \{delivery.attempts}"
             let error : Error = if delivery.attempts > reconnect_attempts {
               DeliveryAttemptsExhausted(detail)
             } else {
@@ -473,12 +489,17 @@ async fn Session::write_one(
     mark_started(request)
   }
   try {
-    let bytes = match item.pending {
-      Some(request) => match request.refresh {
-        Some(refresh) => refresh()
-        None => item.bytes
-      }
-      None => item.bytes
+    let bytes = match item.delivery {
+      Some(delivery) => delivery.packet()
+      None =>
+        match item.pending {
+          Some(request) =>
+            match request.refresh {
+              Some(refresh) => refresh()
+              None => item.bytes
+            }
+          None => item.bytes
+        }
     }
     @async.with_timeout(write_timeout_ms, () => self.writer.write(bytes))
   } catch {
@@ -503,9 +524,7 @@ async fn Session::write_one(
   }
   self.last_write = @async.now()
   if item.delivery is Some(delivery) {
-    delivery.mark_written(
-      self.last_write + operation_timeout_ms.to_int64(),
-    )
+    delivery.mark_written(self.last_write + operation_timeout_ms.to_int64())
     self.delivery_changed.broadcast()
   }
   if item.is_ping {
@@ -517,7 +536,9 @@ async fn Session::write_one(
       match request.kind {
         Publish0 | Disconnect => {
           self.pending.remove(request.id)
-          request.finish(Ok(if request.kind is Publish0 { Published(Written) } else { Done }))
+          request.finish(
+            Ok(if request.kind is Publish0 { Published(Written) } else { Done }),
+          )
           // No MQTT control packet may follow DISCONNECT, including a queued
           // heartbeat or PUBACK while graceful framing shutdown is pending.
           if request.kind is Disconnect {
@@ -543,54 +564,54 @@ async fn Session::expire_durable_delivery(
   delivery : DeliveryRecord,
 ) -> Error? {
   guard delivery.durable is Some(meta) else { return None }
-  try {
-    meta.runtime.transition(async fn() {
-      // The wall-clock observation which selected this record happened before
-      // waiting for the FIFO gate. An ACK or generation teardown may have won
-      // the gate in the meantime, so both ownership and time are authoritative
-      // only after the gate is held.
-      if !self.alive ||
-        delivery.generation != Some(self.generation) ||
-        delivery.phase.terminal() ||
-        !self.deliveries.contains(delivery.packet_id) {
-        return None
-      }
-      let now_ms = (meta.runtime.now_ms)()
-      if now_ms < meta.expires_at_ms {
-        return None
-      }
-      let error : Error? = match meta.runtime.outbox.expire_one(
-        delivery.delivery_id,
-        now_ms,
-      ) {
-        // A backwards wall-clock step, or an already-settled owner observed
-        // before the checks above, is not a protocol or storage failure.
-        ExpiryStillPending => None
-        ExpiryRemoved =>
-          Some(DeliveryRejected(
+  meta.runtime.transition(async fn() {
+    // The wall-clock observation which selected this record happened before
+    // waiting for the FIFO gate. An ACK or generation teardown may have won
+    // the gate in the meantime, so both ownership and time are authoritative
+    // only after the gate is held.
+    if !self.alive ||
+      delivery.generation != Some(self.generation) ||
+      delivery.phase.terminal() ||
+      !self.deliveries.contains(delivery.packet_id) {
+      return None
+    }
+    let now_ms = (meta.runtime.now_ms)()
+    if now_ms < meta.expires_at_ms {
+      return None
+    }
+    let error : Error? = match
+      meta.runtime.outbox.expire_one(delivery.delivery_id, now_ms) {
+      // A backwards wall-clock step, or an already-settled owner observed
+      // before the checks above, is not a protocol or storage failure.
+      ExpiryStillPending => None
+      ExpiryRemoved =>
+        Some(
+          DeliveryRejected(
             "durable delivery \{delivery.delivery_id} expired before its first possible write",
-          ))
-        ExpiryBlocked =>
-          Some(DeliveryRejected(
+          ),
+        )
+      ExpiryBlocked =>
+        Some(
+          DeliveryRejected(
             "durable delivery \{delivery.delivery_id} expired after a possible write",
-          ))
+          ),
+        )
+    }
+    match error {
+      Some(cause) => {
+        // Persisted expiry and the observable handle terminal state share the
+        // gate. A queued ACK can therefore win entirely or observe this
+        // already-recorded first cause, never a half-settled delivery.
+        delivery.finish_terminal(
+          session_error_reason(cause),
+          client_error_of(cause),
+        )
+        self.abort_with(cause)
       }
-      match error {
-        Some(cause) => {
-          // Persisted expiry and the observable handle terminal state share the
-          // gate. A queued ACK can therefore win entirely or observe this
-          // already-recorded first cause, never a half-settled delivery.
-          delivery.finish_terminal(
-            session_error_reason(cause),
-            client_error_of(cause),
-          )
-          self.abort_with(cause)
-        }
-        None => ()
-      }
-      error
-    })
-  } catch {
+      None => ()
+    }
+    error
+  }) catch {
     store_error => {
       if @async.is_cancellation_error(store_error) {
         raise store_error
@@ -661,31 +682,32 @@ async fn Session::write_loop(
     match self.next_outgoing() {
       Some(item) =>
         if !self.write_one(
-          item,
-          operation_timeout_ms,
-          write_timeout_ms,
-          reconnect_attempts,
-        ) {
+            item, operation_timeout_ms, write_timeout_ms, reconnect_attempts,
+          ) {
           return
         }
-      None => {
+      None =>
         // Neither queue has work: stay cancellable with the session task group.
         @async.sleep(1)
-      }
     }
   }
 }
 
 ///|
-async fn Session::heartbeat(self : Session, config : Config) -> Unit {
-  if config.keep_alive_secs == 0 {
+async fn Session::heartbeat(
+  self : Session,
+  config : Config,
+  keep_alive_secs? : Int? = None,
+) -> Unit {
+  let keep_alive = keep_alive_secs.unwrap_or(config.keep_alive_secs)
+  if keep_alive == 0 {
     // Remains cancellable with the surrounding session task group.
     while self.alive {
       @async.sleep(60000)
     }
     return
   }
-  let interval = config.keep_alive_secs * 1000
+  let interval = keep_alive * 1000
   let tick = (interval / 4).clamp(min=10, max=250)
   while self.alive {
     @async.sleep(tick)

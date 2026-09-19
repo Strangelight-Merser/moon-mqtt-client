@@ -78,7 +78,10 @@ fn publish_properties_public(
 }
 
 ///|
-fn broker_reason(code : Int, properties : Array[@mqtt5.Property]) -> BrokerReason {
+fn broker_reason(
+  code : Int,
+  properties : Array[@mqtt5.Property],
+) -> BrokerReason {
   let mut reason_string : String? = None
   for property in properties {
     if property is @mqtt5.ReasonString(value) {
@@ -103,7 +106,7 @@ fn encode_wire(
       encode(packet, limit)
     }
     Mqtt5 =>
-      try @mqtt5.encode(packet, properties, limit) catch {
+      @mqtt5.encode(packet, properties, limit) catch {
         error => raise mqtt5_error(error)
       }
   }
@@ -122,7 +125,7 @@ fn decode_wire(
         Err(reason) => raise ProtocolError(reason)
       }
     Mqtt5 =>
-      try Incoming5(@mqtt5.decode(bytes, limit)) catch {
+      Incoming5(@mqtt5.decode(bytes, limit)) catch {
         error => raise mqtt5_error(error)
       }
   }
@@ -132,9 +135,19 @@ fn decode_wire(
 fn Config::connect_bytes(self : Config) -> Bytes raise ClientError {
   let properties : Array[@mqtt5.Property] = match self.protocol {
     Mqtt311 => []
-    Mqtt5 => [@mqtt5.SessionExpiry(self.session_expiry_secs)]
+    Mqtt5 =>
+      [
+        @mqtt5.SessionExpiry(self.session_expiry_secs),
+        @mqtt5.ReceiveMaximum(self.max_inflight),
+        @mqtt5.MaximumPacketSize(self.max_packet_size.to_int64()),
+      ]
   }
-  encode_wire(self.protocol, self.connect_packet(), properties, self.max_packet_size)
+  encode_wire(
+    self.protocol,
+    self.connect_packet(),
+    properties,
+    self.max_packet_size,
+  )
 }
 
 ///|
@@ -201,10 +214,14 @@ async fn read_wire_packet(
       }
       break
     }
-    if index == 3 { raise ProtocolError("malformed remaining length") }
+    if index == 3 {
+      raise ProtocolError("malformed remaining length")
+    }
     multiplier *= 128
   }
-  for byte in reader.read_exactly(size) { data.push(byte) }
+  for byte in reader.read_exactly(size) {
+    data.push(byte)
+  }
   decode_wire(protocol, Bytes::from_array(data), limit)
 }
 

@@ -268,4 +268,31 @@ The upgrade offers only `mqtt` and requires that exact selected subprotocol. Res
 
 Binary data messages form one MQTT byte stream: a packet may cross frame/message boundaries and multiple packets may share a message. Stream buffering stays bounded, and the MQTT packet-size bound is enforced before accepting an oversized packet body. Peer control frames are handled by the transport independently of MQTT packet boundaries.
 
+## MQTT 5 runtime subset
+
+`Config.protocol` is explicit and defaults to `Mqtt311`. MQTT 3.1.1 rejects a
+nonzero `session_expiry_secs`; MQTT 5 requires zero for `CleanSession` and a
+nonzero value for `ResumeSession`. MQTT 5 frames are decoded only by the MQTT 5
+decoder. No adapter passes MQTT 5 bytes through the MQTT 3.1.1 decoder.
+
+Outgoing publish properties are copied before suspension. Message Expiry is
+converted once to an absolute deadline, then recomputed immediately before the
+socket write, including after durable storage commits. Properties count toward
+the negotiated packet limit and, for durable rows, toward the configured
+payload-plus-property byte bound. Recovered rows retain the same deadline.
+
+Negative PUBACK completes an ordinary request as `BrokerRejected`. For durable
+work, the outbox DELETE commits before the packet identifier, payload and handle
+are released; the handle reaches `Rejected(BrokerReason)`. Like a positive
+PUBACK, this does not create permanent completion history, and a process crash
+after receiving the ACK but before DELETE can replay the row.
+
+Receive Maximum limits admitted QoS 1 work while the separate bounded control
+queue remains available for PUBACK, PINGREQ and DISCONNECT. Maximum Packet Size,
+Maximum QoS, Retain Available and Server Keep Alive constrain the current
+generation. A server DISCONNECT ends that scope with `ServerDisconnected` and
+is not retried in the same scope. A first `Session Present=true` is accepted
+only when local known-session evidence exists; durable evidence is a committed
+metadata bit independent of whether the outbox contains rows.
+
 The WS parser is not periodically cancelled while a connection remains usable. Session abort or scope cancellation closes the underlying stream and ends the reader; no partially consumed frame is reused in a later generation. A publish remains NotSent until its writer starts and OutcomeUnknown after writing starts without completion. Transport masking uses secure entropy and fails if entropy is unavailable; the weaker reconnect-jitter fallback is never used for masking.
