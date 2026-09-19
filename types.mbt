@@ -57,6 +57,7 @@ pub(all) struct Message {
   retain : Bool
   dup : Bool
   generation : Int
+  properties : PublishProperties
 } derive(@debug.Debug)
 
 ///|
@@ -76,6 +77,8 @@ pub(all) suberror ClientError {
   NotSent(String)
   OutcomeUnknown(String)
   ConnectionRefused(String)
+  BrokerRejected(BrokerReason)
+  ServerDisconnected(BrokerReason)
   ReconnectExhausted(String)
   DeliveryRejected(String)
   BrokerSessionLost(String)
@@ -128,7 +131,9 @@ pub(all) struct Config {
   host : String
   port : Int
   client_id : String
+  protocol : ProtocolVersion
   session_policy : SessionPolicy
+  session_expiry_secs : Int64
   transport : NetworkTransport
   tls : TlsMode
   client_identity : ClientIdentity?
@@ -160,8 +165,10 @@ pub(all) struct Config {
 pub fn Config::new(
   host : String,
   client_id : String,
+  protocol? : ProtocolVersion = Mqtt311,
   port? : Int = 1883,
   session_policy? : SessionPolicy = CleanSession,
+  session_expiry_secs? : Int64 = 0L,
   transport? : NetworkTransport = Tcp,
   tls? : TlsMode = Plain,
   client_identity? : ClientIdentity? = None,
@@ -186,7 +193,9 @@ pub fn Config::new(
     host,
     port,
     client_id,
+    protocol,
     session_policy,
+    session_expiry_secs,
     transport,
     tls,
     client_identity,
@@ -256,6 +265,26 @@ fn valid_websocket_path(path : String) -> Bool {
 fn Config::validate(self : Config) -> Unit raise ClientError {
   if self.host.is_empty() || self.client_id.is_empty() {
     raise InvalidConfig("host and stable client_id must be non-empty")
+  }
+  if self.session_expiry_secs < 0L || self.session_expiry_secs > 4294967295L {
+    raise InvalidConfig("session_expiry_secs must be in 0..4294967295")
+  }
+  match self.protocol {
+    Mqtt311 =>
+      if self.session_expiry_secs != 0L {
+        raise InvalidConfig("session_expiry_secs requires MQTT 5")
+      }
+    Mqtt5 =>
+      match self.session_policy {
+        CleanSession =>
+          if self.session_expiry_secs != 0L {
+            raise InvalidConfig("MQTT 5 clean sessions require zero session expiry")
+          }
+        ResumeSession =>
+          if self.session_expiry_secs == 0L {
+            raise InvalidConfig("MQTT 5 resumed sessions require nonzero session expiry")
+          }
+      }
   }
   match self.transport {
     Tcp => ()

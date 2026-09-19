@@ -1,3 +1,81 @@
+///| Internal protocol-neutral events; MQTT 5 is decoded by its own codec first.
+priv enum RuntimePacket {
+  RuntimePublish(@codec.Publish, PublishProperties)
+  RuntimePuback(Int, BrokerReason)
+  RuntimeSuback(Int, Array[Int], BrokerReason)
+  RuntimeUnsuback(Int, Array[Int], BrokerReason)
+  RuntimePingresp
+  RuntimeDisconnect(BrokerReason)
+  RuntimeUnexpected
+}
+
+///|
+fn normalize_packet(packet : IncomingPacket) -> RuntimePacket {
+  match packet {
+    Incoming311(@codec.PublishPacket(value)) =>
+      RuntimePublish(value, PublishProperties::empty())
+    Incoming311(@codec.PubackPacket(value)) =>
+      RuntimePuback(value.message_id, { code: 0, reason_string: None, })
+    Incoming311(@codec.SubackPacket(value)) => {
+      let reasons = value.return_codes.map(code => match code {
+        @codec.SuccessQoS0 => 0
+        @codec.SuccessQoS1 => 1
+        @codec.SuccessQoS2 => 2
+        @codec.Failure => 128
+      })
+      RuntimeSuback(value.message_id, reasons, { code: 0, reason_string: None, })
+    }
+    Incoming311(@codec.UnsubackPacket(value)) =>
+      RuntimeUnsuback(value.message_id, [], { code: 0, reason_string: None, })
+    Incoming311(@codec.PingrespPacket) => RuntimePingresp
+    Incoming5(@mqtt5.Publish(value, properties)) =>
+      RuntimePublish(value, publish_properties_public(properties))
+    Incoming5(@mqtt5.Puback(id, code, properties)) =>
+      RuntimePuback(id, broker_reason(code, properties))
+    Incoming5(@mqtt5.Suback(id, reasons, properties)) =>
+      RuntimeSuback(id, reasons, broker_reason(0, properties))
+    Incoming5(@mqtt5.Unsuback(id, reasons, properties)) =>
+      RuntimeUnsuback(id, reasons, broker_reason(0, properties))
+    Incoming5(@mqtt5.Pingresp) => RuntimePingresp
+    Incoming5(@mqtt5.Disconnect(code, properties)) =>
+      RuntimeDisconnect(broker_reason(code, properties))
+    _ => RuntimeUnexpected
+  }
+}
+
+///|
+fn negotiated_settings(
+  config : Config,
+  properties : Array[@mqtt5.Property],
+) -> NegotiatedSettings {
+  let mut receive = config.max_inflight
+  let mut packet = config.max_packet_size
+  let mut qos = AtLeastOnce
+  let mut retain = true
+  let mut keep_alive = config.keep_alive_secs
+  let mut expiry = config.session_expiry_secs
+  for property in properties {
+    match property {
+      @mqtt5.ReceiveMaximum(value) => receive = receive.min(value)
+      @mqtt5.MaximumPacketSize(value) =>
+        packet = packet.min(value.min(2147483647L).to_int())
+      @mqtt5.MaximumQoS(0) => qos = AtMostOnce
+      @mqtt5.RetainAvailable(0) => retain = false
+      @mqtt5.ServerKeepAlive(value) => keep_alive = value
+      @mqtt5.SessionExpiry(value) => expiry = value
+      _ => ()
+    }
+  }
+  {
+    receive_maximum: receive,
+    max_packet_size: packet,
+    maximum_qos: qos,
+    retain_available: retain,
+    keep_alive_secs: keep_alive,
+    session_expiry_secs: expiry,
+  }
+}
+
 ///|
 /// Exchange MQTT CONNECT/CONNACK over an established transport. Once TLS is
 /// established, socket EOF/reset and TLS-layer errors during this exchange are
@@ -9,10 +87,11 @@ async fn mqtt_connect_exchange(
   connect_bytes : Bytes,
   limit : Int,
   encrypted : Bool,
-) -> @codec.Packet {
+  protocol? : ProtocolVersion = Mqtt311,
+) -> IncomingPacket {
   try {
     writer.write(connect_bytes)
-    read_packet(reader, limit)
+    read_wire_packet(reader, protocol, limit)
   } catch {
     error => {
       if !encrypted {
@@ -46,7 +125,7 @@ fn websocket_handshake_error(error : Error, encrypted : Bool) -> Error {
 
 ///|
 ///|
-async fn Client::dial(self : Client) -> (Session, Bool) {
+async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
   @async.with_timeout(self.config.connect_timeout_ms, () => {
     let tcp = @socket.Tcp::connect_to_host(
       self.config.host[:],
@@ -130,26 +209,40 @@ async fn Client::dial(self : Client) -> (Session, Bool) {
     errdefer close_transport()
     // Encode outside the transport classifier so invalid MQTT configuration can
     // never be mislabeled as a TLS failure.
-    let connect_bytes = encode(
-      self.config.connect_packet(),
-      self.config.max_packet_size,
-    )
+    let connect_bytes = self.config.connect_bytes()
     let response = mqtt_connect_exchange(
       reader,
       writer,
       connect_bytes,
       self.config.max_packet_size,
       !(self.config.tls is Plain),
+      protocol=self.config.protocol,
     )
-    let session_present = match response {
-      @codec.ConnackPacket(ack) => {
+    let (session_present, negotiated) = match response {
+      Incoming311(@codec.ConnackPacket(ack)) => {
         if ack.return_code != @codec.ConnectionAccepted {
           raise ConnectionRefused(@debug.to_string(ack.return_code))
         }
         if self.config.session_policy is CleanSession && ack.session_present {
           raise ProtocolError("CleanSession=true CONNACK set Session Present")
         }
-        ack.session_present
+        (ack.session_present, {
+          receive_maximum: self.config.max_inflight,
+          max_packet_size: self.config.max_packet_size,
+          maximum_qos: AtLeastOnce,
+          retain_available: true,
+          keep_alive_secs: self.config.keep_alive_secs,
+          session_expiry_secs: 0L,
+        })
+      }
+      Incoming5(@mqtt5.Connack(present, reason, properties)) => {
+        if reason != 0 {
+          raise ConnectionRefused("MQTT 5 CONNACK reason code \{reason}")
+        }
+        if self.config.session_policy is CleanSession && present {
+          raise ProtocolError("CleanSession=true CONNACK set Session Present")
+        }
+        (present, negotiated_settings(self.config, properties))
       }
       _ => raise ProtocolError("expected CONNACK")
     }
@@ -176,7 +269,7 @@ async fn Client::dial(self : Client) -> (Session, Bool) {
       ping_sent: None,
       early_messages: [],
       failure_reason: None,
-    }, session_present)
+    }, session_present, negotiated)
   })
 }
 
@@ -335,8 +428,9 @@ async fn Client::supervise(self : Client) -> Unit {
   while !self.stopped {
     try {
       let first_connection = !ever_ready
-      let (session, session_present) = self.dial()
+      let (session, session_present, negotiated) = self.dial()
       self.session = Some(session)
+      self.negotiated = Some(negotiated)
       defer session.abort("connection ended")
       if self.config.session_policy is ResumeSession &&
         (!first_connection ||
@@ -375,7 +469,7 @@ async fn Client::supervise(self : Client) -> Unit {
             .to_array()
           for subscription in restore {
             let result = self.subscribe_on(session, [subscription])
-            if result.contains(Rejected) {
+            if result.any(value => value.result is Rejected) {
               raise ProtocolError("subscription restore rejected")
             }
           }
@@ -455,6 +549,7 @@ async fn Client::supervise(self : Client) -> Unit {
         let reason = session_error_reason(cause)
         self.ready = false
         self.session = None
+        self.negotiated = None
         self.changed.broadcast()
         if self.stopped {
           self.settle_deliveries(self.close_reason())
@@ -479,7 +574,8 @@ async fn Client::supervise(self : Client) -> Unit {
             self.settle_deliveries(terminal)
             raise terminal
           }
-          DeliveryRejected(_) | DurableStorage(_) | NotConnected => {
+          DeliveryRejected(_) | DurableStorage(_) | ServerDisconnected(_) |
+          NotConnected => {
             // Expiry has already removed/quarantined its own row. Storage and
             // setup failures retain other pending rows for explicit reopen.
             self.record_stop(cause)
@@ -524,14 +620,22 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
     // after a partial frame header would discard parser state.
     let incoming = try {
       match self.config.transport {
-        Tcp => read_session_packet(session, self.config.max_packet_size)
+        Tcp => read_session_packet(
+          session,
+          self.config.protocol,
+          self.config.max_packet_size,
+        )
         WebSocket(_) =>
           if session.alive {
             // WebSocket frame parsing performs multi-byte reads. Do not wrap it
             // in the TCP path's recurring 100 ms cancellation slices: a timeout
             // after a partial frame header would discard parser state. Session
             // abort closes the underlying stream and wakes this blocking read.
-            Some(read_packet(session.reader, self.config.max_packet_size))
+            Some(read_wire_packet(
+              session.reader,
+              self.config.protocol,
+              self.config.max_packet_size,
+            ))
           } else {
             None
           }
@@ -550,10 +654,10 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
     if incoming is None {
       return
     }
-    let packet : @codec.Packet = incoming.unwrap()
+    let packet : IncomingPacket = incoming.unwrap()
     let handled : Result[Unit, Error] = try {
-      match packet {
-      @codec.PublishPacket(packet) => {
+      match normalize_packet(packet) {
+      RuntimePublish(packet, properties) => {
         let qos = match packet.qos {
           @codec.QoS0 => AtMostOnce
           @codec.QoS1 => AtLeastOnce
@@ -569,6 +673,7 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
           retain: packet.retain,
           dup: packet.dup,
           generation: session.generation,
+          properties,
         }
         if self.ready {
           self.emit(MessageReceived(message))
@@ -584,9 +689,9 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
           session.early_messages.push(message)
         }
         if packet.message_id is Some(id) && qos == AtLeastOnce {
-          session.control(
+          session.control_wire(
             @codec.PubackPacket({ message_id: id, }),
-            self.config.max_packet_size,
+            self.config,
           ) catch {
             error => {
               session.abort_with(error)
@@ -595,8 +700,8 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
           }
         }
       }
-      @codec.PubackPacket(ack) => {
-        match session.deliveries.get(ack.message_id) {
+      RuntimePuback(message_id, reason) => {
+        match session.deliveries.get(message_id) {
           Some(delivery) => {
             if delivery.generation != Some(session.generation) ||
               !(delivery.phase is AwaitingAck) {
@@ -615,13 +720,17 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                     if session.alive &&
                       delivery.generation == Some(session.generation) &&
                       delivery.phase is AwaitingAck &&
-                      session.deliveries.contains(ack.message_id) {
+                      session.deliveries.contains(message_id) {
                       meta.runtime.outbox.acknowledge(delivery.delivery_id)
-                      session.deliveries.remove(ack.message_id)
+                      session.deliveries.remove(message_id)
                       if session.delivery_slots > 0 {
                         session.delivery_slots -= 1
                       }
-                      self.deliveries.acknowledge(delivery)
+                      if reason.code < 128 {
+                        self.deliveries.acknowledge(delivery)
+                      } else {
+                        self.deliveries.reject(delivery, reason)
+                      }
                       session.delivery_changed.broadcast()
                     }
                   })
@@ -630,20 +739,28 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                   error => raise client_error_of(error)
                 }
               None => {
-                session.deliveries.remove(ack.message_id)
+                session.deliveries.remove(message_id)
                 if session.delivery_slots > 0 {
                   session.delivery_slots -= 1
                 }
-                self.deliveries.acknowledge(delivery)
+                if reason.code < 128 {
+                  self.deliveries.acknowledge(delivery)
+                } else {
+                  self.deliveries.reject(delivery, reason)
+                }
                 session.delivery_changed.broadcast()
               }
             }
           }
           None =>
-            match session.pending.get(ack.message_id) {
+            match session.pending.get(message_id) {
               Some(request) if request.kind is Publish1 && request.started => {
-                session.pending.remove(ack.message_id)
-                request.finish(Ok(Done))
+                session.pending.remove(message_id)
+                if reason.code < 128 {
+                  request.finish(Ok(Published(Accepted(reason))))
+                } else {
+                  request.finish(Err(BrokerRejected(reason)))
+                }
               }
               _ => {
                 session.abort_with(ProtocolError("unexpected PUBACK identifier"))
@@ -652,24 +769,25 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
             }
         }
       }
-      @codec.SubackPacket(ack) =>
-        match session.pending.get(ack.message_id) {
+      RuntimeSuback(message_id, return_codes, diagnostic) =>
+        match session.pending.get(message_id) {
           Some(request) =>
             match request.kind {
               Subscribe(topics) if request.started &&
-                topics.length() == ack.return_codes.length() => {
-                let results : Array[SubscriptionResult] = []
+                topics.length() == return_codes.length() => {
+                let results : Array[SubscriptionAcknowledgement] = []
                 for i in 0..<topics.length() {
-                  let result = match ack.return_codes[i] {
-                    @codec.SuccessQoS0 => Granted(AtMostOnce)
-                    @codec.SuccessQoS1 => Granted(AtLeastOnce)
-                    @codec.Failure => Rejected
-                    @codec.SuccessQoS2 => {
+                  let result = match return_codes[i] {
+                    0 => Granted(AtMostOnce)
+                    1 => Granted(AtLeastOnce)
+                    code if code >= 128 => Rejected
+                    2 => {
                       session.abort_with(
                         ProtocolError("SUBACK granted unsupported QoS"),
                       )
                       return
                     }
+                    _ => { session.abort_with(ProtocolError("invalid SUBACK reason")); return }
                   }
                   match result {
                     Granted(qos) =>
@@ -681,16 +799,16 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
                       }
                     Rejected => ()
                   }
-                  results.push(result)
+                  results.push({ result, reason: { code: return_codes[i], reason_string: diagnostic.reason_string, }, })
                 }
                 // Commit desired subscriptions only after the whole ACK validates.
                 for i in 0..<topics.length() {
-                  if results[i] is Granted(_) {
+                  if results[i].result is Granted(_) {
                     self.subscriptions[topics[i].topic] = topics[i].qos
                   }
                 }
-                session.pending.remove(ack.message_id)
-                request.finish(Ok(Subscriptions(results)))
+                session.pending.remove(message_id)
+                request.finish(Ok(SubscriptionsDetailed(results)))
               }
               _ => {
                 session.abort_with(
@@ -704,16 +822,32 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
             return
           }
         }
-      @codec.UnsubackPacket(ack) =>
-        match session.pending.get(ack.message_id) {
+      RuntimeUnsuback(message_id, reasons, diagnostic) =>
+        match session.pending.get(message_id) {
           Some(request) =>
             match request.kind {
               Unsubscribe(topics) if request.started => {
+                if self.config.protocol is Mqtt5 && topics.length() != reasons.length() {
+                  session.abort_with(ProtocolError("UNSUBACK reason count mismatch"))
+                  return
+                }
+                let values = if self.config.protocol is Mqtt311 {
+                  topics.map(_ => { code: 0, reason_string: None, })
+                } else {
+                  reasons.map(code => { code, reason_string: diagnostic.reason_string, })
+                }
+                for value in values {
+                  if value.code >= 128 {
+                    session.pending.remove(message_id)
+                    request.finish(Err(BrokerRejected(value)))
+                    return
+                  }
+                }
                 for topic in topics {
                   self.subscriptions.remove(topic)
                 }
-                session.pending.remove(ack.message_id)
-                request.finish(Ok(Done))
+                session.pending.remove(message_id)
+                request.finish(Ok(Unsubscriptions(values)))
               }
               _ => {
                 session.abort_with(
@@ -729,8 +863,12 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
             return
           }
         }
-      @codec.PingrespPacket => session.ping_sent = None
-      _ => {
+      RuntimePingresp => session.ping_sent = None
+      RuntimeDisconnect(reason) => {
+        session.abort_with(ServerDisconnected(reason))
+        return
+      }
+      RuntimeUnexpected => {
         session.abort_with(ProtocolError("unexpected server packet"))
         return
       }
@@ -790,8 +928,9 @@ async fn read_session_chunk(session : Session, max_len : Int) -> Bytes? {
 /// stays in this coroutine until the frame is complete or the session is aborted.
 async fn read_session_packet(
   session : Session,
+  protocol : ProtocolVersion,
   limit : Int,
-) -> @codec.Packet? {
+) -> IncomingPacket? {
   let first = match read_session_byte(session) {
     Some(byte) => byte
     None => return None
@@ -832,8 +971,5 @@ async fn read_session_packet(
       None => return None
     }
   }
-  match @codec.decode_packet(data) {
-    Ok(packet) => Some(packet)
-    Err(reason) => raise ProtocolError(reason)
-  }
+  Some(decode_wire(protocol, Bytes::from_array(data), limit))
 }

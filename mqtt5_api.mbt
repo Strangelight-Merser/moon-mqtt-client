@@ -27,6 +27,21 @@ pub fn PublishProperties::new(
 }
 
 ///|
+fn PublishProperties::owned(self : PublishProperties) -> PublishProperties {
+  {
+    message_expiry_secs: self.message_expiry_secs,
+    response_topic: self.response_topic,
+    correlation_data: self.correlation_data.map(value => value[:].to_owned()),
+    user_properties: self.user_properties.map(pair => (pair.0, pair.1)),
+  }
+}
+
+///|
+fn PublishProperties::empty() -> PublishProperties {
+  PublishProperties::new()
+}
+
+///|
 /// Numeric protocol reason plus optional broker diagnostic. Broker text is
 /// untrusted diagnostic data and never changes endpoint or credentials.
 pub(all) struct BrokerReason {
@@ -40,6 +55,12 @@ pub(all) struct BrokerReason {
 pub(all) enum PublishReceipt {
   Written
   Accepted(BrokerReason)
+} derive(Eq, @debug.Debug)
+
+///|
+pub(all) struct SubscriptionAcknowledgement {
+  result : SubscriptionResult
+  reason : BrokerReason
 } derive(Eq, @debug.Debug)
 
 ///|

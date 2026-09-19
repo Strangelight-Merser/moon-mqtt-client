@@ -13,6 +13,7 @@ pub(all) enum DeliveryPhase {
   AwaitingAck
   AwaitingReconnect(String)
   Acknowledged
+  Rejected(BrokerReason)
   TerminalNotSent(String)
   TerminalOutcomeUnknown(String)
 } derive(Eq, @debug.Debug)
@@ -27,6 +28,7 @@ pub(all) struct DeliveryStatus {
   /// Typed initiating cause for terminal failure; absent while active and
   /// after successful acknowledgement.
   terminal_cause : ClientError?
+  broker_reason : BrokerReason?
   packet_id : Int
   attempts : Int
   generation : Int?
@@ -130,7 +132,7 @@ fn DeliveryBook::new() -> DeliveryBook {
 
 ///|
 fn DeliveryPhase::terminal(self : DeliveryPhase) -> Bool {
-  self is (Acknowledged | TerminalNotSent(_) | TerminalOutcomeUnknown(_))
+  self is (Acknowledged | Rejected(_) | TerminalNotSent(_) | TerminalOutcomeUnknown(_))
 }
 
 ///|
@@ -139,6 +141,7 @@ fn DeliveryRecord::status(self : DeliveryRecord) -> DeliveryStatus {
     delivery_id: self.delivery_id,
     phase: self.phase,
     terminal_cause: self.terminal_cause,
+    broker_reason: match self.phase { Rejected(reason) => Some(reason); _ => None },
     packet_id: self.packet_id,
     attempts: self.attempts,
     generation: self.generation,
@@ -254,6 +257,23 @@ fn DeliveryRecord::finish_acknowledged(self : DeliveryRecord) -> Unit {
   }
 }
 
+///| Publish a broker rejection only after any durable DELETE has committed.
+fn DeliveryRecord::finish_rejected(
+  self : DeliveryRecord,
+  reason : BrokerReason,
+) -> Unit {
+  if !self.phase.terminal() {
+    self.start_deadline = None
+    self.ack_deadline = None
+    self.generation = None
+    self.phase = Rejected(reason)
+    self.terminal_cause = Some(BrokerRejected(reason))
+    self.topic = None
+    self.payload = None
+    self.changed.broadcast()
+  }
+}
+
 ///|
 fn DeliveryRecord::finish_terminal(
   self : DeliveryRecord,
@@ -297,6 +317,16 @@ fn DeliveryBook::acknowledge(
   record : DeliveryRecord,
 ) -> Unit {
   record.finish_acknowledged()
+  self.remove_record(record)
+}
+
+///|
+fn DeliveryBook::reject(
+  self : DeliveryBook,
+  record : DeliveryRecord,
+  reason : BrokerReason,
+) -> Unit {
+  record.finish_rejected(reason)
   self.remove_record(record)
 }
 

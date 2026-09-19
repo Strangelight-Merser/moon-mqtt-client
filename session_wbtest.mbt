@@ -38,6 +38,7 @@ fn test_pending(id : Int, kind : RequestKind) -> Pending {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
 }
 
@@ -165,6 +166,7 @@ test "abort classifies unsent and started pending requests" {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   let started : Pending = {
     id: 2,
@@ -173,6 +175,7 @@ test "abort classifies unsent and started pending requests" {
     started: true,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   session.pending[unsent.id] = unsent
   session.pending[started.id] = started
@@ -201,6 +204,7 @@ test "packet id allocation wraps and skips occupied identifiers" {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   session.pending[65535] = occupied
 
@@ -219,6 +223,7 @@ test "packet id allocation enforces inflight limit" {
     started: false,
     result: None,
     queued_at: 0L,
+    refresh: None,
   }
   session.pending[3] = pending
 

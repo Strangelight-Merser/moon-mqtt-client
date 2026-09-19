@@ -79,6 +79,7 @@ fn cause_test_pending() -> Pending {
     started: false,
     result: None,
     queued_at: @async.now(),
+    refresh: None,
   }
 }
 
@@ -163,6 +164,7 @@ fn cause_test_client(config : Config) -> Client {
     last_disconnect: None,
     backoff: ReconnectBackoff::new(1),
     stop_reason: None,
+    negotiated: None,
   }
 }
 
@@ -209,6 +211,7 @@ async test "malformed frame gives started QoS1 the actual unknown reason" {
     started: true,
     result: None,
     queued_at: @async.now(),
+    refresh: None,
   }
   session.pending[request.id] = request
 

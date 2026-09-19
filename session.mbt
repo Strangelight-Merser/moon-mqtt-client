@@ -10,7 +10,9 @@ priv enum RequestKind {
 ///|
 priv enum Reply {
   Done
-  Subscriptions(Array[SubscriptionResult])
+  Published(PublishReceipt)
+  SubscriptionsDetailed(Array[SubscriptionAcknowledgement])
+  Unsubscriptions(Array[BrokerReason])
 }
 
 ///|
@@ -23,6 +25,7 @@ priv struct Pending {
   /// Monotonic time the request was accepted, used as the start of the
   /// `operation_timeout_ms` budget (queue time counts).
   queued_at : Int64
+  refresh : (() -> Bytes raise ClientError)?
 }
 
 ///|
@@ -97,6 +100,8 @@ fn session_error_reason(error : Error) -> String {
     NotSent(reason) => reason
     OutcomeUnknown(reason) => reason
     ConnectionRefused(reason) => reason
+    BrokerRejected(reason) => "broker rejected request with reason code \{reason.code}"
+    ServerDisconnected(reason) => "server disconnected with reason code \{reason.code}"
     ReconnectExhausted(reason) => reason
     DeliveryRejected(reason) => reason
     BrokerSessionLost(reason) => reason
@@ -195,6 +200,30 @@ fn Session::control(
   if accepted {
     self.control_depth += 1
   } else {
+    raise ProtocolError(
+      "control queue exhausted; terminating instead of dropping a control packet",
+    )
+  }
+}
+
+///|
+/// Protocol-aware control encoding. MQTT 5 control packets always pass through
+/// the MQTT 5 encoder; the legacy helper remains for MQTT 3.1.1 tests.
+fn Session::control_wire(
+  self : Session,
+  packet : @codec.Packet,
+  config : Config,
+  is_ping? : Bool = false,
+) -> Unit raise ClientError {
+  if !self.alive { raise NotConnected }
+  let encoded = encode_wire(config.protocol, packet, [], config.max_packet_size)
+  let accepted = self.control_queue.try_put({
+    bytes: encoded,
+    pending: None,
+    delivery: None,
+    is_ping,
+  }) catch { _ => false }
+  if accepted { self.control_depth += 1 } else {
     raise ProtocolError(
       "control queue exhausted; terminating instead of dropping a control packet",
     )
@@ -444,7 +473,14 @@ async fn Session::write_one(
     mark_started(request)
   }
   try {
-    @async.with_timeout(write_timeout_ms, () => self.writer.write(item.bytes))
+    let bytes = match item.pending {
+      Some(request) => match request.refresh {
+        Some(refresh) => refresh()
+        None => item.bytes
+      }
+      None => item.bytes
+    }
+    @async.with_timeout(write_timeout_ms, () => self.writer.write(bytes))
   } catch {
     error => {
       if @async.is_cancellation_error(error) {
@@ -481,7 +517,7 @@ async fn Session::write_one(
       match request.kind {
         Publish0 | Disconnect => {
           self.pending.remove(request.id)
-          request.finish(Ok(Done))
+          request.finish(Ok(if request.kind is Publish0 { Published(Written) } else { Done }))
           // No MQTT control packet may follow DISCONNECT, including a queued
           // heartbeat or PUBACK while graceful framing shutdown is pending.
           if request.kind is Disconnect {
@@ -665,7 +701,7 @@ async fn Session::heartbeat(self : Session, config : Config) -> Unit {
         if now - self.last_write >= (interval / 2).to_int64() {
           // `ping_sent` is only set after the PINGREQ has left the write loop,
           // so a queued ping can never be mistaken for a lost PINGRESP.
-          self.control(@codec.PingreqPacket, config.max_packet_size, is_ping=true)
+          self.control_wire(@codec.PingreqPacket, config, is_ping=true)
         }
     }
   }

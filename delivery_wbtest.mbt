@@ -91,6 +91,7 @@ fn delivery_test_client(config : Config) -> Client {
     last_disconnect: None,
     backoff: ReconnectBackoff::new(1),
     stop_reason: None,
+    negotiated: None,
   }
   let session = delivery_test_session(reserved=deliveries.reserved)
   client.session = Some(session)

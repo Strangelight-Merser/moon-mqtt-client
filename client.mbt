@@ -22,6 +22,7 @@ struct Client {
   /// Set when the supervisor ends because a connect-phase or terminal error
   /// should reach waiters. Normal shutdown leaves this empty so they see Closed.
   mut stop_reason : ClientError?
+  mut negotiated : NegotiatedSettings?
 }
 
 ///|
@@ -151,6 +152,7 @@ fn new_client(
     last_disconnect: None,
     backoff: ReconnectBackoff::new_default(),
     stop_reason: None,
+    negotiated: None,
   }
 }
 
@@ -158,7 +160,7 @@ fn new_client(
 /// Own all client tasks within the callback's lifetime.
 pub async fn[T] with_client(config : Config, action : async (Client) -> T) -> T {
   config.validate()
-  ignore(encode(config.connect_packet(), config.max_packet_size))
+  ignore(config.connect_bytes())
   let client = new_client(config, DeliveryBook::new(), None)
   @async.with_task_group(group => {
     let worker = group.spawn(() => client.supervise())
@@ -237,7 +239,7 @@ pub async fn[T] with_durable_client(
       "durable max_records must not exceed client max_inflight",
     )
   }
-  ignore(encode(config.connect_packet(), config.max_packet_size))
+  ignore(config.connect_bytes())
   let outbox = SqliteOutbox::open(options, durable_identity(config))
   errdefer (try outbox.close() catch { _ => () })
   ignore(outbox.expire(durable_now_ms()))
@@ -355,6 +357,17 @@ pub fn Client::stats(self : Client) -> ClientStats {
   }
 }
 
+///| Effective limits for the currently ready physical generation.
+pub fn Client::negotiated_settings(
+  self : Client,
+) -> NegotiatedSettings raise ClientError {
+  if !self.ready { raise NotConnected }
+  match self.negotiated {
+    Some(value) => value
+    None => raise NotConnected
+  }
+}
+
 ///|
 fn client_error_of(error : Error) -> ClientError {
   try {
@@ -368,6 +381,8 @@ fn client_error_of(error : Error) -> ClientError {
     NotSent(msg) => NotSent(msg)
     OutcomeUnknown(msg) => OutcomeUnknown(msg)
     ConnectionRefused(msg) => ConnectionRefused(msg)
+    BrokerRejected(reason) => BrokerRejected(reason)
+    ServerDisconnected(reason) => ServerDisconnected(reason)
     ReconnectExhausted(msg) => ReconnectExhausted(msg)
     DeliveryRejected(msg) => DeliveryRejected(msg)
     BrokerSessionLost(msg) => BrokerSessionLost(msg)
@@ -482,6 +497,10 @@ async fn Session::request(
   kind : RequestKind,
   packet : (Int) -> @codec.Packet,
   abort_session : (String) -> Unit,
+  properties? : Array[@mqtt5.Property] = [],
+  refresh? : ((Int) -> Bytes raise ClientError)? = None,
+  packet_limit? : Int? = None,
+  inflight_limit? : Int? = None,
   on_unknown? : () -> Unit = () => (),
 ) -> Reply {
   if !self.alive {
@@ -492,9 +511,10 @@ async fn Session::request(
   let id = if kind is Disconnect {
     0
   } else {
-    self.allocate(config.max_inflight)
+    self.allocate(inflight_limit.unwrap_or(config.max_inflight))
   }
-  let bytes = encode(packet(id), config.max_packet_size)
+  let wire_limit = packet_limit.unwrap_or(config.max_packet_size)
+  let bytes = encode_wire(config.protocol, packet(id), properties, wire_limit)
   let request : Pending = {
     id,
     kind,
@@ -502,6 +522,7 @@ async fn Session::request(
     started: false,
     result: None,
     queued_at: @async.now(),
+    refresh: refresh.map(builder => () => builder(id)),
   }
   self.pending[id] = request
   // Cancelling an in-flight request is conservative by design: the connection is
@@ -609,42 +630,79 @@ pub async fn Client::publish(
   payload : Bytes,
   qos? : QoS = AtMostOnce,
   retain? : Bool = false,
+  properties? : PublishProperties = PublishProperties::new(),
 ) -> Unit {
+  ignore(self.publish_detailed(topic, payload, qos~, retain~, properties~))
+}
+
+///| Publish and retain the MQTT 5 broker acknowledgement reason.
+pub async fn Client::publish_detailed(
+  self : Client,
+  topic : String,
+  payload : Bytes,
+  qos? : QoS = AtMostOnce,
+  retain? : Bool = false,
+  properties? : PublishProperties = PublishProperties::new(),
+) -> PublishReceipt {
   if self.config.session_policy is ResumeSession && qos == AtLeastOnce {
     raise DeliveryRejected(
       "QoS 1 publish under ResumeSession requires submit_delivery",
     )
   }
   let session = self.active()
+  let negotiated = self.negotiated_settings()
+  if qos == AtLeastOnce && negotiated.maximum_qos == AtMostOnce {
+    raise BrokerRejected({ code: 155, reason_string: Some("server Maximum QoS is 0"), })
+  }
+  if retain && !negotiated.retain_available {
+    raise BrokerRejected({ code: 154, reason_string: Some("server Retain Available is 0"), })
+  }
   if payload.length() > self.config.max_packet_size - 4 {
     raise ProtocolError("outgoing payload exceeds packet limit")
   }
-  ignore(
-    session.request(
+  let owned = properties.owned()
+  let expiry_at = owned.message_expiry_secs.map(seconds =>
+    durable_now_ms() + seconds * 1000L
+  )
+  let make_packet = id => @codec.PublishPacket({
+    topic,
+    payload,
+    qos: qos.wire(),
+    message_id: if qos == AtMostOnce { None } else { Some(id) },
+    retain,
+    dup: false,
+  })
+  let wire_properties = publish_properties_wire(
+    owned,
+    expiry_at,
+    durable_now_ms(),
+  )
+  let reply = session.request(
       self.config,
       if qos == AtMostOnce {
         Publish0
       } else {
         Publish1
       },
-      id => {
-        @codec.PublishPacket({
-          topic,
-          payload,
-          qos: qos.wire(),
-          message_id: if qos == AtMostOnce {
-            None
-          } else {
-            Some(id)
-          },
-          retain,
-          dup: false,
-        })
-      },
+      make_packet,
       reason => self.abort_session(reason),
+      properties=wire_properties,
+      refresh=Some(fn(id) -> Bytes raise ClientError {
+        encode_wire(
+          self.config.protocol,
+          make_packet(id),
+          publish_properties_wire(owned, expiry_at, durable_now_ms()),
+          negotiated.max_packet_size,
+        )
+      }),
+      packet_limit=Some(negotiated.max_packet_size),
+      inflight_limit=Some(negotiated.receive_maximum),
       on_unknown=() => self.note_unknown(),
-    ),
-  )
+    )
+  match reply {
+    Published(receipt) => receipt
+    _ => raise ProtocolError("wrong publish completion")
+  }
 }
 
 ///|
@@ -935,6 +993,14 @@ pub async fn Client::subscribe(
   self : Client,
   topics : Array[Subscription],
 ) -> Array[SubscriptionResult] {
+  self.subscribe_detailed(topics).map(value => value.result)
+}
+
+///| Subscribe while preserving every numeric MQTT acknowledgement reason.
+pub async fn Client::subscribe_detailed(
+  self : Client,
+  topics : Array[Subscription],
+) -> Array[SubscriptionAcknowledgement] {
   self.subscribe_on(self.active(), topics.copy())
 }
 
@@ -943,7 +1009,7 @@ async fn Client::subscribe_on(
   self : Client,
   session : Session,
   topics : Array[Subscription],
-) -> Array[SubscriptionResult] {
+) -> Array[SubscriptionAcknowledgement] {
   match
     session.request(self.config, Subscribe(topics), id => {
       @codec.SubscribePacket({
@@ -951,20 +1017,29 @@ async fn Client::subscribe_on(
         topics: topics.map(t => { topic: t.topic, qos: t.qos.wire(), }),
       })
     }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()) {
-    Subscriptions(results) => results
+    SubscriptionsDetailed(results) => results
     _ => raise ProtocolError("wrong subscribe completion")
   }
 }
 
 ///|
 pub async fn Client::unsubscribe(self : Client, topics : Array[String]) -> Unit {
+  ignore(self.unsubscribe_detailed(topics))
+}
+
+///| Unsubscribe while preserving numeric MQTT 5 reason codes.
+pub async fn Client::unsubscribe_detailed(
+  self : Client,
+  topics : Array[String],
+) -> Array[BrokerReason] {
   let session = self.active()
   let topics = topics.copy()
-  ignore(
-    session.request(self.config, Unsubscribe(topics), id => {
+  match session.request(self.config, Unsubscribe(topics), id => {
       @codec.UnsubscribePacket({ message_id: id, topics, })
-    }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()),
-  )
+    }, reason => self.abort_session(reason), on_unknown=() => self.note_unknown()) {
+    Unsubscriptions(reasons) => reasons
+    _ => raise ProtocolError("wrong unsubscribe completion")
+  }
 }
 
 ///|
