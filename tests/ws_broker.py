@@ -65,6 +65,7 @@ def _probe(
     tls: bool = False,
     client_cert: bool = False,
     timeout: float = 8.0,
+    route: bool = False,
 ) -> tuple[bool, str]:
     deadline = time.monotonic() + timeout
     last_reason = "timeout waiting for CONNACK"
@@ -72,6 +73,9 @@ def _probe(
         connected = threading.Event()
         reason_text: list[str] = []
         reason_failed = [False]
+        routed = threading.Event()
+        probe_topic = "it/ws-ready/" + uuid.uuid4().hex
+        probe_payload = uuid.uuid4().hex.encode()
         client = paho.Client(
             paho.CallbackAPIVersion.VERSION2,
             client_id=f"ws-probe-{uuid.uuid4().hex[:12]}",
@@ -92,14 +96,28 @@ def _probe(
             reason_text.append(str(reason))
             reason_failed[0] = bool(getattr(reason, "is_failure", False))
             connected.set()
+            if route and not reason_failed[0]:
+                _client.subscribe(probe_topic, qos=1)
+
+        def on_subscribe(c, _u, _mid, reasons, _props):
+            if len(reasons) == 1 and not reasons[0].is_failure:
+                c.publish(probe_topic, probe_payload, qos=1)
+
+        def on_message(_c, _u, message):
+            if message.topic == probe_topic and message.payload == probe_payload:
+                routed.set()
 
         client.on_connect = on_connect
+        client.on_subscribe = on_subscribe
+        client.on_message = on_message
         try:
             client.connect(host, port, keepalive=10)
             client.loop_start()
             if connected.wait(min(2.0, max(0.1, deadline - time.monotonic()))):
                 if not reason_failed[0]:
-                    return True, reason_text[-1]
+                    if not route or routed.wait(max(0.0, deadline - time.monotonic())):
+                        return True, reason_text[-1]
+                    return False, "CONNACK succeeded but subscription/publish route was not ready"
                 return False, reason_text[-1] if reason_text else "failed CONNACK"
             last_reason = "timeout waiting for CONNACK"
         except Exception as exc:  # expected for WSS without a client identity
@@ -188,6 +206,23 @@ class WsBroker:
             )
         print(f"retained Docker log: {log_path}")
 
+    def wait_boot_complete(self) -> None:
+        # Listeners can accept MQTT before later applications finish booting.
+        # A successful early CONNACK is not evidence of a running broker.
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            result = subprocess.run(["docker", "logs", self.name],
+                                    text=True, capture_output=True)
+            if result.returncode == 0 and "EMQX 5.8.8 is running now!" in result.stdout + result.stderr:
+                return
+            state = subprocess.run(["docker", "inspect", "--format",
+                                    "{{.State.Running}}", self.name],
+                                   text=True, capture_output=True)
+            if state.returncode != 0 or state.stdout.strip() != "true":
+                raise RuntimeError("EMQX stopped before completing startup")
+            time.sleep(0.25)
+        raise TimeoutError("EMQX did not complete startup")
+
     def start(self) -> None:
         image = IMAGE_BY_ARCH.get(platform.machine())
         if image is None:
@@ -210,14 +245,15 @@ class WsBroker:
             _wait_port(self.ws_port)
             _wait_port(self.wss_port)
             _wait_port(self.tcp_port)
+            self.wait_boot_complete()
             ws_ok, ws_reason = _probe(
-                fixture=self, host="127.0.0.1", port=self.ws_port
+                fixture=self, host="127.0.0.1", port=self.ws_port, route=True
             )
             if not ws_ok:
                 raise RuntimeError(f"EMQX WS readiness failed: {ws_reason}")
             wss_ok, wss_reason = _probe(
                 fixture=self, host="localhost", port=self.wss_port,
-                tls=True, client_cert=True,
+                tls=True, client_cert=True, route=True,
             )
             if not wss_ok:
                 raise RuntimeError(f"EMQX WSS readiness failed: {wss_reason}")

@@ -63,6 +63,11 @@ class WsInterop(unittest.TestCase):
             result = subprocess.run(self.command('publish', secure=secure, topic=topic,
                                     payload=payload, qos=qos), cwd=ROOT,
                                     text=True, capture_output=True, timeout=15)
+            if result.returncode != 0:
+                self.broker._retain_failure_log()
+                logs = subprocess.run(["docker", "logs", self.broker.name],
+                                      text=True, capture_output=True)
+                print(logs.stdout + logs.stderr, flush=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn('"outcome":"sent"', result.stdout)
             self.assertEqual(received.get(timeout=5), (topic, payload.encode(), qos))
