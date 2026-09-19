@@ -1,0 +1,9 @@
+import {
+  "Strangelight-Merser/moon-mqtt-client" @mqtt,
+  "Strangelight-Merser/moon-mqtt-client/examples/ha_relay" @relay,
+  "Strangelight-Merser/moon-mqtt-client/examples/mqtt_demo" @demo,
+  "moonbitlang/async",
+  "moonbitlang/core/encoding/utf8",
+}
+supported_targets = "+native"
+pkgtype(kind: "executable")

@@ -1,0 +1,52 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Strangelight-Merser/moon-mqtt-client/examples/ha_relay"
+
+import {
+  "Strangelight-Merser/moon-mqtt-client",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn decode_command(Bytes, Int64) -> Command?
+
+pub fn decode_feedback(Bytes) -> Feedback?
+
+pub fn discovery(String, String) -> String
+
+pub fn field(Map[String, Json], String) -> String?
+
+pub fn fresh_id() -> String raise @moon-mqtt-client.ClientError
+
+pub fn now_ms() -> Int64
+
+pub fn object(Bytes) -> Map[String, Json]?
+
+pub fn prefix() -> String raise @moon-mqtt-client.ClientError
+
+pub fn query(String) -> String
+
+pub fn state_text(Bool) -> String
+
+pub fn text(String) -> String
+
+// Errors
+
+// Types and methods
+pub(all) struct Command {
+  id : String
+  target : Bool
+  expires_at_ms : Int64
+} derive(Eq, @debug.Debug)
+pub fn Command::encode(Self) -> String
+
+pub(all) struct Feedback {
+  boot_id : String
+  sequence : Int
+  state : Bool
+  correlation_id : String
+} derive(Eq, @debug.Debug)
+pub fn Feedback::encode(Self) -> String
+
+// Type aliases
+
+// Traits
