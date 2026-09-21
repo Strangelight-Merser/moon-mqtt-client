@@ -50,6 +50,15 @@ pub(all) struct BrokerReason {
 } derive(Eq, @debug.Debug)
 
 ///|
+/// Policy for a post-CONNACK MQTT 5 server DISCONNECT. The default stops the
+/// client. The opt-in policy retries only reason 0x89 (Server busy) or 0x8B
+/// (Server shutting down), using the configured finite reconnect budget.
+pub(all) enum ServerDisconnectPolicy {
+  StopOnServerDisconnect
+  RetryServerBusyOrShutdown
+} derive(Eq, @debug.Debug)
+
+///|
 /// QoS 0 completes locally; QoS 1 records a valid successful broker PUBACK.
 /// Neither result confirms application or physical device execution.
 pub(all) enum PublishReceipt {

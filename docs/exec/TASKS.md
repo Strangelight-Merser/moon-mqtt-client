@@ -1,11 +1,19 @@
 # Tasks
 
+## RESUMED — 2026-09-21
+
+User requested continuation. B1 approved CLI design implementation is active (Sol); B2 evidence reconciliation is active read-only (Luna); B3 follows B1. The historical pause below is superseded. Schema 2 stays unchanged.
+
+## PAUSED BY USER — 2026-09-19
+
+All B1–B3 tasks below are paused by the latest explicit user request. R8 publication is complete. Drafts and evidence are preserved; no automatic continuation or hardware follow-up is scheduled.
+
 ## Authorized continuation (2026-09-19)
 
 - R8 DONE: v0.7.1 merged/tagged at fa89f2f, Mooncakes published, Linux/macOS CI passed, extracted package 26/26, registry TCP/mTLS + roadmap26 + HA faults4 passed. All three GitHub assets anonymously downloaded and byte-verified. STATE records exact hashes and evidence. Historical A-stage stop notes below are superseded by the explicit release/B-stage authorization.
-- B1 IN DESIGN REVIEW: Sol drafted the durable recovery ADR; independent review informs root decision; schema2 unchanged; then explicit inspect/export and controlled resolution, crash recovery and independent review. Separate branch, no v0.7.1 scope expansion.
-- B2 BLOCKED ON DEVICE: user says hardware arrives tomorrow. Prepare independent consumer and evidence checklist only; actual HA/board/GPIO/firmware/serial inputs remain unknown. No HIL claim or automatic wakeup.
-- B3 PLANNED: root defines explicit reconnect reasons; Sol implements after B1, preserving takeover/auth/protocol terminal handling and no automatic redirects.
+- B1 LOCAL ACCEPTED / CI PENDING: CLI 4ef864bb and five-file freeze passed independent Sol review; nine acceptance tests cover exact archival, seven crash windows, raw MQTT3/5 clean handshakes, rejection cases, native old-store refusal/new-store open, and new v311 durable publish/PUBACK with no old payload. No original schema2/core/test changes. Integrated full-library checks passed; hosted CI still pending.
+- B2 HOST HANDOFF ACTIVE / LIVE GATE PENDING: device arrived and a separate task recorded hotspot logical18 and HA API9 historical passes. Final awake image, full browser ON/OFF, physical GPIO and registry-consumer-to-device path are not accepted. Lab stopped; no automatic restart/network change. Luna prepares the fixed published-package consumer and evidence matrix. See current STATE for exact evidence and limits.
+- B3 LOCAL ACCEPTED / CI PENDING: Sol implemented after B1 and independent review closed the dial-origin P1; 10/10 raw and 102/102 root-package native pass. Add an explicit opt-in policy; the default remains terminal for every server DISCONNECT. Opt-in permits only MQTT 5 DISCONNECT 0x89 (busy) and 0x8B (shutdown), never CONNACK rejection, takeover 0x8E, auth/protocol errors or redirects. Give these disconnect-triggered retries a separate finite lifetime budget and jitter/backoff using existing configured limits; successful CONNACK must not reset that budget (prevent busy-connect-busy loops). Existing network reconnect policy remains intact. On budget exhaustion preserve typed reason/observable unknown deliveries; Session Present/expiry checks and durable possible-write semantics remain intact. Add native/raw-peer default, positive, repeated-exhaustion, negative reasons and session-loss regressions. Root approves this bounded behavior; independent review and integrated checks still required.
 
 ## Active A0–A4 (v0.7.1 local candidate)
 

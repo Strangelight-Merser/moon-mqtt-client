@@ -156,6 +156,9 @@ pub(all) struct Config {
   reconnect_delay_ms : Int
   max_reconnect_delay_ms : Int
   reconnect_attempts : Int
+  /// Handling for MQTT 5 server DISCONNECT after an accepted connection.
+  /// The default is terminal. Opt-in retry is limited to reason 0x89/0x8B.
+  server_disconnect_policy : ServerDisconnectPolicy
   /// Reserved slots for protocol control packets (PUBACK, PINGREQ, DISCONNECT)
   /// that business traffic may never occupy.
   control_capacity : Int
@@ -187,6 +190,7 @@ pub fn Config::new(
   reconnect_delay_ms? : Int = 250,
   max_reconnect_delay_ms? : Int = 5000,
   reconnect_attempts? : Int = 10,
+  server_disconnect_policy? : ServerDisconnectPolicy = StopOnServerDisconnect,
   control_capacity? : Int = 16,
 ) -> Config {
   {
@@ -214,6 +218,7 @@ pub fn Config::new(
     reconnect_delay_ms,
     max_reconnect_delay_ms,
     reconnect_attempts,
+    server_disconnect_policy,
     control_capacity,
   }
 }

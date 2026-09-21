@@ -114,9 +114,10 @@ pub(all) struct Config {
   reconnect_delay_ms : Int
   max_reconnect_delay_ms : Int
   reconnect_attempts : Int
+  server_disconnect_policy : ServerDisconnectPolicy
   control_capacity : Int
 }
-pub fn Config::new(String, String, protocol? : ProtocolVersion, port? : Int, session_policy? : SessionPolicy, session_expiry_secs? : Int64, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, control_capacity? : Int) -> Self
+pub fn Config::new(String, String, protocol? : ProtocolVersion, port? : Int, session_policy? : SessionPolicy, session_expiry_secs? : Int64, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, server_disconnect_policy? : ServerDisconnectPolicy, control_capacity? : Int) -> Self
 
 pub struct DeliveryHandle {
   // private fields
@@ -224,6 +225,11 @@ pub(all) enum PublishReceipt {
 pub(all) enum QoS {
   AtMostOnce
   AtLeastOnce
+} derive(Eq, @debug.Debug)
+
+pub(all) enum ServerDisconnectPolicy {
+  StopOnServerDisconnect
+  RetryServerBusyOrShutdown
 } derive(Eq, @debug.Debug)
 
 pub(all) enum SessionPolicy {
