@@ -453,9 +453,26 @@ async fn Session::heartbeat_task(
 }
 
 ///|
+fn server_retry_wait_ms(delay : Int, jitter : Int) -> Int {
+  delay + jitter.min(0x7FFFFFFF - delay)
+}
+
+///|
+fn grow_server_retry_delay(delay : Int, maximum : Int) -> Int {
+  delay + (delay / 2).min(maximum - delay)
+}
+
+///|
 async fn Client::supervise(self : Client) -> Unit {
   let mut attempts = 0
   let mut delay = self.config.reconnect_delay_ms
+  // Server-directed retries have a separate lifetime budget and nominal
+  // delay. A successful CONNACK deliberately does not reset either value.
+  // Jitter still uses the client's seedable stream so test determinism remains
+  // covered by Client::set_reconnect_seed.
+  let mut server_disconnect_attempts = 0
+  let mut server_disconnect_delay = self.config.reconnect_delay_ms
+  let mut server_disconnect_dial_pending = false
   let mut ever_ready = false
   defer {
     self.ready = false
@@ -468,6 +485,11 @@ async fn Client::supervise(self : Client) -> Unit {
     self.changed.broadcast()
   }
   while !self.stopped {
+    // This flag describes exactly this dial. Consuming it before the attempt
+    // means a successful CONNACK or a transport failure cannot leak its origin
+    // into a later ordinary-network retry.
+    let server_disconnect_dial = server_disconnect_dial_pending
+    server_disconnect_dial_pending = false
     try {
       let first_connection = !ever_ready
       let (session, session_present, negotiated) = self.dial()
@@ -638,12 +660,18 @@ async fn Client::supervise(self : Client) -> Unit {
           self.settle_deliveries(self.close_reason())
           return
         }
+        let retry_server_disconnect = match cause {
+          ServerDisconnected(broker_reason) =>
+            self.config.protocol is Mqtt5 &&
+            self.config.server_disconnect_policy is RetryServerBusyOrShutdown &&
+            (broker_reason.code == 0x89 || broker_reason.code == 0x8B)
+          _ => false
+        }
         // Backpressure, a saturated control queue and connect-phase protocol
         // errors are terminal: retrying would hide a defect from the caller.
         match cause {
           BrokerSessionLost(_)
-          | DeliveryAttemptsExhausted(_)
-          | ServerDisconnected(_) => {
+          | DeliveryAttemptsExhausted(_) => {
             // Recoverable handles must remain observable long enough for the
             // application callback to reconcile their terminal state. End the
             // worker normally after recording the typed stop reason instead of
@@ -667,6 +695,37 @@ async fn Client::supervise(self : Client) -> Unit {
             raise cause
           }
           _ => ()
+        }
+        // Once the opt-in server-disconnect path has begun, a negative CONNACK
+        // cannot continue that reason-directed retry cycle. Preserve the typed
+        // broker rejection. Outside this path, the ordinary reconnect policy
+        // retains its existing behavior.
+        if cause is BrokerRejected(_) && server_disconnect_dial {
+          let terminal = self.block_durable_deliveries(cause)
+          self.record_stop(terminal)
+          self.settle_deliveries(terminal)
+          return
+        }
+        if cause is ServerDisconnected(_) {
+          if !retry_server_disconnect ||
+            server_disconnect_attempts >= self.config.reconnect_attempts {
+            let terminal = self.block_durable_deliveries(cause)
+            self.record_stop(terminal)
+            self.settle_deliveries(terminal)
+            return
+          }
+          self.emit(Disconnected(self.generation, reason))
+          server_disconnect_attempts += 1
+          let jitter_ms = self.backoff.next() % server_disconnect_delay
+          @async.sleep(
+            server_retry_wait_ms(server_disconnect_delay, jitter_ms),
+          )
+          server_disconnect_delay = grow_server_retry_delay(
+            server_disconnect_delay,
+            self.config.max_reconnect_delay_ms,
+          )
+          server_disconnect_dial_pending = true
+          continue
         }
         if !ever_ready {
           // A scope that never connected cannot infer a protocol-side terminal

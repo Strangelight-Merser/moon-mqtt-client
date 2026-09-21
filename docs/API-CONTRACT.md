@@ -237,10 +237,28 @@ identifier space. Consequences:
   remain possible, especially across processes started in the same millisecond.
   `Client::set_reconnect_seed` pins the stream for deterministic tests. Clients
   normally avoid the lockstep retries caused by the previous fixed default seed.
+- MQTT 5 server DISCONNECT is terminal by default. Setting
+  `server_disconnect_policy=RetryServerBusyOrShutdown` opts into reconnecting
+  only for numeric reason `0x89` (Server busy) and `0x8B` (Server shutting
+  down). Broker reason text never changes this decision. These retries use a
+  separate lifetime counter and nominal backoff delay, bounded by
+  `reconnect_attempts`, `reconnect_delay_ms` and `max_reconnect_delay_ms`;
+  successful CONNACK packets do not replenish the lifetime counter. Jitter
+  still comes from the client's seedable stream, and waits at extreme configured
+  values saturate at the maximum representable millisecond interval.
+  Exhaustion preserves the final typed `ServerDisconnected(BrokerReason)`. A
+  negative CONNACK on the reason-directed dial and every other server
+  DISCONNECT reason are typed terminal failures. Later ordinary transport
+  retries retain their existing policy.
+- This opt-in does not change session safety. `ResumeSession` still requires
+  `Session Present=true` before an unresolved delivery is replayed; retained
+  replay keeps its packet identifier and sets DUP. `CleanSession` starts a new
+  broker session, so it has no recoverable delivery to replay.
 - Terminal conditions end the client instead of retrying forever:
   `Backpressure` (event queue overflow), `ProtocolError` (including a saturated
   control queue and unexpected server packets), `NotConnected` during the connect
-  phase, and `ReconnectExhausted` after the attempts budget.
+  phase, disallowed `ServerDisconnected` reasons, and `ReconnectExhausted`
+  after the ordinary transport attempts budget.
 - A protocol failure after CONNACK remains terminal, including an invalid ACK
   during subscription restoration. The session retains the original typed cause
   until the supervisor classifies it; cleanup and a pending operation's
@@ -299,8 +317,10 @@ connection. Local max_inflight bounds admitted work; queued and recovered work
 waits for credit in FIFO order. A parked queue head still occupies its bounded
 slot. The separate bounded control queue remains available for PUBACK, PINGREQ and DISCONNECT. Maximum Packet Size,
 Maximum QoS, Retain Available and Server Keep Alive constrain the current
-generation. A server DISCONNECT ends that scope with `ServerDisconnected` and
-is not retried in the same scope. A first `Session Present=true` is accepted
+generation. A server DISCONNECT ends that physical connection with
+`ServerDisconnected`. It is terminal unless the explicit reason policy above
+admits a bounded reconnect; it never changes endpoint, credentials or client
+identity. A first `Session Present=true` is accepted
 only when local known-session evidence exists; durable evidence is a committed
 metadata bit independent of whether the outbox contains rows.
 

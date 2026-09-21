@@ -182,6 +182,20 @@ admission、generation attach、首次可能写入和 PUBACK 删除都先提交 
 至少一次恢复：PUBACK 到达但 SQLite 删除尚未提交时崩溃，重启后可能重复发送，不能据此
 断言设备执行恰好一次。
 
+对于已经开始写入而被 blocked 的记录，可使用独立管理工具检查、归档，并在人工核对后
+退役整个旧会话，为**不同 client ID** 建立空 outbox：
+
+```sh
+python3 -m pip install -r tests/integration/requirements.txt
+python3 scripts/durable_recovery.py inspect --source /absolute/path/old.sqlite3
+python3 scripts/durable_recovery.py resolve --help
+```
+
+完整决策文件及 `export`、`resolve`、`status`、`resume` 步骤见
+[恢复管理契约](docs/architecture/DURABLE-RECOVERY.md)。旧记录保留，不自动重放；schema 2
+不变。当前有网络副作用的恢复操作仅支持 MQTT 3.1.1/5 明文 TCP，TLS/WS 会明确拒绝；
+离线检查和导出不连接 broker。清理前须明确拥有并批准旧、新两个 client ID 的处置权。
+
 `with_client` 在首次连接成功后调用回调；首次连接、CONNACK 或 TLS 失败会直接返回给调用方。
 连接曾经建立后发生的故障会触发有次数上限的重试。`wait_connected()` 可等待重连完成；
 断线期间调用发布、订阅或取消订阅会返回 `NotConnected`，请求不会进入离线队列。
@@ -231,6 +245,24 @@ PUBACK、PINGREQ、DISCONNECT 等协议控制报文使用预留且有上限的�
 
 `Client::set_reconnect_seed` 可在测试中固定重连抖动。已确认的订阅过滤器会一直保存在内存中，
 直至取消订阅；应用应控制订阅集合的大小。
+
+MQTT 5 broker 主动发出 DISCONNECT 时默认终止并保留数字 reason code。只在明确配置后，
+客户端才会对 Server Busy (`0x89`) 和 Server Shutting Down (`0x8B`) 做有界重连：
+
+```moonbit
+let config = @mqtt.Config::new(
+  "broker.example",
+  "stable-client-id",
+  protocol=@mqtt.Mqtt5,
+  server_disconnect_policy=@mqtt.RetryServerBusyOrShutdown,
+  reconnect_attempts=3,
+)
+```
+
+该次数是客户端生命周期内的独立预算，成功 CONNACK 不会重置；耗尽时仍返回最后一个
+`ServerDisconnected(BrokerReason)`。其他 DISCONNECT reason 和由该 reason 直接触发的拨号所收到的
+负 CONNACK 仍为终止错误；之后的普通网络重试保持原策略。恢复式投递只有在
+`ResumeSession` 重连返回 `Session Present=true` 时才会重放。
 
 `Client::stats()` 返回只读快照：连接代次与状态、业务/控制/事件队列占用、待完成请求数、
 重连和断线次数、结果未知次数及最近一次断线原因。快照不包含凭据和消息正文，也不依赖监控服务。
