@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 from acceptance import source_identity
 
@@ -23,6 +24,14 @@ def main():
         package = Path(manifest[key])
         assert hashlib.sha256(package.read_bytes()).hexdigest() == manifest["sha256"][package.name]
     evidence = Path(os.environ.get("MQTT_EVIDENCE_DIR", path.parent))
+    assets = evidence / "candidate-assets"
+    assets.mkdir(exist_ok=True)
+    for key in ("library", "operator"):
+        package = Path(manifest[key])
+        destination = assets / package.name
+        if destination.resolve() != package.resolve():
+            shutil.copyfile(package, destination)
+        assert hashlib.sha256(destination.read_bytes()).hexdigest() == manifest["sha256"][package.name]
     (evidence / "candidate.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = [
         [sys.executable, "tests/registry_roadmap.py", "--package", manifest["library"],
