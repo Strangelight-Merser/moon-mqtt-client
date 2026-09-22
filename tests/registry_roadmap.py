@@ -11,6 +11,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import hashlib
+import platform
 from pathlib import Path
 import re
 import shutil
@@ -23,6 +25,7 @@ import mqtt5_runtime
 import ws_protocol_faults
 import ws_interop
 import ha_relay
+import reason_reconnect
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -31,8 +34,15 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--package", type=Path)
     parser.add_argument("--evidence", type=Path)
+    parser.add_argument("--version", help="Published registry version; required without --package")
     args = parser.parse_args()
-    version = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "moon.mod").read_text(), re.M).group(1)
+    if not args.package and not args.version:
+        parser.error("registry verification requires explicit --version after publication")
+    module_text = (ROOT / "moon.mod").read_text()
+    if args.package:
+        with zipfile.ZipFile(args.package) as archive:
+            module_text = archive.read("moon.mod").decode()
+    version = args.version or re.search(r'^version\s*=\s*"([^"]+)"', module_text, re.M).group(1)
     moon = os.environ.get("MOON", str(ROOT / "scripts/moon.sh"))
     env = {**os.environ, "MOONBIT_ASYNC_CHECK_FD_LEAK": "1"}
     env.pop("MOON_WORK", None)
@@ -48,6 +58,7 @@ import {{
 }}
 ''')
         entries = {"mqtt5_runtime_driver": "examples/mqtt5_runtime_driver",
+                   "reason_reconnect_driver": "tests/reason_reconnect_driver",
                    "cli": "examples/mqtt_demo/cli",
                    "ha_relay/controller": "examples/ha_relay/controller",
                    "ha_relay/simulator": "examples/ha_relay/simulator"}
@@ -101,15 +112,30 @@ import {{
             @classmethod
             def setUpClass(cls):
                 cls.binary = binary_root / "ha_relay"
+        class ConsumerMaintenance(reason_reconnect.ReasonReconnect):
+            @classmethod
+            def setUpClass(cls):
+                cls.driver = binary_root / "reason_reconnect_driver/reason_reconnect_driver.exe"
+                assert cls.driver.is_file(), cls.driver
         suite = unittest.TestSuite()
-        for case in (ConsumerRuntime, ConsumerFraming, ConsumerWebSocket, ConsumerHa):
+        cases = [ConsumerRuntime, ConsumerFraming, ConsumerHa, ConsumerMaintenance]
+        excluded = []
+        if platform.system() == "Linux":
+            cases.append(ConsumerWebSocket)
+        else:
+            excluded.append("EMQX WS/WSS requires supported Linux Docker service; framing still runs")
+        for case in cases:
             suite.addTests(unittest.defaultTestLoader.loadTestsFromTestCase(case))
         print(f"consumer source: {source}; version: {version}; binary root: {binary_root}", flush=True)
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         record = {"source": source, "version": version, "tests_run": result.testsRun,
                   "failures": len(result.failures), "errors": len(result.errors),
                   "skipped": len(result.skipped), "successful": result.wasSuccessful(),
-                  "workspace_override": bool(args.package)}
+                  "workspace_override": bool(args.package), "platform_excluded": excluded,
+                  "MOON_WORK_removed": "MOON_WORK" not in env,
+                  "package_sha256": hashlib.sha256(args.package.read_bytes()).hexdigest() if args.package else None,
+                  "entry_sha256": {source + "/" + name: hashlib.sha256((ROOT / source / name).read_bytes()).hexdigest()
+                                    for source in entries.values() for name in ("main.mbt", "moon.pkg")}}
         if args.evidence:
             args.evidence.parent.mkdir(parents=True, exist_ok=True)
             args.evidence.write_text(json.dumps(record, indent=2) + "\n")

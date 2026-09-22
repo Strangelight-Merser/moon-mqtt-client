@@ -14,6 +14,7 @@ import time
 import unittest
 
 from protocol_faults import recv_packet, body_offset, publish_id
+from harness import NativeProcess
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,23 +82,11 @@ class RuntimePeers(unittest.TestCase):
                 result = subprocess.run(command, cwd=ROOT, text=True,
                                         capture_output=True, timeout=12, env=env)
             else:
-                lines = []
-                with subprocess.Popen(command, cwd=ROOT, text=True, env=env,
-                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
-                    def collect():
-                        for line in process.stdout:
-                            lines.append(line)
-                            phases.put(line.rstrip())
-                    reader = threading.Thread(target=collect, daemon=True)
-                    reader.start()
-                    try:
-                        process.wait(timeout=12)
-                    finally:
-                        if process.poll() is None:
-                            process.kill()
-                            process.wait()
-                        reader.join(5)
-                    result = subprocess.CompletedProcess(command, process.returncode, "".join(lines), "")
+                process = NativeProcess(command, cwd=ROOT, env=env, events=phases)
+                try:
+                    result = process.finish(timeout=12)
+                finally:
+                    process.close()
             thread.join(5)
             self.assertFalse(thread.is_alive(), "raw peer did not terminate")
             self.assertEqual(failures, [], (failures, result.stdout, result.stderr))

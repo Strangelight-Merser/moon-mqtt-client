@@ -3,6 +3,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      level:
+        description: Shared software acceptance level
+        type: choice
+        options: [release, integration, core]
+        default: release
   schedule:
     - cron: '17 5 * * 1'
 permissions:
@@ -14,7 +20,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 150
     env:
       MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
     steps:
@@ -39,48 +45,25 @@ jobs:
         run: |
           ./scripts/install-moonbit-ci.sh fixed
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
-      - name: Check and build
-        id: build
-        run: |
-          moon version --all
-          moon update
-          moon check --target native
-          moon test --target native
-          moon build --target native
-      - name: Independent broker verification
-        run: |
-          python -m pip install -r tests/integration/requirements.txt
-          MOON="$(command -v moon)" PYTHON="$(command -v python)" ./tests/integration/run.sh
-      - name: Protocol faults and example consumers
-        run: |
-          MOON="$(command -v moon)" python tests/protocol_faults.py
-          MOON="$(command -v moon)" python tests/scenario_smoke.py
-          MOON="$(command -v moon)" python tests/consumer_smoke.py
-      - name: MQTT 5 codec seam
-        run: MOON="$(command -v moon)" python tests/mqtt5_codec.py
-      - name: MQTT 5 production runtime and recovery
-        run: MOON="$(command -v moon)" python tests/mqtt5_runtime.py
-      - name: HA host consumer
-        run: MOON="$(command -v moon)" python tests/ha_relay.py
-      - name: HA transient publication boundaries
-        run: MOON="$(command -v moon)" python -W error::ResourceWarning tests/ha_relay_transient.py
-      - name: Recoverable QoS 1
-        run: MOON="$(command -v moon)" python tests/recoverable_qos1.py
-      - name: Durable outbox process recovery
-        run: MOON="$(command -v moon)" python tests/durable_outbox.py
-      - name: Reason-aware MQTT 5 reconnect
-        run: MOON="$(command -v moon)" python -W error::ResourceWarning tests/reason_reconnect.py
-      - name: Durable recovery administration
-        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" python -W error::ResourceWarning tests/durable_recovery_admin.py
-      - name: EMQX interoperability
-        if: runner.os == 'Linux'
-        run: MOON="$(command -v moon)" python tests/emqx_interop.py
-      - name: WebSocket framing and cancellation
-        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
-        run: MOON="$(command -v moon)" python tests/ws_protocol_faults.py
-      - name: Native WS/WSS interoperability
-        if: ${{ !cancelled() && runner.os == 'Linux' && steps.build.outcome == 'success' }}
-        run: MOON="$(command -v moon)" python tests/ws_interop.py
+      - name: Install acceptance dependencies
+        run: python -m pip install -r tests/integration/requirements.txt
+      - name: Shared software acceptance
+        env:
+          ACCEPTANCE_LEVEL: ${{ github.event.inputs.level || (github.event_name == 'schedule' && 'release') || 'core' }}
+        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" ./scripts/check.sh "$ACCEPTANCE_LEVEL"
+      - name: Preserve first-attempt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-${{ matrix.os }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            _build/acceptance/
+            !_build/acceptance/**/*.key
+            !_build/acceptance/**/*.pem
+            !_build/acceptance/**/*.sqlite3*
+            !_build/acceptance/**/*.mqttrec
+          if-no-files-found: error
+          retention-days: 30
 
   latest-compatibility:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
