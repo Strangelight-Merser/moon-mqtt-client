@@ -65,7 +65,7 @@ fn durable_runtime_session(
     delivery_slots: 0,
     qos1_outstanding: 0,
     receive_maximum: 65535,
-    parked_business: None,
+    deferred_business: [],
     outgoing_limit: 65536,
     delivery_changed: @cond_var.Cond(),
     next_id: 1,

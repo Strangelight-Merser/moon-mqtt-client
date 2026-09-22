@@ -67,7 +67,9 @@ priv struct Session {
   mut qos1_outstanding : Int
   outgoing_limit : Int
   receive_maximum : Int
-  mut parked_business : Outgoing?
+  /// PUBLISH writes deferred behind Receive Maximum. These still count toward
+  /// business_depth and share outgoing's send_capacity; they add no slots.
+  deferred_business : Array[Outgoing]
   delivery_changed : @cond_var.Cond
   mut next_id : Int
   mut alive : Bool
@@ -161,7 +163,7 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
     self.deliveries.clear()
     self.delivery_slots = 0
     self.qos1_outstanding = 0
-    self.parked_business = None
+    self.deferred_business.clear()
     self.delivery_changed.broadcast()
   }
 }
@@ -256,7 +258,7 @@ fn Session::control_wire(
 ///|
 /// Choose the next write. Protocol control packets take priority over business
 /// traffic so heartbeats and acknowledgements cannot be delayed behind a large
-/// business backlog. Both queues are empty exactly when this returns `None`.
+/// business backlog. `None` also means only credit-blocked PUBLISH writes remain.
 fn Session::next_outgoing(self : Session) -> Outgoing? {
   // `try_get` raises once the queue has been closed by `abort`. Reaching that
   // state is normal shutdown, not a fault: the write loop must return quietly so
@@ -272,29 +274,56 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
     }
     None => ()
   }
-  let business = match self.parked_business {
-    Some(item) => Some(item)
-    None => self.outgoing.try_get() catch { _ => return None }
-  }
-  match business {
-    Some(item) => {
-      let requires_credit = item.delivery is Some(_) ||
-        (item.pending is Some(request) && request.kind is Publish1)
-      if requires_credit && self.qos1_outstanding >= self.receive_maximum {
-        self.parked_business = Some(item)
-        return None
-      }
-      self.parked_business = None
-      if self.business_depth > 0 {
-        self.business_depth -= 1
-      }
-      // A replay waiting for a bounded business slot can now try admission.
-      // The mirror describes actual queue occupancy, never blocked producers.
-      self.delivery_changed.broadcast()
-      Some(item)
+  let credit_available = self.qos1_outstanding < self.receive_maximum
+  if !self.deferred_business.is_empty() {
+    let first = self.deferred_business[0]
+    if credit_available || !first.requires_publish_credit() {
+      return self.selected_business(self.deferred_business.remove(0))
     }
-    None => None
   }
+  // Only PUBLISH writes enter the deferred buffer. Pull at most the remaining
+  // bounded business backlog, selecting the earliest non-PUBLISH. QoS0 stays
+  // behind earlier PUBLISH writes even though it consumes no receive credit.
+  while true {
+    let business = self.outgoing.try_get() catch { _ => return None }
+    match business {
+      Some(item) => {
+        if !item.is_publish() ||
+          (self.deferred_business.is_empty() &&
+          (credit_available || !item.requires_publish_credit())) {
+          return self.selected_business(item)
+        }
+        self.deferred_business.push(item)
+      }
+      None => return None
+    }
+  } nobreak {
+    None
+  }
+}
+
+///|
+fn Outgoing::is_publish(self : Outgoing) -> Bool {
+  self.delivery is Some(_) ||
+  (self.pending is Some(request) &&
+  (request.kind is Publish0 || request.kind is Publish1))
+}
+
+///|
+fn Outgoing::requires_publish_credit(self : Outgoing) -> Bool {
+  self.delivery is Some(_) ||
+  (self.pending is Some(request) && request.kind is Publish1)
+}
+
+///|
+fn Session::selected_business(self : Session, item : Outgoing) -> Outgoing? {
+  if self.business_depth > 0 {
+    self.business_depth -= 1
+  }
+  // Replays waiting for a slot may try admission. Moving into the deferred
+  // buffer never broadcasts or reduces occupancy.
+  self.delivery_changed.broadcast()
+  Some(item)
 }
 
 ///|
@@ -837,7 +866,7 @@ async fn Session::heartbeat(
 }
 
 ///|
-/// The parked FIFO head still occupies a bounded business slot.
+/// Deferred PUBLISH writes still occupy the same bounded business slots.
 fn Session::enqueue_business(self : Session, item : Outgoing) -> Bool raise {
   match self.outgoing.kind {
     @aqueue.Blocking(limit) if self.business_depth >= limit => false

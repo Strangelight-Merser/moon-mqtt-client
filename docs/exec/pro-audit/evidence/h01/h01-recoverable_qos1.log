@@ -1,0 +1,12 @@
+Finished. moon: no work to do
+test_real_mosquitto_persistent_session_replay (__main__.RecoverableQos1.test_real_mosquitto_persistent_session_replay) ... ok
+test_resume_skips_duplicate_subscription_at_capacity_one (__main__.RecoverableQos1.test_resume_skips_duplicate_subscription_at_capacity_one) ... ok
+test_same_packet_id_and_dup_after_session_resume (__main__.RecoverableQos1.test_same_packet_id_and_dup_after_session_resume) ... ok
+test_session_loss_stops_without_replay (__main__.RecoverableQos1.test_session_loss_stops_without_replay) ... ok
+test_wait_timeout_does_not_own_delivery (__main__.RecoverableQos1.test_wait_timeout_does_not_own_delivery) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.777s
+
+OK
+mosquitto command: ['/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.tools/mosquitto', '-c', '/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/moon-q1-mosquitto-kmq6_nj_/mosquitto.conf', '-v']

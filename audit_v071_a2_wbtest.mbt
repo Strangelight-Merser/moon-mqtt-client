@@ -64,7 +64,7 @@ fn audit_v071_a2_session(
     delivery_slots: 0,
     qos1_outstanding: 0,
     receive_maximum: 65535,
-    parked_business: None,
+    deferred_business: [],
     outgoing_limit: 4096,
     delivery_changed: @cond_var.Cond(),
     next_id: 1,

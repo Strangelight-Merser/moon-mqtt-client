@@ -265,7 +265,7 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
         delivery_slots: 0,
         qos1_outstanding: 0,
         receive_maximum: negotiated.receive_maximum,
-        parked_business: None,
+        deferred_business: [],
         outgoing_limit: negotiated.max_packet_size,
         delivery_changed: @cond_var.Cond(),
         next_id: 1,

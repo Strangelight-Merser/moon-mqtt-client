@@ -20,7 +20,7 @@ fn test_session(next_id? : Int = 1, outgoing_limit? : Int = 65536) -> Session {
     delivery_slots: 0,
     qos1_outstanding: 0,
     receive_maximum: 65535,
-    parked_business: None,
+    deferred_business: [],
     outgoing_limit,
     delivery_changed: @cond_var.Cond(),
     next_id,

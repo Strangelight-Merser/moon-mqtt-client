@@ -1,0 +1,33 @@
+Using cached moonbit-community/sqlite3@0.2.2
+Using cached moonbitlang/async@0.21.3
+Using cached zbhzs1/moonbit-mqtt@0.1.0
+warning: /Library/Developer/CommandLineTools/usr/bin/libtool: archive library: /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/_build/native/debug/test/moonbitlang/async/types/libtypes.a the table of contents is empty (no object file members in the library define global symbols)
+Warning: [0007]
+    ╭─[ /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/durable_store.mbt:64:3 ]
+    │
+ 64 │   removed : Array[String]
+    │   ───┬───  
+    │      ╰───── Warning (unused_field): Field 'removed' is never read
+────╯
+Warning: [0007]
+    ╭─[ /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/durable_store.mbt:65:3 ]
+    │
+ 65 │   quarantined : Array[String]
+    │   ─────┬─────  
+    │        ╰─────── Warning (unused_field): Field 'quarantined' is never read
+────╯
+Warning: [0001]
+     ╭─[ /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/session.mbt:194:13 ]
+     │
+ 194 │ fn Session::control(
+     │             ───┬───  
+     │                ╰───── Warning (unused_value): Unused function 'control'
+─────╯
+Warning: [0001]
+     ╭─[ /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/wire.mbt:161:10 ]
+     │
+ 161 │ async fn read_packet(reader : &@io.Reader, limit : Int) -> @codec.Packet {
+     │          ─────┬─────  
+     │               ╰─────── Warning (unused_value): Unused function 'read_packet'
+─────╯
+{"artifacts_path":["/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/_build/native/debug/test/Strangelight-Merser/moon-mqtt-client/moon-mqtt-client.whitebox_test.exe"]}
