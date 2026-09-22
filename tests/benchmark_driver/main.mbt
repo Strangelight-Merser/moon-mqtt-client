@@ -34,6 +34,21 @@ async fn barrier(event : String) -> Unit {
 }
 
 ///|
+async fn range(
+  phase : String,
+  worker : Int,
+  first : Int,
+  last : Int,
+  outcome : String,
+) -> Unit {
+  if first <= last {
+    log(
+      "{\"event\":\"range\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"first\":\{first},\"last\":\{last},\"outcome\":\"\{outcome}\"}",
+    )
+  }
+}
+
+///|
 async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit {
   let kind = setting("KIND", "publish")
   let payload = Bytes::make(number("PAYLOAD", "32"), b'X')
@@ -51,38 +66,74 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
       group.spawn_bg(async fn() {
         let mut seq = 0
         let histogram = Array::make(10001, 0)
+        let mut completed_count = 0
+        let mut rejected = 0
+        let mut unknown = 0
+        let mut not_sent = 0
+        let mut range_start = 1
+        let mut last_outcome = "completed"
         while now_ns() < end {
           seq += 1
           let id = "bench-\{phase}-\{worker}-\{seq}"
           let began = now_ns()
-          if kind == "durable" || kind == "stages" {
-            let handle = if kind == "durable" {
-              client.submit_durable_delivery(
-                id,
-                id,
-                payload,
-                @env.now().reinterpret_as_int64() + 60000L,
+          let outcome = try {
+            if kind == "durable" || kind == "stages" {
+              let handle = if kind == "durable" {
+                client.submit_durable_delivery(
+                  id,
+                  id,
+                  payload,
+                  @env.now().reinterpret_as_int64() + 60000L,
+                )
+              } else {
+                client.submit_delivery(id, id, payload)
+              }
+              let admission = now_ns()
+              let status = handle.wait()
+              if status.phase != @mqtt.Acknowledged {
+                fail("measurement delivery was not acknowledged")
+              }
+              let completed = now_ns()
+              log(
+                "{\"event\":\"stages\",\"id\":\"\{id}\",\"begin_ns\":\{began},\"admitted_ns\":\{admission},\"completed_ns\":\{completed}}",
               )
             } else {
-              client.submit_delivery(id, id, payload)
+              client.publish(id, payload, qos~)
             }
-            let admission = now_ns()
-            let status = handle.wait()
-            if status.phase != @mqtt.Acknowledged {
-              fail("measurement delivery was not acknowledged")
-            }
-            let completed = now_ns()
-            log(
-              "{\"event\":\"stages\",\"id\":\"\{id}\",\"begin_ns\":\{began},\"admitted_ns\":\{admission},\"completed_ns\":\{completed}}",
-            )
-          } else {
-            client.publish(id, payload, qos~)
+            "completed"
+          } catch {
+            @mqtt.Backpressure(_) | @mqtt.NotConnected => "rejected"
+            @mqtt.OutcomeUnknown(_) => "unknown"
+            @mqtt.NotSent(_) => "not_sent"
+            error => raise error
           }
-          let bucket = ((now_ns() - began) / 10000L)
-            .to_int()
-            .clamp(min=0, max=10000)
-          histogram[bucket] += 1
+          if outcome == "completed" {
+            completed_count += 1
+            let bucket = ((now_ns() - began) / 10000L)
+              .to_int()
+              .clamp(min=0, max=10000)
+            histogram[bucket] += 1
+          } else {
+            if outcome == "rejected" {
+              rejected += 1
+            }
+            if outcome == "unknown" {
+              unknown += 1
+            }
+            if outcome == "not_sent" {
+              not_sent += 1
+            }
+          }
+          if outcome != last_outcome {
+            range(phase, worker, range_start, seq - 1, last_outcome)
+            range_start = seq
+            last_outcome = outcome
+          }
+          if outcome != "completed" {
+            @async.pause()
+          }
         }
+        range(phase, worker, range_start, seq, last_outcome)
         for bucket in 0..<histogram.length() {
           if histogram[bucket] > 0 {
             log(
@@ -91,7 +142,7 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
           }
         }
         log(
-          "{\"event\":\"outcomes\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"first\":1,\"last\":\{seq},\"accepted\":\{seq},\"completed\":\{seq},\"rejected\":0,\"unknown\":0}",
+          "{\"event\":\"outcomes\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"first\":1,\"last\":\{seq},\"accepted\":\{completed_count + unknown + not_sent},\"completed\":\{completed_count},\"rejected\":\{rejected},\"unknown\":\{unknown},\"not_sent\":\{not_sent}}",
         )
       })
     }
@@ -132,12 +183,12 @@ async fn special_workload(
     } else {
       let first = client.submit_delivery(
         "bench-\{phase}-0-\{sequence}",
-        "bench-flow-1",
+        "bench-\{phase}-0-\{sequence}",
         b"one",
       )
       let second = client.submit_delivery(
         "bench-\{phase}-1-\{sequence}",
-        "bench-flow-2",
+        "bench-\{phase}-1-\{sequence}",
         b"two",
       )
       ignore(

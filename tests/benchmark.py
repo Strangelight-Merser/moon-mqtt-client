@@ -61,6 +61,7 @@ class Peer:
         self.port = self.listener.getsockname()[1]
         self.conn = None
         self.wire = {}
+        self.wire_ranges = {}
         self.connections = 0
         self.filters = []
         self.sub_count = 0
@@ -148,6 +149,16 @@ class Peer:
                             )
                             self.filters.append(filters)
                             break
+                        prefix, phase, worker, seq = topic.split("-")
+                        assert prefix == "bench"
+                        key = f"{phase}/{worker}"
+                        assert int(seq) > self.wire.get(key, 0), topic
+                        self.wire[key] = int(seq)
+                        ranges = self.wire_ranges.setdefault(key, [])
+                        if ranges and ranges[-1][1] + 1 == int(seq):
+                            ranges[-1][1] = int(seq)
+                        else:
+                            ranges.append([int(seq), int(seq)])
                         if self.settings["kind"] == "flow":
                             identifier = publish_id(data).to_bytes(2, "big")
                             if flow_released:
@@ -156,11 +167,6 @@ class Peer:
                             else:
                                 held.append(identifier)
                             continue
-                        prefix, phase, worker, seq = topic.split("-")
-                        assert prefix == "bench"
-                        key = f"{phase}/{worker}"
-                        assert int(seq) == self.wire.get(key, 0) + 1, topic
-                        self.wire[key] = int(seq)
                         if self.settings["kind"] in ("durable", "stages"):
                             self.trace.write(
                                 json.dumps(
@@ -331,12 +337,39 @@ def trial(binary, settings, warmup, seconds, directory):
     histogram = {}
     for row in phases:
         if row["event"] == "outcomes":
-            assert peer.wire[f"sample/{row['worker']}"] == row["last"]
+            key = f"sample/{row['worker']}"
+            ranges = [
+                r
+                for r in phases
+                if r["event"] == "range" and r["worker"] == row["worker"]
+            ]
+            expected = 1
+            counts = {k: 0 for k in ("completed", "rejected", "unknown", "not_sent")}
+            successful = []
+            for r in ranges:
+                assert r["first"] == expected and r["last"] >= r["first"]
+                expected = r["last"] + 1
+                counts[r["outcome"]] += r["last"] - r["first"] + 1
+                if r["outcome"] == "completed":
+                    successful.append([r["first"], r["last"]])
+            assert expected == row["last"] + 1 and all(
+                row[k] == v for k, v in counts.items()
+            )
+            assert row["unknown"] == 0 and row["not_sent"] == 0, row
+            assert successful == peer.wire_ranges.get(key, []), (
+                key,
+                successful,
+                peer.wire_ranges.get(key, []),
+            )
         if row["event"] == "bucket":
             histogram[row["upper_us"]] = (
                 histogram.get(row["upper_us"], 0) + row["count"]
             )
     count = sum(r["completed"] for r in phases if r["event"] == "outcomes")
+    cycles = sum(1 for row in phases if row["event"] == "cycle")
+    if settings["kind"] == "flow":
+        assert peer.wire["sample/0"] == peer.wire["sample/1"] == cycles
+
     result = {
         "settings": settings,
         "native": identity,
@@ -344,6 +377,10 @@ def trial(binary, settings, warmup, seconds, directory):
         "sample_seconds": seconds,
         "actual_sample_seconds": (end - start) / 1e9,
         "completed": count,
+        "outcomes": {
+            k: sum(r[k] for r in phases if r["event"] == "outcomes")
+            for k in ("accepted", "rejected", "completed", "unknown", "not_sent")
+        },
         "throughput_per_s": count / ((end - start) / 1e9),
         "completion_semantics": "socket write; no MQTT acknowledgement"
         if settings.get("qos", 1) == 0
@@ -358,9 +395,18 @@ def trial(binary, settings, warmup, seconds, directory):
             [r["ns"] for r in phases if r["event"] == "nonpublish"]
         ),
         "wire_accounting": peer.wire,
+        "wire_ranges": peer.wire_ranges,
         "restore_cycles": len(peer.filters),
         "connections": peer.connections,
         "flow_cycles": peer.flow_count,
+        "flow_sample_outcomes": {
+            "accepted": cycles * 2,
+            "acknowledged": cycles * 2,
+            "rejected": 0,
+            "unknown": 0,
+        }
+        if settings["kind"] == "flow"
+        else None,
         "resources": {
             "before_scope": before,
             "warmed": warmed,

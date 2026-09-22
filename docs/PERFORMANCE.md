@@ -18,8 +18,10 @@ loopback and trace costs are part of this baseline, so these numbers are not a
 claim about maximum client throughput or a ranking against other clients.
 
 Every publication has a phase/worker/sequence measurement ID. Stable workload
-outcomes are checked against contiguous raw-wire IDs; any rejected or unknown
-operation fails that stable workload rather than being counted as delivered.
+outcomes cover every attempted ID and are matched to raw-wire ID ranges.
+Capacity rejection is counted separately; rejected attempts yield to the async
+scheduler and are never counted as accepted. Stable-workload unknown/not-sent
+results fail the trial and remain in its native log.
 QoS0 completion is socket-write completion, not an acknowledgement. The latency
 histogram uses 10-microsecond buckets and separately labels observations above
 100 ms as censored. Restoration and non-PUBLISH timings retain exact samples.
