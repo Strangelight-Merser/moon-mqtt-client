@@ -26,6 +26,7 @@ import ws_protocol_faults
 import ws_interop
 import ha_relay
 import reason_reconnect
+import b2_consumer
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,6 +60,7 @@ import {{
 ''')
         entries = {"mqtt5_runtime_driver": "examples/mqtt5_runtime_driver",
                    "reason_reconnect_driver": "tests/reason_reconnect_driver",
+                   "b2_durable_consumer": "examples/esp32/durable_consumer",
                    "cli": "examples/mqtt_demo/cli",
                    "ha_relay/controller": "examples/ha_relay/controller",
                    "ha_relay/simulator": "examples/ha_relay/simulator"}
@@ -117,8 +119,13 @@ import {{
             def setUpClass(cls):
                 cls.driver = binary_root / "reason_reconnect_driver/reason_reconnect_driver.exe"
                 assert cls.driver.is_file(), cls.driver
+        class ConsumerB2(b2_consumer.B2Consumer):
+            @classmethod
+            def setUpClass(cls):
+                cls.driver = binary_root / "b2_durable_consumer/b2_durable_consumer.exe"
+                assert cls.driver.is_file(), cls.driver
         suite = unittest.TestSuite()
-        cases = [ConsumerRuntime, ConsumerFraming, ConsumerHa, ConsumerMaintenance]
+        cases = [ConsumerRuntime, ConsumerFraming, ConsumerHa, ConsumerMaintenance, ConsumerB2]
         excluded = []
         if platform.system() == "Linux":
             cases.append(ConsumerWebSocket)

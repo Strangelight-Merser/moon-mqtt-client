@@ -1,0 +1,23 @@
+{
+  "baseline": "f0a0e9ec33b7aee2aeee26ea20572904d05e3069",
+  "files": {
+    "pkg.generated.mbti": {
+      "baseline_sha256": "6ffcdeb66d4081e53afe52e6e480a7d6ee7d0dcba15b8944da6ad18f53775885",
+      "candidate_sha256": "6ffcdeb66d4081e53afe52e6e480a7d6ee7d0dcba15b8944da6ad18f53775885",
+      "identical": true
+    },
+    "moon.mod": {
+      "baseline_sha256": "532f160fc537a6cdc313170cd3dbec3bfe8dfa75ea02cb6eb01ff66d4700d2a0",
+      "candidate_sha256": "532f160fc537a6cdc313170cd3dbec3bfe8dfa75ea02cb6eb01ff66d4700d2a0",
+      "identical": true
+    },
+    "durable_store.mbt": {
+      "baseline_sha256": "977e0d40444056fc619e874e32174718284e3bd2c2323fadbdf82ad955eac48c",
+      "candidate_sha256": "977e0d40444056fc619e874e32174718284e3bd2c2323fadbdf82ad955eac48c",
+      "identical": true
+    }
+  },
+  "behavior_change": "H01 non-PUBLISH bypass of blocked publications only; heartbeat representation preserves existing behavior",
+  "retry_defaults_changed": false,
+  "schema_version": 2
+}

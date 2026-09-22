@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from acceptance import source_identity
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -17,10 +18,12 @@ def main():
     args = parser.parse_args()
     path = args.manifest or Path(json.loads((ROOT / "_build/candidate/latest.json").read_text())["manifest"])
     manifest = json.loads(path.read_text())
+    assert source_identity()["files"] == manifest["source"]["files"], "candidate source or consumer entrypoints changed"
     for key in ("library", "operator"):
         package = Path(manifest[key])
         assert hashlib.sha256(package.read_bytes()).hexdigest() == manifest["sha256"][package.name]
     evidence = Path(os.environ.get("MQTT_EVIDENCE_DIR", path.parent))
+    (evidence / "candidate.json").write_text(json.dumps(manifest, indent=2) + "\n")
     commands = [
         [sys.executable, "tests/registry_roadmap.py", "--package", manifest["library"],
          "--evidence", str(evidence / "library-consumer.json")],

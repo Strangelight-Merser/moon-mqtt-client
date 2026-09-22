@@ -49,7 +49,7 @@ def main():
         python = work / "venv/bin/python"
         subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
                         "-r", str(operator / "requirements.txt")], check=True, cwd=operator, env=env)
-        for entry in ("inspect", "export", "resolve", "resume", "status"):
+        for entry in ("inspect", "export", "verify", "resolve", "resume", "status"):
             subprocess.run([str(python), str(operator / "durable_recovery.py"), entry, "--help"],
                            cwd=operator, check=True, env=env, stdout=subprocess.DEVNULL)
         version = re.search(r'^version\s*=\s*"([^"]+)"', (library / "moon.mod").read_text(), re.M).group(1)

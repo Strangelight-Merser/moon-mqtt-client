@@ -5,7 +5,7 @@
 | Last public release | [v0.7.1](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.1), published 2026-09-19 |
 | Source module version | `0.7.1`; source includes unreleased changes |
 | Audit baseline | `f0a0e9ec33b7aee2aeee26ea20572904d05e3069` |
-| Review candidate | Local `0.7.1-audit-<source digest>` assets; not a new registry version |
+| Review candidate | Local `0.7.1-audit-<commit>-<source digest>` assets; not a new registry version |
 | Candidate manifest | Generated `_build/candidate/<id>/candidate.json` binds exact source files and ZIP checksums |
 | Formal next version/release | Awaiting Pro/release-owner decision; no tag, upload or release in this implementation |
 | Current task and evidence | [Pro implementation ledger](exec/pro-audit/README.md) |
