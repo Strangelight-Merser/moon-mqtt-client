@@ -1,5 +1,8 @@
 name: bounded WSS close baseline comparison
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/wss-close-diagnostic]
 permissions:
   contents: read
 jobs:
