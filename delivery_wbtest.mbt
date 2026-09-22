@@ -48,34 +48,19 @@ fn delivery_test_session(
   generation? : Int = 1,
 ) -> Session {
   let (reader, writer) = @io.pipe()
-  {
-    generation,
+  fixture_session(
     reader,
     writer,
-    close_transport: () => {
+    () => {
       reader.close()
       writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(1)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(1)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: {},
-    reserved_deliveries: reserved,
-    delivery_slots: 0,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    deferred_business: [],
-    outgoing_limit: 65536,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 1,
-    alive: true,
-    last_write: @async.now(),
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }
+    send_capacity=1,
+    control_capacity=1,
+    generation=generation,
+    reserved_deliveries=reserved,
+    last_write=@async.now(),
+  )
 }
 
 ///|
@@ -406,34 +391,19 @@ async test "unexpected PUBACK settles recoverable handle and releases ownership"
   delivery.mark_started()
   let attached : Map[Int, DeliveryRecord] = Map([])
   attached[delivery.packet_id] = delivery
-  let session : Session = {
-    generation: 1,
+  let session : Session = fixture_session(
     reader,
-    writer: pipe_writer,
-    close_transport: () => {
+    pipe_writer,
+    () => {
       reader.close()
       pipe_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(1)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(1)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: attached,
-    reserved_deliveries: client.deliveries.reserved,
-    delivery_slots: 1,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    deferred_business: [],
-    outgoing_limit: 65536,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 1,
-    alive: true,
-    last_write: 0L,
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }
+    send_capacity=1,
+    control_capacity=1,
+    deliveries=attached,
+    reserved_deliveries=client.deliveries.reserved,
+    delivery_slots=1,
+  )
   client.read_loop(session)
   match session.failure_reason {
     Some(ProtocolError(reason)) =>

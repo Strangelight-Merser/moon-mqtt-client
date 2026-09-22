@@ -1,5 +1,6 @@
+// Regression origin: PR #4, audit_v071_a2_wbtest.mbt. Original assertions retained.
 ///|
-struct AuditV071PingWriter {
+struct HeartbeatGateWriter {
   mut writes : Int
   mut entered : Bool
   mut released : Bool
@@ -7,25 +8,25 @@ struct AuditV071PingWriter {
 }
 
 ///|
-fn AuditV071PingWriter::new() -> AuditV071PingWriter {
+fn HeartbeatGateWriter::new() -> HeartbeatGateWriter {
   { writes: 0, entered: false, released: false, changed: @cond_var.Cond(), }
 }
 
 ///|
-async fn AuditV071PingWriter::wait_entered(self : AuditV071PingWriter) -> Unit {
+async fn HeartbeatGateWriter::wait_entered(self : HeartbeatGateWriter) -> Unit {
   while !self.entered {
     self.changed.wait()
   }
 }
 
 ///|
-fn AuditV071PingWriter::release(self : AuditV071PingWriter) -> Unit {
+fn HeartbeatGateWriter::release(self : HeartbeatGateWriter) -> Unit {
   self.released = true
   self.changed.broadcast()
 }
 
 ///|
-impl @io.Writer for AuditV071PingWriter with fn write_once(
+impl @io.Writer for HeartbeatGateWriter with fn write_once(
   self,
   _buf,
   offset~,
@@ -41,43 +42,27 @@ impl @io.Writer for AuditV071PingWriter with fn write_once(
 }
 
 ///|
-fn audit_v071_a2_session(
+fn heartbeat_test_session(
   writer : &@io.Writer,
   control_capacity? : Int = 2,
 ) -> (Session, &@io.Writer) {
   let (reader, peer_writer) = @io.pipe()
-  ({
-    generation: 1,
+  (fixture_session(
     reader,
     writer,
-    close_transport: () => {
+    () => {
       reader.close()
       peer_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(control_capacity)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: {},
-    reserved_deliveries: {},
-    delivery_slots: 0,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    deferred_business: [],
-    outgoing_limit: 4096,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 1,
-    alive: true,
-    last_write: @async.now() - 1000L,
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }, peer_writer)
+    send_capacity=2,
+    control_capacity=control_capacity,
+    outgoing_limit=4096,
+    last_write=@async.now() - 1000L,
+  ), peer_writer)
 }
 
 ///|
-fn audit_v071_a2_config(
+fn heartbeat_test_config(
   timeout_ms? : Int = 5000,
   control_capacity? : Int = 2,
 ) -> Config {
@@ -94,9 +79,9 @@ fn audit_v071_a2_config(
 
 ///|
 async test "A2 repeated ticks keep only one queued ping" {
-  let writer = AuditV071PingWriter::new()
-  let session = audit_v071_a2_session(writer).0
-  let config = audit_v071_a2_config()
+  let writer = HeartbeatGateWriter::new()
+  let session = heartbeat_test_session(writer).0
+  let config = heartbeat_test_config()
   @async.with_task_group(group => {
     let heartbeat = group.spawn(() => session.heartbeat(config))
     @async.sleep(600)
@@ -109,9 +94,9 @@ async test "A2 repeated ticks keep only one queued ping" {
 
 ///|
 async test "A2 early PINGRESP stays pending until the current write returns" {
-  let writer = AuditV071PingWriter::new()
-  let (session, peer_writer) = audit_v071_a2_session(writer)
-  let config = audit_v071_a2_config()
+  let writer = HeartbeatGateWriter::new()
+  let (session, peer_writer) = heartbeat_test_session(writer)
+  let config = heartbeat_test_config()
   let client = new_client(config, DeliveryBook::new(), None)
   session.queue_ping(config)
   guard session.next_outgoing() is Some(item) else {
@@ -143,9 +128,9 @@ async test "A2 early PINGRESP stays pending until the current write returns" {
 
 ///|
 async test "A2 PINGRESP timeout starts after blocked write completion" {
-  let writer = AuditV071PingWriter::new()
-  let session = audit_v071_a2_session(writer, control_capacity=8).0
-  let config = audit_v071_a2_config(timeout_ms=100, control_capacity=8)
+  let writer = HeartbeatGateWriter::new()
+  let session = heartbeat_test_session(writer, control_capacity=8).0
+  let config = heartbeat_test_config(timeout_ms=100, control_capacity=8)
   @async.with_task_group(group => {
     let writing = group.spawn(() =>
       session.write_loop(5000, 5000, 2)
@@ -181,9 +166,9 @@ async test "A2 PINGRESP timeout starts after blocked write completion" {
 
 ///|
 async test "A2 abort clears ping state and blocked completion cannot revive it" {
-  let writer = AuditV071PingWriter::new()
-  let session = audit_v071_a2_session(writer).0
-  let config = audit_v071_a2_config()
+  let writer = HeartbeatGateWriter::new()
+  let session = heartbeat_test_session(writer).0
+  let config = heartbeat_test_config()
   session.queue_ping(config)
   guard session.next_outgoing() is Some(item) else {
     abort("queued PINGREQ missing")
@@ -201,10 +186,10 @@ async test "A2 abort clears ping state and blocked completion cannot revive it" 
 
 ///|
 async test "A2 pending ping preserves PUBACK and DISCONNECT control slots" {
-  let writer = AuditV071PingWriter::new()
+  let writer = HeartbeatGateWriter::new()
   writer.release()
-  let session = audit_v071_a2_session(writer).0
-  let config = audit_v071_a2_config()
+  let session = heartbeat_test_session(writer).0
+  let config = heartbeat_test_config()
   session.queue_ping(config)
   session.control_wire(@codec.PubackPacket({ message_id: 7, }), config)
   assert_eq(session.control_depth, 2)
@@ -244,10 +229,10 @@ async test "A2 pending ping preserves PUBACK and DISCONNECT control slots" {
 
 ///|
 async test "A2 queued PINGREQ ignores PINGRESP until a write can start" {
-  let writer = AuditV071PingWriter::new()
+  let writer = HeartbeatGateWriter::new()
   writer.release()
-  let (session, peer_writer) = audit_v071_a2_session(writer)
-  let config = audit_v071_a2_config(timeout_ms=100)
+  let (session, peer_writer) = heartbeat_test_session(writer)
+  let config = heartbeat_test_config(timeout_ms=100)
   let client = new_client(config, DeliveryBook::new(), None)
   client.ready = true
   session.queue_ping(config)

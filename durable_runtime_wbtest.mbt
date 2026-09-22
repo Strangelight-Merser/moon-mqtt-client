@@ -47,34 +47,18 @@ fn durable_runtime_session(
   writer : &@io.Writer,
 ) -> (Session, &@io.Writer) {
   let (reader, peer_writer) = @io.pipe()
-  ({
-    generation: 1,
+  (fixture_session(
     reader,
     writer,
-    close_transport: () => {
+    () => {
       reader.close()
       peer_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(config.send_capacity)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(config.control_capacity)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: {},
-    reserved_deliveries: deliveries.reserved,
-    delivery_slots: 0,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    deferred_business: [],
-    outgoing_limit: 65536,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 1,
-    alive: true,
-    last_write: @async.now(),
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }, peer_writer)
+    send_capacity=config.send_capacity,
+    control_capacity=config.control_capacity,
+    reserved_deliveries=deliveries.reserved,
+    last_write=@async.now(),
+  ), peer_writer)
 }
 
 ///|

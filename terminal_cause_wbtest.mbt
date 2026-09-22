@@ -44,47 +44,21 @@ impl @io.Writer for FailingCauseWriter with fn write_once(
 ///|
 fn cause_test_session(writer : &@io.Writer) -> Session {
   let (reader, pipe_writer) = @io.pipe()
-  {
-    generation: 1,
+  fixture_session(
     reader,
     writer,
-    close_transport: () => {
+    () => {
       reader.close()
       pipe_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: {},
-    reserved_deliveries: {},
-    delivery_slots: 0,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    deferred_business: [],
-    outgoing_limit: 65536,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 1,
-    alive: true,
-    last_write: 0L,
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }
+    send_capacity=2,
+    control_capacity=2,
+  )
 }
 
 ///|
 fn cause_test_pending() -> Pending {
-  {
-    id: 1,
-    kind: Publish1,
-    changed: @cond_var.Cond(),
-    started: false,
-    result: None,
-    queued_at: @async.now(),
-    refresh: None,
-  }
+  test_pending(1, Publish1, queued_at=@async.now())
 }
 
 ///|
@@ -184,43 +158,19 @@ async test "malformed frame gives started QoS1 the actual unknown reason" {
     max_packet_size=268435455,
   )
   let client = cause_test_client(config)
-  let session : Session = {
-    generation: 1,
+  let session : Session = fixture_session(
     reader,
-    writer: pipe_writer,
-    close_transport: () => {
+    pipe_writer,
+    () => {
       reader.close()
       pipe_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: {},
-    reserved_deliveries: client.deliveries.reserved,
-    delivery_slots: 0,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    deferred_business: [],
-    outgoing_limit: 65536,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 2,
-    alive: true,
-    last_write: 0L,
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }
-  let request : Pending = {
-    id: 1,
-    kind: Publish1,
-    changed: @cond_var.Cond(),
-    started: true,
-    result: None,
-    queued_at: @async.now(),
-    refresh: None,
-  }
+    send_capacity=2,
+    control_capacity=2,
+    reserved_deliveries=client.deliveries.reserved,
+    next_id=2,
+  )
+  let request : Pending = test_pending(1, Publish1, started=true, queued_at=@async.now())
   session.pending[request.id] = request
 
   client.read_loop(session)

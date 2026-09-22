@@ -61,10 +61,7 @@ test "available credit keeps original business order" {
 async test "cancelled deferred request is never written and abort clears buffer" {
   let session = test_session()
   defer session.abort("test complete")
-  let request : Pending = {
-    id: 1, kind: Publish1, changed: @cond_var.Cond(), started: false,
-    result: None, queued_at: @async.now(), refresh: None,
-  }
+  let request : Pending = test_pending(1, Publish1, queued_at=@async.now())
   let item : Outgoing = {
     bytes: b"must-not-be-written", pending: Some(request), delivery: None, is_ping: false,
   }
