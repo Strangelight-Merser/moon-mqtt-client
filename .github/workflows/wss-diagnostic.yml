@@ -1,0 +1,34 @@
+name: bounded WSS close baseline comparison
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y openssl libssl-dev
+      - run: |
+          ./scripts/install-moonbit-ci.sh fixed
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
+          python -m pip install -r tests/integration/requirements.txt
+      - name: Compare unchanged baseline and candidate CLI
+        env:
+          MQTT_EVIDENCE_DIR: ${{ github.workspace }}/_build/ws-close-diagnostic
+          MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
+        run: |
+          mkdir -p "$MQTT_EVIDENCE_DIR"
+          MOON="$(command -v moon)" python scripts/wss-diagnostic.py 2>&1 | tee "$MQTT_EVIDENCE_DIR/run.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wss-baseline-comparison-${{ github.run_id }}
+          path: _build/ws-close-diagnostic/
+          retention-days: 30
