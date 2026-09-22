@@ -48,6 +48,17 @@ def retain_log(path, label):
         shutil.copyfile(path, directory / f"{label}-{uuid.uuid4().hex}.log")
 
 
+def retain_container_log(name):
+    """Capture the named test broker before its fixture removes the container."""
+    destination = os.environ.get("MQTT_EVIDENCE_DIR")
+    if destination:
+        directory = Path(destination) / "broker-logs"
+        directory.mkdir(parents=True, exist_ok=True)
+        with (directory / f"{name}-{uuid.uuid4().hex}.docker.log").open("w") as output:
+            subprocess.run(["docker", "logs", name], stdout=output,
+                           stderr=subprocess.STDOUT, check=False, timeout=15)
+
+
 class NativeProcess:
     """Unbuffered line barriers, exact executable identity and bounded cleanup."""
     def __init__(self, command, *, env=None, cwd=ROOT, events=None):

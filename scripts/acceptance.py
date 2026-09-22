@@ -85,6 +85,10 @@ def main():
         if log.exists():
             row["log_sha256"] = hashlib.sha256(log.read_bytes()).hexdigest()
         print(f"{row['status'].upper()} {scenario['id']} ({row['seconds']}s)", flush=True)
+        if row["status"] == "failed" and log.exists():
+            # Surface the first failure while longer independent scenarios run.
+            # Keep the complete log and its hash in the attempt directory.
+            print(log.read_text(errors="replace")[-12000:], flush=True)
         (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     result["successful"] = all(r["status"] in ("passed", "platform-not-applicable") for r in records)
     result["full_level"] = not bool(args.only)
