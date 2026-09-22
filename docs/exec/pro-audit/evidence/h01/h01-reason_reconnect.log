@@ -1,0 +1,16 @@
+Finished. moon: no work to do
+test_default_busy_is_terminal (__main__.ReasonReconnect.test_default_busy_is_terminal) ... ok
+test_failed_server_directed_dial_does_not_taint_next_ordinary_dial (__main__.ReasonReconnect.test_failed_server_directed_dial_does_not_taint_next_ordinary_dial) ... ok
+test_later_ordinary_reconnect_does_not_inherit_server_dial_origin (__main__.ReasonReconnect.test_later_ordinary_reconnect_does_not_inherit_server_dial_origin) ... ok
+test_lifetime_budget_survives_successful_connacks (__main__.ReasonReconnect.test_lifetime_budget_survives_successful_connacks) ... ok
+test_negative_connack_after_retry_is_typed_terminal (__main__.ReasonReconnect.test_negative_connack_after_retry_is_typed_terminal) ... ok
+test_opt_in_busy_and_shutdown_reconnect (__main__.ReasonReconnect.test_opt_in_busy_and_shutdown_reconnect) ... ok
+test_reason_string_cannot_make_disallowed_code_retryable (__main__.ReasonReconnect.test_reason_string_cannot_make_disallowed_code_retryable) ... ok
+test_recoverable_delivery_replays_same_id_with_dup_and_ack (__main__.ReasonReconnect.test_recoverable_delivery_replays_same_id_with_dup_and_ack) ... ok
+test_recoverable_delivery_requires_session_present_before_replay (__main__.ReasonReconnect.test_recoverable_delivery_requires_session_present_before_replay) ... ok
+test_zero_budget_and_disallowed_reasons_never_reconnect (__main__.ReasonReconnect.test_zero_budget_and_disallowed_reasons_never_reconnect) ... ok
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.002s
+
+OK

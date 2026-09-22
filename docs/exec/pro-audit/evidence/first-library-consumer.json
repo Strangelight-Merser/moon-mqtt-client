@@ -1,0 +1,27 @@
+{
+  "source": "extracted package",
+  "version": "0.7.1",
+  "tests_run": 33,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "successful": true,
+  "workspace_override": true,
+  "platform_excluded": [
+    "EMQX WS/WSS requires supported Linux Docker service; framing still runs"
+  ],
+  "MOON_WORK_removed": true,
+  "package_sha256": "2081a556866eff8b91b7c5d52104c4bbb46c71d95d4d8eb79291cc675e3b36ef",
+  "entry_sha256": {
+    "examples/mqtt5_runtime_driver/main.mbt": "c55da55e53cae5a36f6fc0b9434c7a0a24fdfd220f83dd2545cc62676984dbb3",
+    "examples/mqtt5_runtime_driver/moon.pkg": "b1042c28162913184488dbd850dd3c1dd5e8ac5992559f7171fff3e85b6e962f",
+    "tests/reason_reconnect_driver/main.mbt": "cbadb603c3245a95aab13cd510fabed4c73b690fae1d3661dfbbce87987b5b37",
+    "tests/reason_reconnect_driver/moon.pkg": "a4b48cf60b907a44cad4ce98b1503ef18b06229ae90ff5d55664b390911ad8ed",
+    "examples/mqtt_demo/cli/main.mbt": "edab6162d4f2c9409f5fae6f3f8ccf2110394179237831d04872565ef6cc834e",
+    "examples/mqtt_demo/cli/moon.pkg": "e88d1cfb2d8100a4741aec8f6b17e8cfb59768914186d822bb5a45cded563d92",
+    "examples/ha_relay/controller/main.mbt": "ebcc484a95b22ad63609570497cbbfc624cf1310be681bee2b8e370c0ff27163",
+    "examples/ha_relay/controller/moon.pkg": "2f3ad51309e2ff11c0d5a1c00f5215e0a7421a118d11022e9da2895e13b5b206",
+    "examples/ha_relay/simulator/main.mbt": "ef10257e98f89e6be13cf26341455798d20301fe4422a6c6fd7afe1a3d8d8322",
+    "examples/ha_relay/simulator/moon.pkg": "0b38e217d4062f3fdef773accfff3da834b3f9d864fcf8ccf0270bb5eb7f0f01"
+  }
+}

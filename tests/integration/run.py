@@ -16,6 +16,7 @@ import shutil
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -25,16 +26,12 @@ import paho.mqtt.client as paho
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests"))
+from harness import free_port, stop_process, retain_log
 LOCAL_BROKER = ROOT / ".tools/mosquitto"
 BROKER = Path(os.environ.get("MOSQUITTO", shutil.which("mosquitto") or
                             (str(LOCAL_BROKER) if LOCAL_BROKER.is_file() else "mosquitto")))
 MOON = Path(os.environ.get("MOON", ROOT / "scripts/moon.sh"))
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
 
 
 def openssl(*args: str) -> None:
@@ -256,13 +253,7 @@ class Broker:
         write_pki(self.temp, mtls=self.mtls)
 
     def stop(self) -> None:
-        if self.process and self.process.poll() is None:
-            self.process.terminate()
-            try:
-                self.process.wait(2)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
+        stop_process(self.process)
         if hasattr(self, "log") and not self.log.closed:
             self.log.close()
 
@@ -272,6 +263,7 @@ class Broker:
 
     def close(self, failed: bool = False) -> None:
         self.stop()
+        retain_log(self.temp / "broker.log", "mosquitto")
         if failed or os.environ.get("MQTT_KEEP_TEST_ARTIFACTS") == "1":
             print(f"broker evidence retained at {self.temp}", flush=True)
         else:

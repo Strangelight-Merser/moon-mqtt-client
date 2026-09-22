@@ -1,0 +1,164 @@
+{
+  "level": "core",
+  "subset": null,
+  "source_commit": "e749bcf4657b5d2dfe75c0e83bf37529fa6a5499",
+  "platform": "Darwin",
+  "attempts": [
+    {
+      "id": "dependencies",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/scripts/moon.sh",
+        "update"
+      ],
+      "log": "dependencies.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 38.323,
+      "log_sha256": "5867fd85b950d30cfa53a965d0f592dbdcc29db13c60388e0a5b24d303b39c72"
+    },
+    {
+      "id": "check",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/scripts/moon.sh",
+        "check",
+        "--target",
+        "native"
+      ],
+      "log": "check.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 0.123,
+      "log_sha256": "83f0d8a605310c379f59fffae8f28b9ca8a54274800372c74099b95260645a38"
+    },
+    {
+      "id": "native",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/scripts/moon.sh",
+        "test",
+        "--target",
+        "native"
+      ],
+      "log": "native.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 5.207,
+      "log_sha256": "b881d08a217faff41240265ac876e22b23eeac4d3540a231814890697f17ca89"
+    },
+    {
+      "id": "build",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/scripts/moon.sh",
+        "build",
+        "--target",
+        "native"
+      ],
+      "log": "build.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 2.622,
+      "log_sha256": "1bf42eeb6f8fd30adb32282746882b2f730fa0f85b98480ae2864a182e5b0648"
+    },
+    {
+      "id": "mosquitto-core",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "tests/integration/run.py",
+        "IntegrationTest.test_tcp_qos0_qos1_and_subscription",
+        "IntegrationTest.test_reconnect_and_resubscribe",
+        "IntegrationTest.test_lost_puback_never_reports_success"
+      ],
+      "log": "mosquitto-core.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 1.058,
+      "log_sha256": "d985ee39976a1f590ecf736e0ca4ed441d87d72a96e1b0c43cec356d63c4b803"
+    },
+    {
+      "id": "raw-protocol",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "tests/protocol_faults.py"
+      ],
+      "log": "raw-protocol.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 1.917,
+      "log_sha256": "e4b8c1393172fa4c6aeead1ad3143f0308b71e2ebaf1ac6e4a0c9809e0cf8df0"
+    },
+    {
+      "id": "mqtt5-codec",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "tests/mqtt5_codec.py"
+      ],
+      "log": "mqtt5-codec.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 0.274,
+      "log_sha256": "98e98d40a9666825b8f720cddb3d74e04e6d8026c2fef4669054926977de6784"
+    },
+    {
+      "id": "mqtt5-runtime-h01",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "tests/mqtt5_runtime.py"
+      ],
+      "log": "mqtt5-runtime-h01.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 5.006,
+      "log_sha256": "54cb9dd833182133734ef5dffb1c6c398442c2a4e877ceff69e9fd73d62d3f25"
+    },
+    {
+      "id": "maintenance",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "-W",
+        "error::ResourceWarning",
+        "tests/reason_reconnect.py"
+      ],
+      "log": "maintenance.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 0.742,
+      "log_sha256": "58a5bffa151f4dcaaa0ce48a8c8a14ab44a738a59d7f032ab7c3ebb7188bdecd"
+    },
+    {
+      "id": "recoverable",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "tests/recoverable_qos1.py"
+      ],
+      "log": "recoverable.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 0.544,
+      "log_sha256": "9d82eada5fc007bd5051685cb192977488c0e51b33ecfdc34f615d83a5ac3a4b"
+    },
+    {
+      "id": "durable-crash",
+      "attempt": 1,
+      "command": [
+        "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.venv/bin/python",
+        "tests/durable_outbox.py"
+      ],
+      "log": "durable-crash.log",
+      "status": "passed",
+      "returncode": 0,
+      "seconds": 14.294,
+      "log_sha256": "a8b6d65e8e3025117c870b61d8c2b77a25cd186fee61faee01f9a6d469ed9b76"
+    }
+  ],
+  "successful": true,
+  "full_level": true
+}

@@ -1,0 +1,24 @@
+{
+  "baseline": "f0a0e9ec33b7aee2aeee26ea20572904d05e3069",
+  "platform": "macOS arm64",
+  "native_tests": 156,
+  "mqtt5_runtime_tests": 13,
+  "maintenance_tests": 10,
+  "recoverable_tests": 5,
+  "durable_process_tests": 4,
+  "public_api_changed": false,
+  "schema_changed": false,
+  "dependencies_changed": false,
+  "logs": {
+    "baseline-native-red-1.log": "aa1fd0504e23a823050daf7183f40402bd057a9584776fa77a7831d4b499d4f2",
+    "h01-recoverable_qos1.log": "e6fcb928c41ef64c06fd3bed46ffedfaa2dfd4a1623c3264606fe5eb57957dd4",
+    "baseline-native-draft-compile.log": "4486f7efaf2e07d66b0af07d9baaa521828b277be5572b5b6210e7d93e4d0b66",
+    "baseline-native-red-0.log": "c9ad0183367c44c88a42f75bb6d0d78c196e6b8921c1da0adfc4726cff4ed8b1",
+    "h01-mqtt5_runtime.log": "fa1e27d2708d86a6c95321134d3ddb0ce05c966bd79bad1d113293bacb0af229",
+    "h01-reason_reconnect.log": "1f23aa3dfda82e5950e1c59f6a2c715718be07211ef6f3a39c883d0dabc32cff",
+    "baseline-native-red.log": "77dea9d100845d7e5557b54d8e6f6568b23f50aedc58a51dc665a603bc60cd2b",
+    "h01-native-final.log": "b881d08a217faff41240265ac876e22b23eeac4d3540a231814890697f17ca89",
+    "baseline-raw-red.log": "1c919417f2b32725bc5f0ed99fa8ece05b1e5d7752b683c5db9019ccda431c1f",
+    "h01-durable_outbox.log": "8f662ee795ead48e49aabaf8021b77ef11808b53b67aeeee42dd72efa5ddeda5"
+  }
+}

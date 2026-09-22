@@ -15,6 +15,7 @@ import time
 import unittest
 
 import paho.mqtt.client as paho
+from harness import retain_container_log
 
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("mqtt_integration", ROOT / "tests/integration/run.py")
@@ -329,10 +330,14 @@ class Emqx:
     def close(self) -> None:
         self.gate.stop()
         if os.environ.get("MQTT_KEEP_TEST_ARTIFACTS") == "1":
+            retain_container_log(self.name)
             print(f"EMQX evidence retained in container {self.name} and {self.temp}")
             return
-        self._remove_container()
-        __import__("shutil").rmtree(self.temp, ignore_errors=True)
+        try:
+            retain_container_log(self.name)
+        finally:
+            self._remove_container()
+            __import__("shutil").rmtree(self.temp, ignore_errors=True)
 
 
 class EmqxInteropTest(unittest.TestCase):

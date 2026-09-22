@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect, archive, and retire one moon-mqtt durable logical session."""
+"""Operator tooling for durable sessions; resolve/resume are experimental."""
 
 from __future__ import annotations
 
@@ -1281,6 +1281,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except RecoveryError as error:
         print(f"durable recovery refused: {error}", file=sys.stderr)
+        return 2
+    except (OSError, sqlite3.Error) as error:
+        # Filesystem failures may occur before a temporary file or journal even
+        # exists. Preserve the nonzero result without an unstructured traceback;
+        # do not retry, overwrite, or infer which side effects committed.
+        print(f"durable recovery refused: storage failure: {error}; preserve files and inspect/status before resuming", file=sys.stderr)
         return 2
 
 

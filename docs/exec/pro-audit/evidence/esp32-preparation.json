@@ -1,0 +1,17 @@
+{
+  "gpio_enabled": false,
+  "uploaded": false,
+  "live_tested": false,
+  "binary_sha256": "cff0a390ee91d34b567fbf667eb3a26a51dc54cf577b2d016c94173f8078796f",
+  "program_bytes": 1030586,
+  "globals_bytes": 49964,
+  "framework": "esp32 3.3.12",
+  "libraries": {
+    "ArduinoMqttClient": "0.1.8",
+    "ArduinoJson": "7.4.3"
+  },
+  "source_sha256": {
+    "examples/esp32/campus_device/campus_device.ino": "6df3f88d50fcc0451d5854bb27b1936bd6b775aa7792c41d555cb572001efdf4",
+    "examples/esp32/campus_device/b2_output.h": "337e2210ab36908351839c0f77a82ff4cee77e19621676659b42cd5d29a3b630"
+  }
+}
