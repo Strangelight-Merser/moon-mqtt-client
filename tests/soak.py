@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import platform
 import importlib.util
 import json
 import os
@@ -18,17 +20,12 @@ import threading
 import time
 
 import paho.mqtt.client as paho
+from harness import free_port
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MOON = Path(os.environ.get("MOON", ROOT / "scripts/moon.sh"))
-BROKER = Path(os.environ.get("MOSQUITTO", ROOT / ".tools/mosquitto"))
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+BROKER = Path(os.environ.get("MOSQUITTO", shutil.which("mosquitto") or ROOT / ".tools/mosquitto"))
 
 
 def wait_port(port: int, timeout: float = 4.0) -> None:
@@ -128,7 +125,7 @@ def process_sample(pid: int) -> tuple[int, int, int]:
     the caller can record the gap instead of reporting zeros as measurements.
     """
     if subprocess.run(["kill", "-0", str(pid)], capture_output=True).returncode:
-        return 0, 0, 0
+        raise SamplingUnavailable("process exited before live sample")
     proc = Path(f"/proc/{pid}")
     rss_kib = 0
     if (proc / "status").is_file():
@@ -152,9 +149,12 @@ def process_sample(pid: int) -> tuple[int, int, int]:
         lsof = shutil.which("lsof")
         if lsof:
             output = subprocess.run(
-                [lsof, "-n", "-p", str(pid)], capture_output=True, text=True
+                [lsof, "-n", "-F", "f", "-p", str(pid)], capture_output=True, text=True
             ).stdout
-            fd_count = max(0, len(output.splitlines()) - 1)
+            fd_count = len({line[1:] for line in output.splitlines()
+                            if line.startswith("f") and line[1:].isdigit()})
+        else:
+            raise SamplingUnavailable("lsof is required for live FD measurement")
     task_count = 0
     if (proc / "task").is_dir():
         task_count = len(list((proc / "task").iterdir()))
@@ -191,7 +191,15 @@ def write_mtls_files(directory: Path) -> None:
 def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
              downtime: float, artifacts: Path, broker_log: str = "quiet",
              broker_log_limit_mb: int = 64, mtls: bool = False) -> dict:
+    artifacts = artifacts.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
+    subprocess.run([str(MOON), "build", "--target", "native"], cwd=ROOT, check=True)
+    binaries = list((ROOT / "_build/native/debug/build").glob("**/soak_driver/soak_driver.exe"))
+    assert len(binaries) == 1, binaries
+    binary = artifacts / "soak_driver.exe"
+    shutil.copyfile(binaries[0], binary)
+    binary.chmod(0o700)
+    binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
     port = free_port()
     broker = Broker(port, artifacts, log_level=broker_log,
                     log_limit_bytes=broker_log_limit_mb * 1024 * 1024)
@@ -205,8 +213,16 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "require_certificate true\n"
             + broker._log_directives()
         )
-    broker.start()
-    observed = {"messages": 0, "invalid": 0, "connections": 0}
+    try:
+        broker.start()
+    except BaseException:
+        broker.close()
+        raise
+    observed = {"messages": 0, "invalid": 0, "connections": 0,
+                "measurement_ids": 0, "coverage": "observer may disconnect; not proof of complete delivery"}
+    observed_last = {}
+    observed["out_of_order_or_duplicate_ids"] = 0
+    observed["id_count_semantics"] = "monotonic per-worker IDs; lower bound if observer reorders"
     oracle_ready = threading.Event()
     oracle = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-soak-oracle")
     oracle.reconnect_delay_set(min_delay=1, max_delay=2)
@@ -219,6 +235,13 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
 
     def on_message(client, userdata, message):
         observed["messages"] += 1
+        parts = message.topic.split("/")
+        worker, sequence = int(parts[-2]), int(parts[-1])
+        if sequence > observed_last.get(worker, 0):
+            observed["measurement_ids"] += 1
+            observed_last[worker] = sequence
+        else:
+            observed["out_of_order_or_duplicate_ids"] += 1
         payload = message.payload
         if len(payload) != payload_bytes or any(
             value != index % 251 for index, value in enumerate(payload)
@@ -238,6 +261,9 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         oracle.connect("127.0.0.1", port)
     oracle.loop_start()
     if not oracle_ready.wait(4):
+        oracle.disconnect()
+        oracle.loop_stop()
+        broker.close()
         raise TimeoutError("Paho observer did not subscribe")
 
     log_path = artifacts / "driver.jsonl"
@@ -249,6 +275,8 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         "MQTT_SOAK_DURATION_SECONDS": str(duration),
         "MQTT_SOAK_CONCURRENCY": str(concurrency),
         "MQTT_SOAK_PAYLOAD_BYTES": str(payload_bytes),
+        "MQTT_RESOURCE_BARRIER": "1",
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1",
     }
     if mtls:
         env.update({
@@ -258,9 +286,9 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "MQTT_SOAK_KEY": str(artifacts / "client.key"),
         })
     driver = subprocess.Popen(
-        [str(MOON), "run", "examples/soak_driver", "--target", "native"],
+        [str(binary)],
         cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=stderr_file,
-        text=True, bufsize=1,
+        stdin=subprocess.PIPE, text=True, bufsize=1,
     )
     assert driver.stdout
     events: queue.Queue[dict] = queue.Queue()
@@ -290,7 +318,32 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
                 return event
         raise TimeoutError(f"did not receive {kind}; recent events={seen[-5:]}")
 
-    ready = next_event("ready", 15)
+    try:
+        next_event("cold_start", 15)
+        cold_start = process_sample(driver.pid)
+        driver.stdin.write("\n"); driver.stdin.flush()
+        warmup_scopes = []
+        for _ in range(3):
+            next_event("warmup_closed", 15)
+            warmup_scopes.append(process_sample(driver.pid))
+            driver.stdin.write("\n"); driver.stdin.flush()
+        next_event("before_scope", 15)
+        before_scope = process_sample(driver.pid)
+        driver.stdin.write("\n"); driver.stdin.flush()
+        ready = next_event("ready", 15)
+    except BaseException:
+        if driver.poll() is None:
+            driver.kill()
+            driver.wait()
+        reader.join(3)
+        driver.stdout.close()
+        driver.stdin.close()
+        oracle.disconnect()
+        oracle.loop_stop()
+        broker.close()
+        log_file.close()
+        stderr_file.close()
+        raise
     wall_started = time.monotonic()
     samples: list[dict] = []
     sampling = True
@@ -338,6 +391,10 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             else:
                 raise TimeoutError(f"cycle {cycle + 1} did not reconnect")
         final = next_event("final", duration + 30)
+        next_event("scope_closed", 10)
+        assert driver.poll() is None, "post-scope process exited before resource sampling"
+        post_scope = [process_sample(driver.pid) for _ in range(3)]
+        driver.stdin.write("\n"); driver.stdin.flush()
         code = driver.wait(15)
         if code != 0:
             raise RuntimeError(f"soak driver exited {code}; see {stderr_path}")
@@ -348,6 +405,7 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             driver.kill()
             driver.wait()
         driver.stdout.close()
+        driver.stdin.close()
         reader.join(3)
         oracle.disconnect()
         oracle.loop_stop()
@@ -367,12 +425,14 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             histogram[int(event["ms"])] = int(event["count"])
 
     elapsed = time.monotonic() - wall_started
-    after_exit_rss, after_exit_fds, after_exit_tasks = process_sample(driver.pid)
     evidence_bytes = {
         path.name: path.stat().st_size
         for path in sorted(artifacts.iterdir()) if path.is_file()
     }
     result = {
+        "native_executable": {"path": str(binary), "pid": driver.pid,
+                              "sha256": binary_hash},
+        "environment": {"platform": platform.platform(), "measurement": "native PID, not moon launcher"},
         "parameters": {
             "duration_seconds": duration, "disconnect_cycles": cycles,
             "payload_bytes": payload_bytes, "concurrency": concurrency,
@@ -411,9 +471,11 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "tasks_end": samples[-1]["tasks"] if samples else None,
             "tasks_peak": max((s["tasks"] for s in samples), default=None),
             "process_exit_code": code,
-            "after_exit_rss_kib": after_exit_rss,
-            "after_exit_fds": after_exit_fds,
-            "after_exit_tasks": after_exit_tasks,
+            "before_scope_rss_fds_threads": before_scope,
+            "cold_start_rss_fds_threads": cold_start,
+            "warmup_closed_rss_fds_threads": warmup_scopes,
+            "post_scope_rss_fds_threads": post_scope,
+            "task_measurement": "OS threads plus native active_workers; not a census of internal async tasks",
         },
         "ready": ready,
     }
@@ -439,14 +501,28 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         failures.append("observer saw no messages")
     if code != 0:
         failures.append(f"driver exit code={code}, expected 0")
-    if after_exit_fds != 0 or after_exit_tasks != 0:
-        failures.append(
-            f"driver retained resources after exit: fds={after_exit_fds}, tasks={after_exit_tasks}"
-        )
+    if any(row[1] > before_scope[1] for row in post_scope):
+        failures.append(f"post-scope descriptors exceed pre-scope baseline: {before_scope}, {post_scope}")
+    if warmup_scopes[-1][1] > warmup_scopes[-2][1]:
+        failures.append(f"descriptor count grows across warmup scopes: {warmup_scopes}")
+    counts = {"acknowledged": 0, "unknown": 0, "not_sent": 0, "rejected": 0}
+    next_sequence = {}
+    for line in log_path.read_text().splitlines():
+        event = json.loads(line)
+        if event.get("event") == "outcome_range":
+            worker = event["worker"]
+            if event["first"] != next_sequence.get(worker, 1) or event["last"] < event["first"]:
+                failures.append(f"non-contiguous measurement outcomes: {event}")
+            next_sequence[worker] = event["last"] + 1
+            counts[event["outcome"]] += event["last"] - event["first"] + 1
+    if sum(counts.values()) != final["attempted"] or any(counts[k] != final[k] for k in counts):
+        failures.append(f"measurement ID accounting differs from driver counters: {counts}")
+    result["outcome_accounting"] = counts
     if sample_errors and not samples:
         # The soak can still be valid, but it must not imply resource evidence
         # it does not have.
         result["resources"]["resource_evidence_available"] = False
+        failures.append("required live resource sampling unavailable")
     elif samples:
         result["resources"]["resource_evidence_available"] = True
         start_rss, end_rss = samples[0]["rss_kib"], samples[-1]["rss_kib"]
@@ -485,7 +561,7 @@ def main() -> None:
         help="require client certificates and use a private test PKI",
     )
     args = parser.parse_args()
-    artifacts = args.artifacts or Path(tempfile.mkdtemp(prefix="moon-mqtt-soak-"))
+    artifacts = args.artifacts or Path(os.environ.get("MQTT_EVIDENCE_DIR", ROOT / "_build/pro-audit")) / f"soak-{'mtls' if args.mtls else 'tcp'}-{time.time_ns()}"
     result = run_soak(
         args.duration, args.cycles, args.payload_bytes, args.concurrency,
         args.downtime, artifacts, args.broker_log, args.broker_log_limit_mb,
