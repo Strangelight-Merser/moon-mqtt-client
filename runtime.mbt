@@ -271,7 +271,7 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
         next_id: 1,
         alive: true,
         last_write: @async.now(),
-        ping_sent: None,
+        heartbeat_state: Idle,
         early_messages: [],
         failure_reason: None,
       },

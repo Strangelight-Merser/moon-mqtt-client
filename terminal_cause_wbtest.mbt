@@ -194,7 +194,7 @@ async test "heartbeat failure gives pending request its actual reason" {
   let request = cause_test_pending()
   request.started = true
   session.pending[request.id] = request
-  session.ping_sent = Some(@async.now() - 10L)
+  session.heartbeat_state = AwaitingResponse(@async.now() - 10L)
   let config = Config::new(
     "127.0.0.1",
     "heartbeat-cause-test",
@@ -226,7 +226,7 @@ async test "heartbeat failure gives pending request its actual reason" {
 ///|
 async test "heartbeat preserves the cause recorded while it was sleeping" {
   let session = cause_test_session(FailingCauseWriter::{  })
-  session.ping_sent = Some(@async.now() - 10L)
+  session.heartbeat_state = AwaitingResponse(@async.now() - 10L)
   let config = Config::new(
     "127.0.0.1",
     "heartbeat-abort-race",

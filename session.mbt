@@ -1,4 +1,13 @@
 ///|
+priv enum HeartbeatState {
+  Idle
+  Queued
+  Writing
+  RespondedWhileWriting
+  AwaitingResponse(Int64)
+} derive(Eq, @debug.Debug)
+
+///|
 priv enum RequestKind {
   Publish0
   Publish1
@@ -74,12 +83,7 @@ priv struct Session {
   mut next_id : Int
   mut alive : Bool
   mut last_write : Int64
-  /// Heartbeat state in one field: `None` is idle, -1 is queued, -2 is writing,
-  /// -3 is an early PINGRESP waiting for write completion, and a non-negative
-  /// value is the completed-write timestamp. The current native async runtime
-  /// obtains `@async.now()` from an unsigned millisecond timestamp source, so
-  /// these private negative sentinels cannot overlap a runtime timestamp.
-  mut ping_sent : Int64?
+  mut heartbeat_state : HeartbeatState
   early_messages : Array[Message]
   /// First error that ended this generation. Keeping the typed value lets the
   /// supervisor distinguish terminal protocol failures from retryable I/O loss.
@@ -145,7 +149,7 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
     self.control_queue.close(error=Closed, clear=true)
     self.business_depth = 0
     self.control_depth = 0
-    self.ping_sent = None
+    self.heartbeat_state = Idle
     for _, request in self.pending {
       // `started` means the bytes reached the socket write call, so the peer
       // may have executed the request even though no ACK arrived.
@@ -366,46 +370,27 @@ fn mark_started(request : Pending) -> Unit {
 }
 
 ///|
-/// Negative values are private heartbeat states. The current native runtime
-/// obtains timestamps from an unsigned millisecond source, so the existing
-/// optional field can distinguish these states without changing Session shape.
-fn ping_queued() -> Int64 {
-  -1L
-}
-
-///|
-fn ping_writing() -> Int64 {
-  -2L
-}
-
-///|
-fn ping_responded_while_writing() -> Int64 {
-  -3L
-}
-
-///|
 fn Session::queue_ping(self : Session, config : Config) -> Unit raise ClientError {
-  if self.ping_sent is Some(_) {
+  if !(self.heartbeat_state is Idle) {
     return
   }
-  self.ping_sent = Some(ping_queued())
+  self.heartbeat_state = Queued
   errdefer {
-    self.ping_sent = None
+    self.heartbeat_state = Idle
   }
   self.control_wire(@codec.PingreqPacket, config, is_ping=true)
 }
 
 ///|
 fn Session::receive_pingresp(self : Session) -> Unit {
-  match self.ping_sent {
-    Some(state) if state == ping_writing() ||
-      state == ping_responded_while_writing() =>
-      self.ping_sent = Some(ping_responded_while_writing())
+  match self.heartbeat_state {
+    Writing | RespondedWhileWriting =>
+      self.heartbeat_state = RespondedWhileWriting
     // A response cannot belong to this generation's PINGREQ until its writer
     // has begun. Ignore an unsolicited/stale response while it is only queued.
-    Some(state) if state == ping_queued() => ()
-    Some(_) => self.ping_sent = None
-    None => ()
+    Queued => ()
+    AwaitingResponse(_) => self.heartbeat_state = Idle
+    Idle => ()
   }
 }
 
@@ -617,8 +602,8 @@ async fn Session::write_one(
       // Mark writing inside the timeout closure, immediately before handing
       // bytes to the writer. A PINGRESP observed while the item was merely
       // queued must not satisfy this exchange.
-      if item.is_ping && self.ping_sent == Some(ping_queued()) {
-        self.ping_sent = Some(ping_writing())
+      if item.is_ping && self.heartbeat_state == Queued {
+        self.heartbeat_state = Writing
       }
       self.writer.write(bytes)
     })
@@ -654,18 +639,18 @@ async fn Session::write_one(
     self.delivery_changed.broadcast()
   }
   if item.is_ping {
-    match self.ping_sent {
-      Some(state) if state == ping_responded_while_writing() =>
+    match self.heartbeat_state {
+      RespondedWhileWriting =>
         // The peer observed the bytes before the writer future completed.
         // Keep the slot occupied until this point, then finish the exchange.
-        self.ping_sent = None
-      Some(state) if state == ping_writing() =>
+        self.heartbeat_state = Idle
+      Writing =>
         // PINGRESP timeout starts only after the PINGREQ write completed.
-        self.ping_sent = Some(self.last_write)
-      Some(_) => ()
+        self.heartbeat_state = AwaitingResponse(self.last_write)
+      Queued | AwaitingResponse(_) => ()
       // Production PINGREQ writes are admitted only by queue_ping. If no
       // exchange remains, leave the heartbeat idle instead of reviving it.
-      None => ()
+      Idle => ()
     }
   }
   match item.pending {
@@ -849,18 +834,18 @@ async fn Session::heartbeat(
   while self.alive {
     @async.sleep(tick)
     let now = @async.now()
-    match self.ping_sent {
-      Some(sent) =>
-        if sent >= 0L &&
-          now - sent >= config.ping_response_timeout_ms.to_int64() {
+    match self.heartbeat_state {
+      AwaitingResponse(sent) =>
+        if now - sent >= config.ping_response_timeout_ms.to_int64() {
           raise PingResponseTimeout(
             "no PINGRESP within \{config.ping_response_timeout_ms} ms of the completed PINGREQ write",
           )
         }
-      None =>
+      Idle =>
         if now - self.last_write >= (interval / 2).to_int64() {
           self.queue_ping(config)
         }
+      Queued | Writing | RespondedWhileWriting => ()
     }
   }
 }

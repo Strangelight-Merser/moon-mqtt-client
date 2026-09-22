@@ -23,7 +23,7 @@ fn fixture_session(
     business_depth: 0, control_depth: 0, pending, deliveries, reserved_deliveries,
     delivery_slots, qos1_outstanding: 0, receive_maximum, deferred_business: [],
     outgoing_limit, delivery_changed: @cond_var.Cond(), next_id, alive: true,
-    last_write, ping_sent: None, early_messages: [], failure_reason: None,
+    last_write, heartbeat_state: Idle, early_messages: [], failure_reason: None,
   }
 }
 

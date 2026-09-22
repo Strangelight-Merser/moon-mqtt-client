@@ -107,22 +107,22 @@ async test "A2 early PINGRESP stays pending until the current write returns" {
     writer.wait_entered()
     let reading = group.spawn(() => client.read_loop(session))
     peer_writer.write(encode(@codec.PingrespPacket, 4096))
-    while session.ping_sent == Some(ping_writing()) {
+    while session.heartbeat_state == Writing {
       @async.pause()
     }
-    assert_eq(session.ping_sent, Some(ping_responded_while_writing()))
+    assert_eq(session.heartbeat_state, RespondedWhileWriting)
     let heartbeat = group.spawn(() => session.heartbeat(config))
     @async.sleep(300)
     let duplicate_depth = session.control_depth
     writer.release()
     assert_true(writing.wait())
     assert_eq(writer.writes, 1)
-    let state_after_write = session.ping_sent
+    let state_after_write = session.heartbeat_state
     session.abort("test complete")
     heartbeat.cancel()
     reading.cancel()
     assert_eq(duplicate_depth, 0)
-    assert_true(state_after_write is None)
+    assert_true(state_after_write is Idle)
   })
 }
 
@@ -141,12 +141,11 @@ async test "A2 PINGRESP timeout starts after blocked write completion" {
       @async.sleep(200)
       assert_true(session.alive)
       assert_true(
-        (session.ping_sent is Some(value) && value < 0L) ||
-        session.ping_sent is None,
+        !(session.heartbeat_state is AwaitingResponse(_)),
       )
       writer.release()
       while session.alive &&
-            !(session.ping_sent is Some(value) && value >= 0L) {
+            !(session.heartbeat_state is AwaitingResponse(_)) {
         @async.pause()
       }
       assert_true(session.alive)
@@ -180,7 +179,7 @@ async test "A2 abort clears ping state and blocked completion cannot revive it" 
     writer.release()
     assert_false(writing.wait())
     assert_eq(writer.writes, 1)
-    assert_true(session.ping_sent is None)
+    assert_true(session.heartbeat_state is Idle)
   })
 }
 
@@ -236,7 +235,7 @@ async test "A2 queued PINGREQ ignores PINGRESP until a write can start" {
   let client = new_client(config, DeliveryBook::new(), None)
   client.ready = true
   session.queue_ping(config)
-  assert_eq(session.ping_sent, Some(ping_queued()))
+  assert_eq(session.heartbeat_state, Queued)
   @async.with_task_group(group => {
     let reading = group.spawn(() => client.read_loop(session))
     // The first frame is an unsolicited/old response while this generation's
@@ -259,12 +258,12 @@ async test "A2 queued PINGREQ ignores PINGRESP until a write can start" {
     while client.event_depth == 0 {
       @async.pause()
     }
-    assert_eq(session.ping_sent, Some(ping_queued()))
+    assert_eq(session.heartbeat_state, Queued)
     guard session.next_outgoing() is Some(ping) else {
       abort("queued PINGREQ missing")
     }
     assert_true(session.write_one(ping, 5000, 5000, 2))
-    assert_true(session.ping_sent is Some(sent) && sent >= 0L)
+    assert_true(session.heartbeat_state is AwaitingResponse(sent) && sent >= 0L)
     try {
       session.heartbeat_task(config)
       abort("missing response after the real PINGREQ write must time out")
