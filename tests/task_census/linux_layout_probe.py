@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 
 from snapshot import ACCESSOR, GLOBAL, SET_EMPTY
@@ -39,19 +40,25 @@ def main() -> None:
         ["objdump", "-d", "--no-show-raw-insn", str(binary)], text=True)
     elf_header = subprocess.check_output(["readelf", "-h", str(binary)], text=True)
     symbols = (GLOBAL, ACCESSOR, SET_EMPTY)
+    output = Path(os.environ.get("MQTT_EVIDENCE_DIR", ROOT / "_build/task-census"))
+    output.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(binary, output / "scope_driver-linux.exe")
     report = {
         "platform": platform.platform(),
         "binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
         "elf_type": [line.strip() for line in elf_header.splitlines()
                      if line.strip().startswith("Type:")],
+        "nm_line_count": len(nm.splitlines()),
         "symbols": {symbol: {
-            "nm": [line for line in nm.splitlines() if line.endswith(" " + symbol)],
-            "disassembly": symbol_lines(disassembly, symbol),
+            spelling: {
+                "nm": [line for line in nm.splitlines() if line.endswith(" " + spelling)],
+                "disassembly": symbol_lines(disassembly, spelling),
+            } for spelling in (symbol, symbol[1:])
         } for symbol in symbols},
+        "related_nm": [line for line in nm.splitlines()
+                       if "scheduler" in line or "all__coroutines" in line or "is__empty" in line][:100],
         "status": "layout probe only; no task count inferred",
     }
-    output = Path(os.environ.get("MQTT_EVIDENCE_DIR", ROOT / "_build/task-census"))
-    output.mkdir(parents=True, exist_ok=True)
     (output / "census-linux-layout.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report))
 
