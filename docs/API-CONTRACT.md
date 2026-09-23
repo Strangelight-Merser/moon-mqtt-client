@@ -66,6 +66,14 @@ best-effort and does not claim cross-field atomicity.
 | `DurableStorage(error)` | A required SQLite transition failed; the nested error retains busy/full/read-only/corrupt/I/O/schema/identity/limit/state classification | Depends; inspect the stable ID before reopening |
 | `Closed` | The client was shut down normally (`disconnect` or `with_client` scope end) | n/a |
 
+`Client.disconnect()` succeeds after its local MQTT DISCONNECT write completes
+and its worker cleanup is joined. MQTT supplies no DISCONNECT acknowledgement;
+neither a peer EOF nor a WebSocket Close proves that write succeeded. If the
+local write never began, the request remains `NotSent`; if it may be partial,
+it remains `OutcomeUnknown`. A reader close after the local write returns
+cannot revise that completed result. Already completed publications keep their
+own results.
+
 A failed first connection raises the classified error to `wait_connected` and to
 `with_client`. `Closed` is reserved for a normal stop; it does not replace
 `InvalidConfig` or `TlsFailure`.

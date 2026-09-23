@@ -30,6 +30,9 @@ priv struct Pending {
   kind : RequestKind
   changed : @cond_var.Cond
   mut started : Bool
+  /// Local writer returned successfully. MQTT DISCONNECT has no broker ACK;
+  /// this is its completion boundary even if the reader closes next.
+  mut local_write_complete : Bool
   mut result : Result[Reply, ClientError]?
   /// Monotonic time the request was accepted, used as the start of the
   /// `operation_timeout_ms` budget (queue time counts).
@@ -151,6 +154,13 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
     self.control_depth = 0
     self.heartbeat_state = Idle
     for _, request in self.pending {
+      // The reader can observe WS Close/TLS EOF after the local DISCONNECT
+      // write returned but before write_one removes slot zero. Keep that
+      // completed local write successful; Pending::finish remains first-wins.
+      if request.kind is Disconnect && request.local_write_complete {
+        request.finish(Ok(Done))
+        continue
+      }
       // `started` means the bytes reached the socket write call, so the peer
       // may have executed the request even though no ACK arrived.
       let error = if request.started {
@@ -606,6 +616,11 @@ async fn Session::write_one(
         self.heartbeat_state = Writing
       }
       self.writer.write(bytes)
+      if item.pending is Some(request) {
+        // Set inside the writer future, before its caller can be cancelled by
+        // a concurrent reader close. Never infer this from peer EOF/WS Close.
+        request.local_write_complete = true
+      }
     })
   } catch {
     error => {

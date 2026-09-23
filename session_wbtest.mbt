@@ -153,6 +153,48 @@ test "abort classifies unsent and started pending requests" {
 }
 
 ///|
+test "DISCONNECT local write completion wins a later reader close exactly once" {
+  let completed_session = test_session()
+  let completed = test_pending(0, Disconnect, started=true)
+  completed.local_write_complete = true
+  completed_session.pending[0] = completed
+  completed_session.abort("reader closed after local write")
+  match completed.result {
+    Some(Ok(Done)) => ()
+    _ => abort("completed local DISCONNECT write must succeed")
+  }
+
+  let partial_session = test_session()
+  let partial = test_pending(0, Disconnect, started=true)
+  partial_session.pending[0] = partial
+  partial_session.abort("reader closed during write")
+  match partial.result {
+    Some(Err(OutcomeUnknown(_))) => ()
+    _ => abort("started, incomplete DISCONNECT must remain unknown")
+  }
+
+  let queued_session = test_session()
+  let queued = test_pending(0, Disconnect)
+  queued_session.pending[0] = queued
+  queued_session.abort("reader closed before write")
+  match queued.result {
+    Some(Err(NotSent(_))) => ()
+    _ => abort("unstarted DISCONNECT must remain not sent")
+  }
+
+  let settled_session = test_session()
+  let settled = test_pending(0, Disconnect, started=true)
+  settled.finish(Err(OutcomeUnknown("first terminal result")))
+  settled.local_write_complete = true
+  settled_session.pending[0] = settled
+  settled_session.abort("late reader close")
+  match settled.result {
+    Some(Err(OutcomeUnknown(reason))) => assert_eq(reason, "first terminal result")
+    _ => abort("late success must not overwrite a published terminal result")
+  }
+}
+
+///|
 test "packet id allocation wraps and skips occupied identifiers" {
   let session = test_session(next_id=65535)
   let occupied : Pending = test_pending(65535, Publish1)

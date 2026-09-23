@@ -35,6 +35,7 @@ fn test_pending(id : Int, kind : RequestKind, queued_at? : Int64 = 0L, started? 
     kind,
     changed: @cond_var.Cond(),
     started,
+    local_write_complete: false,
     result: None,
     queued_at,
     refresh: None,
