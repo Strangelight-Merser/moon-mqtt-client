@@ -17,8 +17,8 @@
     {"type": "required_status_checks", "parameters": {
       "strict_required_status_checks_policy": true,
       "required_status_checks": [
-        {"context": "check (ubuntu-latest)", "integration_id": 15368},
-        {"context": "check (macos-latest)", "integration_id": 15368}
+        {"context": "core (linux-x64)", "integration_id": 15368},
+        {"context": "core (macos-arm64)", "integration_id": 15368}
       ]
     }}
   ]

@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import socket
 import statistics
@@ -50,8 +51,8 @@ class Broker:
         self.log_path = artifact_dir / "broker.log"
         self.log = open(self.log_path, "a", encoding="utf-8")
         # A 30-minute, 16-worker QoS 1 run can emit an enormous per-packet broker
-        # log. The default is quiet (errors and warnings only); `normal` adds
-        # connection notices and `debug` restores `log_type all` for diagnosis.
+        # log. The soak default is normal, which records connection notices;
+        # `quiet` keeps only errors/warnings and `debug` logs all packets.
         # The file is also capped in `_cap_log`, so a long run cannot leave
         # multi-gigabyte artifacts behind.
         self.config = artifact_dir / "mosquitto.conf"
@@ -179,6 +180,35 @@ def percentile(histogram: dict[int, int], fraction: float) -> int | None:
     raise AssertionError("histogram accounting error")
 
 
+def broker_dial_ledger(path: Path) -> dict:
+    """Extract independent broker notices without inferring a client from TCP probes."""
+    rows = []
+    accepted = {}
+    for line in path.read_text(errors="replace").splitlines():
+        stamp = re.match(r"^(\d+): (.*)$", line)
+        if not stamp:
+            continue
+        second, message = int(stamp.group(1)), stamp.group(2)
+        tcp = re.match(r"New connection from ([^ ]+) on port (\d+)\.", message)
+        mqtt = re.match(r"New client connected from ([^ ]+) as ([^ ]+) ", message)
+        if tcp:
+            rows.append({"stage": "tcp_accepted", "broker_epoch_second": second,
+                         "endpoint": tcp.group(1), "line": line})
+        elif mqtt:
+            identity = mqtt.group(2)
+            rows.append({"stage": "mqtt_client_accepted", "broker_epoch_second": second,
+                         "endpoint": mqtt.group(1), "identity": identity,
+                         "line": line})
+            accepted[identity] = accepted.get(identity, 0) + 1
+        elif "disconnected" in message and "Client " in message:
+            rows.append({"stage": "broker_reported_close", "broker_epoch_second": second,
+                         "line": line})
+    return {"rows": rows, "accepted_by_identity": accepted,
+            "limitations": ["Mosquitto notices have one-second timestamp resolution",
+                            "TCP health probes have no MQTT identity and are excluded from MQTT dials",
+                            "No on-wire CONNACK bytes or TLS handshake phase captured by this logger"]}
+
+
 def write_mtls_files(directory: Path) -> None:
     spec = importlib.util.spec_from_file_location(
         "mqtt_integration", ROOT / "tests/integration/run.py",
@@ -189,7 +219,7 @@ def write_mtls_files(directory: Path) -> None:
 
 
 def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
-             downtime: float, artifacts: Path, broker_log: str = "quiet",
+             downtime: float, artifacts: Path, broker_log: str = "normal",
              broker_log_limit_mb: int = 64, mtls: bool = False) -> dict:
     artifacts = artifacts.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
@@ -368,18 +398,27 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
     sampler = threading.Thread(target=sample_resources, daemon=True)
     sampler.start()
     recoveries = []
+    fault_plan = []
     latest_generation = 1
+    observation_complete = False
     try:
         for cycle in range(cycles):
             target = wall_started + (cycle + 1) * duration / (cycles + 1)
             delay = target - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
+            fault = {"fault_id": cycle + 1, "generation_before": latest_generation,
+                     "stop_invoked_wall_ms": int(time.time() * 1000),
+                     "stop_invoked_monotonic_ns": time.monotonic_ns()}
+            fault_plan.append(fault)
             broker.stop()
             stopped = time.monotonic()
+            fault["stopped_monotonic_ns"] = time.monotonic_ns()
             time.sleep(downtime)
             oracle_ready.clear()
+            fault["start_invoked_monotonic_ns"] = time.monotonic_ns()
             broker.start()
+            fault["started_monotonic_ns"] = time.monotonic_ns()
             deadline = time.monotonic() + 12
             while time.monotonic() < deadline:
                 event = next_event("connected", max(.1, deadline - time.monotonic()))
@@ -387,6 +426,9 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
                 if generation > latest_generation:
                     latest_generation = generation
                     recoveries.append(time.monotonic() - stopped)
+                    fault["recovered_generation"] = generation
+                    fault["recovered_monotonic_ns"] = time.monotonic_ns()
+                    fault["recovered_wall_ms"] = int(time.time() * 1000)
                     break
             else:
                 raise TimeoutError(f"cycle {cycle + 1} did not reconnect")
@@ -398,9 +440,16 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         code = driver.wait(15)
         if code != 0:
             raise RuntimeError(f"soak driver exited {code}; see {stderr_path}")
+        observation_complete = True
     finally:
         sampling = False
         sampler.join(3)
+        if not observation_complete:
+            (artifacts / "observation-incomplete.json").write_text(json.dumps({
+                "status": "incomplete", "reason": "watchdog, driver failure, or forced collector cancellation",
+                "fault_plan": fault_plan, "last_generation": latest_generation,
+                "driver_exit_code_before_cleanup": driver.poll(),
+            }, indent=2) + "\n")
         if driver.poll() is None:
             driver.kill()
             driver.wait()
@@ -414,6 +463,7 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         stderr_file.close()
 
     histogram: dict[int, int] = {}
+    client_events = []
     while not events.empty():
         event = events.get_nowait()
         if event.get("event") == "latency_bucket":
@@ -423,6 +473,39 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         event = json.loads(line)
         if event.get("event") == "latency_bucket":
             histogram[int(event["ms"])] = int(event["count"])
+        if event.get("event") in ("connected", "disconnected"):
+            client_events.append(event)
+
+    classifications = []
+    connected_index = {}
+    for index, event in enumerate(client_events):
+        if event["event"] == "connected":
+            connected_index.setdefault(event["generation"], []).append(index)
+    for fault in fault_plan:
+        generation = fault["generation_before"]
+        starts = connected_index.get(generation, [])
+        ends = connected_index.get(generation + 1, [])
+        if len(starts) != 1 or len(ends) != 1:
+            continue
+        within = [event for event in client_events[starts[0] + 1:ends[0]]
+                  if event["event"] == "disconnected"]
+        for number, event in enumerate(within):
+            window = (fault["stop_invoked_wall_ms"] - 100 <= event["at_ms"]
+                      <= fault.get("recovered_wall_ms", -1) + 100)
+            classifications.append({"fault_id": fault["fault_id"],
+                                    "generation": event["generation"],
+                                    "at_ms": event["at_ms"],
+                                    "class": ("established_close" if number == 0 else
+                                              "recovery_pre_ready_failure") if window and
+                                              event["generation"] == generation else "unknown"})
+    classified = len(classifications)
+    consumed_disconnects = sum(e["event"] == "disconnected" for e in client_events)
+    unknown_class = sum(e["class"] == "unknown" for e in classifications)
+    unknown_class += consumed_disconnects - classified
+    (artifacts / "fault-plan.json").write_text(json.dumps(fault_plan, indent=2) + "\n")
+    (artifacts / "client-events.json").write_text(json.dumps(client_events, indent=2) + "\n")
+    peer_dials = broker_dial_ledger(broker.log_path)
+    (artifacts / "peer-dial-ledger.json").write_text(json.dumps(peer_dials, indent=2) + "\n")
 
     elapsed = time.monotonic() - wall_started
     evidence_bytes = {
@@ -442,6 +525,13 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         },
         "evidence_bytes": evidence_bytes,
         "driver": final,
+        "fault_plan": fault_plan,
+        "peer_dial_ledger": {"mqtt_client_accepts": peer_dials["accepted_by_identity"].get(
+            "moon-soak-driver", 0), "limitations": peer_dials["limitations"]},
+        "disconnect_classification": {"rows": classifications,
+                                      "unknown_class": unknown_class,
+                                      "consumer_events": consumed_disconnects,
+                                      "broker_stage_limit": "No independent per-dial CONNACK or TLS stage trace; pre-ready classification is from client event order and fault windows."},
         "elapsed_seconds": elapsed,
         "throughput_ack_per_second": final["acknowledged"] / elapsed,
         "latency_ms": {
@@ -488,13 +578,27 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         "event_queue": 0,
         "generation": cycles + 1,
         "reconnects": cycles,
-        "disconnects": cycles,
+        "collector_complete": True,
+        "shutdown_failed": False,
     }
     for field, wanted in expected.items():
         if final.get(field) != wanted:
             failures.append(f"final.{field}={final.get(field)!r}, expected {wanted!r}")
     if len(recoveries) != cycles:
         failures.append(f"recovery count={len(recoveries)}, expected {cycles}")
+    if broker_log != "quiet" and peer_dials["accepted_by_identity"].get(
+        "moon-soak-driver", 0) < cycles + 1:
+        failures.append("broker notices lack the expected independent MQTT accepts")
+    if final.get("disconnects") != consumed_disconnects:
+        failures.append(f"emitted Disconnected={final.get('disconnects')} consumed={consumed_disconnects}")
+    if final.get("disconnected_events") != consumed_disconnects:
+        failures.append(f"collector counter={final.get('disconnected_events')} log={consumed_disconnects}")
+    if unknown_class:
+        failures.append(f"unclassified Disconnected events={unknown_class}")
+    for fault in fault_plan:
+        if sum(row["fault_id"] == fault["fault_id"] and row["class"] == "established_close"
+               for row in classifications) != 1:
+            failures.append(f"fault {fault['fault_id']} has no unique established close")
     if observed["invalid"] != 0:
         failures.append(f"observer.invalid={observed['invalid']}, expected 0")
     if observed["messages"] <= 0:
@@ -549,8 +653,8 @@ def main() -> None:
     parser.add_argument("--downtime", type=float, default=.2)
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument(
-        "--broker-log", choices=["quiet", "normal", "debug"], default="quiet",
-        help="mosquitto verbosity; quiet keeps only warnings and errors",
+        "--broker-log", choices=["quiet", "normal", "debug"], default="normal",
+        help="mosquitto verbosity; normal records independent connection notices",
     )
     parser.add_argument(
         "--broker-log-limit-mb", type=int, default=64,

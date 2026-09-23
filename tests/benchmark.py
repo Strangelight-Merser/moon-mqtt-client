@@ -5,12 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
 import queue
 import shutil
 import socket
+import statistics
 import subprocess
 import threading
 import time
@@ -49,6 +51,43 @@ def percentiles(values):
     }
 
 
+def percentile_with_overflow(histogram, overflow_count, fraction):
+    total = sum(histogram.values()) + overflow_count
+    if total == 0:
+        return None
+    rank = math.ceil(total * fraction)
+    finite = sum(histogram.values())
+    if rank > finite:
+        return {"lower_bound_us": 100000, "upper_bound_us": None}
+    return percentile(histogram, fraction * total / finite)
+
+
+def trace_comparison(pairs):
+    assert len(pairs) == 3
+    throughputs = {mode: [pair[mode]["throughput_per_s"] for pair in pairs]
+                   for mode in ("off", "on")}
+    p99 = {mode: [pair[mode]["latency_us"]["p99"] for pair in pairs]
+           for mode in ("off", "on")}
+    variable = any(statistics.pstdev(values) / statistics.mean(values) > .15
+                   for values in throughputs.values() if statistics.mean(values))
+    if any(not isinstance(value, int) for values in p99.values() for value in values):
+        variable = True
+    else:
+        variable |= any(statistics.pstdev(values) / statistics.mean(values) > .15
+                        for values in p99.values() if statistics.mean(values))
+    if variable:
+        return {"verdict": "indeterminate", "reason": "variance above 15% or censored p99",
+                "throughput": throughputs, "p99_us": p99}
+    off_t = statistics.median(throughputs["off"])
+    on_t = statistics.median(throughputs["on"])
+    off_p = statistics.median(p99["off"])
+    on_p = statistics.median(p99["on"])
+    return {"verdict": "investigate" if on_t < off_t * .8 or on_p > off_p * 1.25 else "within_trigger",
+            "throughput": throughputs, "p99_us": p99,
+            "throughput_drop_fraction": (off_t - on_t) / off_t,
+            "p99_rise_fraction": (on_p - off_p) / off_p if off_p else None}
+
+
 class Peer:
     def __init__(self, settings, directory):
         self.settings = settings
@@ -66,6 +105,9 @@ class Peer:
         self.filters = []
         self.sub_count = 0
         self.flow_count = 0
+        self.ack_delay_ms = settings.get("ack_delay_ms", 0)
+        self.phase = "warmup"
+        self.subscribe_sequence = {"warmup": 0, "sample": 0}
         self.trace = (directory / "wire.jsonl").open("w")
         self.thread = threading.Thread(target=self.serve, daemon=True)
         self.thread.start()
@@ -108,6 +150,7 @@ class Peer:
                             conn.sendall(b"\xd0\0")
                             continue
                         if typ == 8:
+                            wire_subscribe_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
                             pid = data[o : o + 2]
                             i = o + 2 + (1 if version == 5 else 0)
                             count = 0
@@ -117,6 +160,7 @@ class Peer:
                                 count += 1
                             filters += count
                             self.sub_count += count
+                            suback_begin_ns = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
                             conn.sendall(
                                 frame(
                                     0x90,
@@ -125,6 +169,15 @@ class Peer:
                                     + b"\x01" * count,
                                 )
                             )
+                            if self.settings["kind"] == "flow":
+                                phase = self.phase
+                                self.subscribe_sequence[phase] += 1
+                                self.trace.write(json.dumps({
+                                    "id": f"flow-{phase}-{self.subscribe_sequence[phase]}",
+                                    "wire_subscribe_ns": wire_subscribe_ns,
+                                    "suback_begin_ns": suback_begin_ns,
+                                    "suback_sent_ns": time.clock_gettime_ns(time.CLOCK_MONOTONIC),
+                                }) + "\n")
                             if self.settings["kind"] == "flow":
                                 assert len(held) == (
                                     1 if self.settings["credit"] == 1 else 2
@@ -181,6 +234,8 @@ class Peer:
                                 + "\n"
                             )
                         if qos:
+                            if self.ack_delay_ms:
+                                time.sleep(self.ack_delay_ms / 1000)
                             if self.settings["kind"] in ("durable", "stages"):
                                 self.trace.write(
                                     json.dumps(
@@ -229,7 +284,7 @@ class Peer:
         assert not self.thread.is_alive(), "peer did not close"
 
 
-def trial(binary, settings, warmup, seconds, directory):
+def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
     directory.mkdir(parents=True, exist_ok=False)
     peer = Peer(settings, directory)
     env = {
@@ -240,6 +295,7 @@ def trial(binary, settings, warmup, seconds, directory):
         "MQTT_BENCH_SECONDS": str(seconds),
         "MQTT_BENCH_DB": str(directory / "outbox.sqlite3"),
         "MQTT_BENCH_TRACE": str(directory / "sqlite.jsonl"),
+        "MQTT_BENCH_TRACE_ENABLED": "1" if trace_enabled else "0",
     }
     env.update({"MQTT_BENCH_" + k.upper(): str(v) for k, v in settings.items()})
     stdout = (directory / "native.jsonl").open("w")
@@ -312,6 +368,7 @@ def trial(binary, settings, warmup, seconds, directory):
         barrier("warmed", warmup + 30)
         warmed = process_sample(process.pid)
         sampler.start()
+        peer.phase = "sample"
         release()
         barrier("scope_closed", seconds + 40)
         post = [process_sample(process.pid) for _ in range(3)]
@@ -335,6 +392,8 @@ def trial(binary, settings, warmup, seconds, directory):
     start = next(r["ns"] for r in phases if r["event"] == "phase_start")
     end = next(r["ns"] for r in phases if r["event"] == "phase_end")
     histogram = {}
+    overflow_count = 0
+    max_ns = 0
     for row in phases:
         if row["event"] == "outcomes":
             key = f"sample/{row['worker']}"
@@ -365,7 +424,15 @@ def trial(binary, settings, warmup, seconds, directory):
             histogram[row["upper_us"]] = (
                 histogram.get(row["upper_us"], 0) + row["count"]
             )
+        if row["event"] == "overflow":
+            assert row["lower_us"] == 100000
+            overflow_count += row["count"]
+            max_ns = max(max_ns, row["max_ns"])
     count = sum(r["completed"] for r in phases if r["event"] == "outcomes")
+    if settings["kind"] in ("publish", "stages", "durable"):
+        assert sum(histogram.values()) + overflow_count == count, (
+            histogram, overflow_count, count
+        )
     cycles = sum(1 for row in phases if row["event"] == "cycle")
     if settings["kind"] == "flow":
         assert peer.wire["sample/0"] == peer.wire["sample/1"] == cycles
@@ -386,13 +453,19 @@ def trial(binary, settings, warmup, seconds, directory):
         if settings.get("qos", 1) == 0
         else "QoS1 PUBACK",
         "latency_us": {
-            k: percentile(histogram, f)
+            k: percentile_with_overflow(histogram, overflow_count, f)
             for k, f in (("p50", 0.5), ("p95", 0.95), ("p99", 0.99))
         },
-        "latency_censored_above_100ms": histogram.get(100010, 0),
+        "latency_overflow_count": overflow_count,
+        "latency_overflow_lower_us": 100000,
+        "latency_max_ns": max_ns if count else None,
         "cycles_ns": percentiles([r["ns"] for r in phases if r["event"] == "cycle"]),
-        "nonpublish_ns": percentiles(
-            [r["ns"] for r in phases if r["event"] == "nonpublish"]
+        "cycle_to_suback_ns": percentiles(
+            [r["cycle_to_suback_ns"] for r in phases if r["event"] == "subscribe_call"]
+        ),
+        "subscribe_call_to_return_ns": percentiles(
+            [r["returned_ns"] - r["called_ns"] for r in phases
+             if r["event"] == "subscribe_call"]
         ),
         "wire_accounting": peer.wire,
         "wire_ranges": peer.wire_ranges,
@@ -449,7 +522,7 @@ def trial(binary, settings, warmup, seconds, directory):
             )
             assert x["ack_send_begin"] <= done
             durations["total"].append(done - begin)
-            if settings["kind"] == "durable":
+            if settings["kind"] == "durable" and trace_enabled:
                 assert begin <= x["admission_commit"] <= row["admitted_ns"]
                 assert (
                     x["admission_commit"]
@@ -463,9 +536,28 @@ def trial(binary, settings, warmup, seconds, directory):
         result["stage_duration_ns"] = {
             k: percentiles(v) for k, v in durations.items() if v
         }
+        result["sqlite_trace_enabled"] = trace_enabled and settings["kind"] == "durable"
         result["stage_semantics"] = (
-            "ACK is peer send-completion upper bound; delete duration starts at wire receive, not business processing. SQLite PROFILE follows COMMIT. Trace adds I/O overhead."
+            "ACK is bounded by peer send begin/return. SQLite stages exist only with the test trace enabled; PROFILE follows COMMIT and adds I/O overhead."
         )
+    if settings["kind"] == "flow":
+        wire_subscriptions = {
+            row["id"]: row for row in map(json.loads, (directory / "wire.jsonl").read_text().splitlines())
+            if row.get("id", "").startswith("flow-sample-")
+        }
+        native_subscriptions = [row for row in phases if row["event"] == "subscribe_call"]
+        assert len(wire_subscriptions) == len(native_subscriptions), (
+            len(wire_subscriptions), len(native_subscriptions))
+        result["wire_subscribe_to_suback_ns"] = {
+            "send_begin": percentiles([
+                wire_subscriptions[f"flow-sample-{row['sequence']}"]["suback_begin_ns"] -
+                wire_subscriptions[f"flow-sample-{row['sequence']}"]["wire_subscribe_ns"]
+                for row in native_subscriptions]),
+            "send_return": percentiles([
+                wire_subscriptions[f"flow-sample-{row['sequence']}"]["suback_sent_ns"] -
+                wire_subscriptions[f"flow-sample-{row['sequence']}"]["wire_subscribe_ns"]
+                for row in native_subscriptions]),
+        }
     (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     return result
 
@@ -476,6 +568,8 @@ def main():
     parser.add_argument("--seconds", type=int, default=30)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--only", nargs="*")
+    parser.add_argument("--trace-ab", action="store_true",
+                        help="add three paired durable-stage trials with only test SQLite trace toggled")
     parser.add_argument("--artifacts", type=Path)
     args = parser.parse_args()
     workloads = [w for w in WORKLOADS if not args.only or w["name"] in args.only]
@@ -531,6 +625,7 @@ def main():
         and args.warmup == 5
         and args.seconds == 30
         and args.repeats == 3,
+        "trace_ab_requested": args.trace_ab,
     }
     for w in workloads:
         for i in range(args.repeats):
@@ -541,6 +636,23 @@ def main():
                 )
             )
             (out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
+    if args.trace_ab:
+        if args.repeats != 3:
+            raise ValueError("trace A/B requires exactly three repeats")
+        settings = next(w for w in WORKLOADS if w["name"] == "durable-stages")
+        pairs = []
+        for i in range(3):
+            pair = {}
+            for mode in ("off", "on"):
+                print(f"TRACE A/B repeat {i + 1} {mode}", flush=True)
+                pair[mode] = trial(binary, settings, args.warmup, args.seconds,
+                                   out / f"trace-ab-{i + 1}-{mode}",
+                                   trace_enabled=mode == "on")
+            pairs.append(pair)
+            report["trace_ab"] = {"pairs": pairs}
+            (out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
+        report["trace_ab"]["comparison"] = trace_comparison(pairs)
+        (out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
     print(f"Benchmark evidence: {out}", flush=True)
 
 

@@ -66,6 +66,7 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
       group.spawn_bg(async fn() {
         let mut seq = 0
         let histogram = Array::make(10001, 0)
+        let mut max_ns = 0L
         let mut completed_count = 0
         let mut rejected = 0
         let mut unknown = 0
@@ -109,7 +110,9 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
           }
           if outcome == "completed" {
             completed_count += 1
-            let bucket = ((now_ns() - began) / 10000L)
+            let elapsed_ns = (now_ns() - began).max(0L)
+            max_ns = max_ns.max(elapsed_ns)
+            let bucket = (elapsed_ns / 10000L)
               .to_int()
               .clamp(min=0, max=10000)
             histogram[bucket] += 1
@@ -134,13 +137,16 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
           }
         }
         range(phase, worker, range_start, seq, last_outcome)
-        for bucket in 0..<histogram.length() {
+        for bucket in 0..<10000 {
           if histogram[bucket] > 0 {
             log(
               "{\"event\":\"bucket\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"upper_us\":\{(bucket + 1) * 10},\"count\":\{histogram[bucket]}}",
             )
           }
         }
+        log(
+          "{\"event\":\"overflow\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"lower_us\":100000,\"count\":\{histogram[10000]},\"max_ns\":\{max_ns}}",
+        )
         log(
           "{\"event\":\"outcomes\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"first\":1,\"last\":\{seq},\"accepted\":\{completed_count + unknown + not_sent},\"completed\":\{completed_count},\"rejected\":\{rejected},\"unknown\":\{unknown},\"not_sent\":\{not_sent}}",
         )
@@ -191,18 +197,19 @@ async fn special_workload(
         "bench-\{phase}-1-\{sequence}",
         b"two",
       )
+      let subscribe_called_ns = now_ns()
       ignore(
         client.subscribe([
           { topic: "bench/nonpublish", qos: @mqtt.AtLeastOnce, },
         ]),
       )
-      let acknowledged = now_ns()
+      let subscribe_returned_ns = now_ns()
       if first.wait().phase != @mqtt.Acknowledged ||
         second.wait().phase != @mqtt.Acknowledged {
         fail("flow measurement publish failed")
       }
       log(
-        "{\"event\":\"nonpublish\",\"phase\":\"\{phase}\",\"sequence\":\{sequence},\"ns\":\{acknowledged - start}}",
+        "{\"event\":\"subscribe_call\",\"phase\":\"\{phase}\",\"sequence\":\{sequence},\"called_ns\":\{subscribe_called_ns},\"returned_ns\":\{subscribe_returned_ns},\"cycle_to_suback_ns\":\{subscribe_returned_ns - start}}",
       )
     }
     log(
@@ -261,7 +268,7 @@ async fn main {
     max_reconnect_delay_ms=20,
     reconnect_attempts=10,
   )
-  if kind == "durable" {
+  if kind == "durable" && setting("TRACE_ENABLED", "1") == "1" {
     if trace_enable() != 0 {
       fail("cannot install isolated SQLite measurement trace")
     }

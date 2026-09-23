@@ -1,7 +1,5 @@
-// Proposed regressions for the root package at f0a0e9ec33b7aee2aeee26ea20572904d05e3069.
-// NOT COMPILED OR EXECUTED in the audit environment.
-// Reuses test_session/test_pending from session_wbtest.mbt.
-// Copy to the repository root in an isolated worktree; run its native tests.
+// Native H01 regression tests. These run from the root package with
+// test_session/test_pending from session_wbtest.mbt.
 
 ///|
 fn credit_audit_item(id : Int, kind : RequestKind, bytes : Bytes) -> Outgoing {

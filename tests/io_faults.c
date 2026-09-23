@@ -2,6 +2,7 @@
  * Fail exactly one matching call beneath an explicit temporary directory. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -12,9 +13,26 @@
 #include <unistd.h>
 
 static atomic_int fired = 0;
+static int arm_prefix_exists(const char *root, const char *prefix) {
+  if (!prefix) return 1;
+  DIR *directory = opendir(root);
+  if (!directory) return 0;
+  struct dirent *entry;
+  int found = 0;
+  size_t length = strlen(prefix);
+  while ((entry = readdir(directory))) {
+    if (!strncmp(entry->d_name, prefix, length)) { found = 1; break; }
+  }
+  closedir(directory);
+  return found;
+}
 static int selected(int fd, const char *operation) {
   const char *root = getenv("MQTT_IO_ROOT"), *op = getenv("MQTT_IO_OPERATION");
   const char *arm = getenv("MQTT_IO_ARM"), *marker = getenv("MQTT_IO_MARKER");
+  const char *contains = getenv("MQTT_IO_PATH_CONTAINS");
+  const char *arm_prefix = getenv("MQTT_IO_ARM_PREFIX");
+  const char *arm_path = getenv("MQTT_IO_ARM_PATH");
+  const char *directory_only = getenv("MQTT_IO_DIRECTORY_ONLY");
   if (!root || !op || !marker || strcmp(op, operation) ||
       (arm && access(arm, F_OK))) return 0;
   char path[PATH_MAX];
@@ -29,6 +47,10 @@ static int selected(int fd, const char *operation) {
 #endif
   size_t length = strlen(root);
   if (strncmp(path, root, length) || (path[length] && path[length] != '/')) return 0;
+  if (contains && !strstr(path, contains)) return 0;
+  if (directory_only && strcmp(path, root)) return 0;
+  if (!arm_prefix_exists(root, arm_prefix)) return 0;
+  if (arm_path && access(arm_path, F_OK)) return 0;
   if (atomic_exchange(&fired, 1)) return 0;
   int log = open(marker, O_WRONLY | O_CREAT | O_APPEND, 0600);
   if (log >= 0) {

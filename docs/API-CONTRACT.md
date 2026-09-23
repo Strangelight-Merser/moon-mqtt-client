@@ -275,6 +275,12 @@ identifier space. Consequences:
 `Client.stats()` returns generation, connection state, business/control/event
 queue occupancy, pending requests, cumulative reconnects, cumulative
 disconnects, cumulative unknown outcomes, and the most recent disconnect reason.
+`disconnects` counts `Disconnected` notifications successfully queued for the
+client, including some failed recovery dials. It is neither a broker restart
+count nor a count of every socket close, and an additional notification need
+not imply a new generation. `generation` advances on successful CONNACK;
+`Connected(generation)` is emitted only after subscription restoration and
+the connection is ready. These observations must be accounted for separately.
 It contains no credentials and no message bodies, and the client does not depend
 on any monitoring service to produce it.
 

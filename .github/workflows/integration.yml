@@ -1,13 +1,12 @@
-name: native client
+name: native client integration
 on:
   push:
-  pull_request:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  core:
-    name: core (${{ matrix.platform }})
+  integration:
+    name: integration (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
@@ -17,7 +16,7 @@ jobs:
           - os: macos-latest
             platform: macos-arm64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 150
+    timeout-minutes: 65
     env:
       MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
     steps:
@@ -31,26 +30,24 @@ jobs:
       - name: Install broker (macOS)
         if: runner.os == 'macOS'
         run: brew install mosquitto openssl@3
-      - name: Match localhost to the IPv4-only test broker (Linux)
+      - name: Match localhost to IPv4 broker (Linux)
         if: runner.os == 'Linux'
         run: |
-          # The test broker listens on 127.0.0.1. Avoid spending three Happy
-          # Eyeballs delays on duplicate ::1 results where no broker listens.
           echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
-          python -c 'import socket; results=socket.getaddrinfo("localhost", None, 0, 0, 0, socket.AI_ADDRCONFIG); print(results); assert results[0][4][0] == "127.0.0.1"'
+          python -c 'import socket; results=socket.getaddrinfo("localhost", None, 0, 0, 0, socket.AI_ADDRCONFIG); assert results[0][4][0] == "127.0.0.1"'
       - name: Install verified MoonBit baseline
         run: |
           ./scripts/install-moonbit-ci.sh fixed
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
       - name: Install acceptance dependencies
         run: python -m pip install -r tests/integration/requirements.txt
-      - name: Shared software acceptance
-        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" ./scripts/check.sh core
+      - name: Shared Integration acceptance
+        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" ./scripts/check.sh integration
       - name: Preserve first-attempt evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: core-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_attempt }}
+          name: integration-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             _build/acceptance/
             !_build/acceptance/**/*.key

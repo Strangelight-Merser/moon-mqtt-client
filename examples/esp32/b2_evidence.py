@@ -35,6 +35,44 @@ def file_identity(path):
     }
 
 
+def classify_run(root):
+    manifest = json.loads((root / "run.json").read_text())
+    for key in ("candidate", "firmware", "consumer"):
+        item = manifest[key]
+        assert file_identity(Path(item["file"]))["sha256"] == item["sha256"], key
+    physical = {}
+    for line in (root / "physical.jsonl").read_text().splitlines():
+        row = json.loads(line)
+        assert row["id"] not in physical, "ambiguous duplicate observation record"
+        physical[row["id"]] = row
+    commands = [json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()]
+    calibration = manifest["calibration"]
+    calibrated = calibration["two_distinct_applies_resolved"] is True and bool(
+        calibration["raw_capture"]
+    )
+    if calibrated:
+        item = calibration["raw_capture"]
+        calibrated = file_identity(Path(item["file"]))["sha256"] == item["sha256"]
+    result = []
+    for command in commands:
+        row = physical.get(command["id"])
+        outcome = "evidence_insufficient"
+        if calibrated and row and row.get("independent_observer") and row.get("coverage_complete"):
+            raw = row["raw_capture"]
+            assert file_identity(Path(raw["file"]))["sha256"] == raw["sha256"]
+            count = row["apply_count"]
+            assert type(count) is int and count >= 0
+            outcome = "zero" if count == 0 else "once" if count == 1 else "multiple"
+        result.append({"id": command["id"], "case": command["case"], "execution": outcome})
+    return {
+        "commands": result,
+        "unrun_cases": [c for c in CASES if c not in {x["case"] for x in commands}],
+        "observer_scope": "Independent capture provenance is supplied by the operator; software cannot certify wiring or mechanical action.",
+        "b2_a_ui_evidence": manifest.get("b2_a_ui_evidence"),
+        "b2_complete": False,
+    }
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
@@ -68,50 +106,7 @@ def main():
         print(args.output / "run.json")
         return
     root = args.run
-    manifest = json.loads((root / "run.json").read_text())
-    for key in ("candidate", "firmware", "consumer"):
-        item = manifest[key]
-        assert file_identity(Path(item["file"]))["sha256"] == item["sha256"], key
-    physical = {}
-    for line in (root / "physical.jsonl").read_text().splitlines():
-        row = json.loads(line)
-        assert row["id"] not in physical, "ambiguous duplicate observation record"
-        physical[row["id"]] = row
-    commands = [
-        json.loads(line) for line in (root / "commands.jsonl").read_text().splitlines()
-    ]
-    calibration = manifest["calibration"]
-    calibrated = calibration["two_distinct_applies_resolved"] is True and bool(
-        calibration["raw_capture"]
-    )
-    if calibrated:
-        item = calibration["raw_capture"]
-        calibrated = file_identity(Path(item["file"]))["sha256"] == item["sha256"]
-    result = []
-    for command in commands:
-        row = physical.get(command["id"])
-        outcome = "evidence_insufficient"
-        if (
-            calibrated
-            and row
-            and row.get("independent_observer")
-            and row.get("coverage_complete")
-        ):
-            raw = row["raw_capture"]
-            assert file_identity(Path(raw["file"]))["sha256"] == raw["sha256"]
-            count = row["apply_count"]
-            assert type(count) is int and count >= 0
-            outcome = "zero" if count == 0 else "once" if count == 1 else "multiple"
-        result.append(
-            {"id": command["id"], "case": command["case"], "execution": outcome}
-        )
-    output = {
-        "commands": result,
-        "unrun_cases": [c for c in CASES if c not in {x["case"] for x in commands}],
-        "observer_scope": "Independent capture provenance is supplied by the operator; software cannot certify wiring or mechanical action.",
-        "b2_a_ui_evidence": manifest.get("b2_a_ui_evidence"),
-        "b2_complete": False,
-    }
+    output = classify_run(root)
     # No automatic full B2 PASS: UI, observer calibration and physical scope
     # require review of the actual captures, not just JSON declarations.
     with (root / "classification.json").open("x") as stream:

@@ -38,9 +38,23 @@ def main():
     assert len(benchmarks) == 1
     benchmark = read(benchmarks[0])
     assert benchmark["full_default_matrix"] and len(benchmark["results"]) == 39
+    assert benchmark["trace_ab_requested"]
+    assert len(benchmark["trace_ab"]["pairs"]) == 3
+    assert benchmark["trace_ab"]["comparison"]["verdict"] == "within_trigger", (
+        "trace A/B requires investigation or is indeterminate", benchmark["trace_ab"]["comparison"])
     for trial in benchmark["results"]:
         assert trial["native"]["pid"] > 0 and len(trial["native"]["sha256"]) == 64
         assert trial["resources"]["live"] and trial["resources"]["post_scope"]
+    validity = list(directory.glob("measurement-validity-*/summary.json"))
+    assert len(validity) == 1, "E06 needs one native held-ACK measurement run"
+    held = read(validity[0])
+    assert [row["delay_ms"] for row in held] == [100, 160, 500]
+    assert all(row["completed"] > 0 and row["overflow"] == row["completed"]
+               and row["max_ns"] >= row["delay_ms"] * 1_000_000 for row in held)
+    recovery_io = list(directory.glob("recovery-io-*/summary.json"))
+    assert len(recovery_io) == 1
+    assert {row["window"] for row in read(recovery_io[0])["results"]} == {
+        "prepared_journal", "source_retirement", "target_directory_publish"}
     for transport in ("tcp", "mtls"):
         matches = list(directory.glob(f"soak-{transport}-*/summary.json"))
         assert len(matches) == 1

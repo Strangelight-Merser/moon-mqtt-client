@@ -23,8 +23,21 @@ Capacity rejection is counted separately; rejected attempts yield to the async
 scheduler and are never counted as accepted. Stable-workload unknown/not-sent
 results fail the trial and remain in its native log.
 QoS0 completion is socket-write completion, not an acknowledgement. The latency
-histogram uses 10-microsecond buckets and separately labels observations above
-100 ms as censored. Restoration and non-PUBLISH timings retain exact samples.
+histogram uses finite 10-microsecond buckets below 100 ms. Its final bucket is
+**overflow ≥100 ms**, with `latency_overflow_count`; it has no invented finite
+upper edge. `latency_max_ns` is the exact observed maximum recorded while each
+sample completes. A percentile inside overflow reports only its lower bound.
+The 100/160/500 ms held-PUBACK native cases prove that long tails are retained.
+Historical summaries with the old final bucket cannot recover their true max.
+
+For Receive Maximum workloads, `cycle_to_suback_ns` starts before two delivery
+submissions, while `subscribe_call_to_return_ns` starts at the actual public
+`subscribe` call. The raw peer separately records wire SUBSCRIBE to SUBACK send
+begin/return, correlated by phase and sequence. These are different clocks and
+scopes; the wire send return bounds when the ACK entered the socket, not when
+the client parsed it. Restore-100/1000 `cycles_ns` remains a compound reset,
+dial, restore and ready cycle until each phase has an independent timestamp.
+No historical cycle is retroactively decomposed.
 
 Ordinary stage measurement uses the existing non-durable recoverable handle so
 admission is directly observable; ordinary `publish` throughput is measured in
@@ -34,7 +47,12 @@ executable alone registers `sqlite3_auto_extension` / `sqlite3_trace_v2`; it
 traces the same statically linked pinned SQLite implementation without modifying
 the library/dependency or transaction order. `SQLITE_TRACE_PROFILE` runs after a
 statement completes. Only synthetic measurement IDs/stages/timestamps are logged.
-SQL/payloads are not exported. Trace/stdout I/O adds overhead and is reported.
+SQL/payloads are not exported. A three-pair trace A/B uses the same executable,
+peer and durable-stage workload, changing only `MQTT_BENCH_TRACE_ENABLED`.
+The off group has no internal SQLite stage times. Median throughput loss above
+20% or p99 rise above 25% triggers investigation; throughput coefficient of
+variation above 15% or censored p99 makes the comparison indeterminate. All
+three pairs are kept. Trace/stdout I/O adds overhead and is reported.
 See the [SQLite trace API](https://www.sqlite.org/c3ref/trace_v2.html) and
 [automatic extension API](https://www.sqlite.org/c3ref/auto_extension.html).
 
@@ -51,6 +69,10 @@ and records its own coverage gaps; seeing some messages is not evidence that
 all admitted messages were delivered. Samples cover stable connected intervals,
 recovery cycles, three warmup scope closures and the final closure before exit.
 Cold-to-warm lazy runtime initialization is reported separately.
+
+The QoS1 `inflight=1, workers=16` case intentionally applies admission pressure;
+attempted, accepted, rejected, not-sent, unknown and completion counts are
+separate. It is not a maximum-throughput SLO.
 
 No new performance threshold, stable-window budget reset, queue enlargement,
 weaker persistence or scheduling policy follows automatically from these data.

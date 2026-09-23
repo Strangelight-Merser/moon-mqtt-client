@@ -2,8 +2,10 @@
 
 Read-only inspection on 2026-09-22 found no main branch protection (HTTP 404,
 “Branch not protected”) and an empty repository ruleset list. The existing
-successful checks are `check (ubuntu-latest)` and `check (macos-latest)`, emitted
-by GitHub Actions app ID 15368. The names remain stable in the new shared runner.
+successful checks were `check (ubuntu-latest)` and `check (macos-latest)`, emitted
+by GitHub Actions app ID 15368. The second-round proposal requires the new
+`core (linux-x64)` and `core (macos-arm64)` contexts only after both have been
+observed on an actual PR run. Integration and Release have separate contexts.
 
 The prepared [ruleset](main-ruleset.json) requires a PR, both fixed platform
 checks and resolved review threads, and prevents main deletion and force push.

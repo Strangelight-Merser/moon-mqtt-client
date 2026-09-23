@@ -9,6 +9,8 @@ struct Metrics {
   mut connected_events : Int
   mut disconnected_events : Int
   mut active_workers : Int
+  mut collector_complete : Bool
+  mut shutdown_failed : Bool
   latency_ms : Array[Int]
 }
 
@@ -136,25 +138,32 @@ async fn publish_worker(
 ///|
 async fn consume_events(
   client : @mqtt.Client,
-  deadline : Int64,
   metrics : Metrics,
 ) -> Unit {
-  while @async.now() < deadline || metrics.active_workers > 0 {
-    match @async.with_timeout_opt(100, () => client.next_event()) {
-      Some(@mqtt.Connected(generation)) => {
+  while true {
+    let event = try {
+      client.next_event()
+    } catch {
+      @mqtt.Closed => {
+        metrics.collector_complete = true
+        return
+      }
+      error => raise error
+    }
+    match event {
+      @mqtt.Connected(generation) => {
         metrics.connected_events += 1
         log_line(
           "{\"event\":\"connected\",\"generation\":\{generation},\"at_ms\":\{@async.now()}}",
         )
       }
-      Some(@mqtt.Disconnected(generation, _)) => {
+      @mqtt.Disconnected(generation, _) => {
         metrics.disconnected_events += 1
         log_line(
           "{\"event\":\"disconnected\",\"generation\":\{generation},\"at_ms\":\{@async.now()}}",
         )
       }
-      Some(@mqtt.MessageReceived(_)) => ()
-      None => ()
+      @mqtt.MessageReceived(_) => ()
     }
   }
 }
@@ -175,6 +184,8 @@ async fn main {
     connected_events: 0,
     disconnected_events: 0,
     active_workers: concurrency,
+    collector_complete: false,
+    shutdown_failed: false,
     latency_ms: Array::make(5001, 0),
   }
   let resource_barrier = @env.get_env_var("MQTT_RESOURCE_BARRIER").unwrap_or(
@@ -203,24 +214,34 @@ async fn main {
       "{\"event\":\"ready\",\"started_ms\":\{started},\"duration_seconds\":\{duration_seconds},\"concurrency\":\{concurrency},\"payload_bytes\":\{payload_bytes}}",
     )
     @async.with_task_group(group => {
+      let collector = group.spawn(() => consume_events(client, metrics))
       for worker in 0..<concurrency {
         group.spawn_bg(() => {
           publish_worker(client, worker, deadline, payload, metrics)
         })
       }
-      group.spawn_bg(() => consume_events(client, deadline, metrics))
+      while metrics.active_workers > 0 {
+        @async.sleep(10)
+      }
+      let drain_deadline = @async.now() + 5000L
+      let mut snapshot = client.stats()
+      while (
+              snapshot.pending_requests > 0 ||
+              snapshot.business_queue_depth > 0 ||
+              snapshot.control_queue_depth > 0
+            ) &&
+            @async.now() < drain_deadline {
+        @async.sleep(10)
+        snapshot = client.stats()
+      }
+      try {
+        client.disconnect()
+      } catch {
+        _ => metrics.shutdown_failed = true
+      }
+      collector.wait()
     })
-    let drain_deadline = @async.now() + 5000L
-    let mut snapshot = client.stats()
-    while (
-            snapshot.pending_requests > 0 ||
-            snapshot.business_queue_depth > 0 ||
-            snapshot.control_queue_depth > 0
-          ) &&
-          @async.now() < drain_deadline {
-      @async.sleep(10)
-      snapshot = client.stats()
-    }
+    let snapshot = client.stats()
     for latency in 0..<metrics.latency_ms.length() {
       if metrics.latency_ms[latency] > 0 {
         log_line(
@@ -229,7 +250,7 @@ async fn main {
       }
     }
     log_line(
-      "{\"event\":\"final\",\"ended_ms\":\{@async.now()},\"attempted\":\{metrics.attempted},\"accepted\":\{metrics.acknowledged + metrics.unknown + metrics.not_sent},\"rejected\":\{metrics.rejected},\"not_sent\":\{metrics.not_sent},\"acknowledged\":\{metrics.acknowledged},\"unknown\":\{metrics.unknown},\"not_connected\":\{metrics.not_connected},\"active_workers\":\{metrics.active_workers},\"connected_events\":\{metrics.connected_events},\"disconnected_events\":\{metrics.disconnected_events},\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests},\"business\":\{snapshot.business_queue_depth},\"control\":\{snapshot.control_queue_depth},\"event_queue\":\{snapshot.event_queue_depth}}",
+      "{\"event\":\"final\",\"ended_ms\":\{@async.now()},\"attempted\":\{metrics.attempted},\"accepted\":\{metrics.acknowledged + metrics.unknown + metrics.not_sent},\"rejected\":\{metrics.rejected},\"not_sent\":\{metrics.not_sent},\"acknowledged\":\{metrics.acknowledged},\"unknown\":\{metrics.unknown},\"not_connected\":\{metrics.not_connected},\"active_workers\":\{metrics.active_workers},\"connected_events\":\{metrics.connected_events},\"disconnected_events\":\{metrics.disconnected_events},\"collector_complete\":\{metrics.collector_complete},\"shutdown_failed\":\{metrics.shutdown_failed},\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests},\"business\":\{snapshot.business_queue_depth},\"control\":\{snapshot.control_queue_depth},\"event_queue\":\{snapshot.event_queue_depth}}",
     )
   })
   if resource_barrier {

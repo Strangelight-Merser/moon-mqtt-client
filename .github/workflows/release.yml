@@ -1,13 +1,13 @@
-name: native client
+name: native client release acceptance
 on:
-  push:
-  pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
 permissions:
   contents: read
 jobs:
-  core:
-    name: core (${{ matrix.platform }})
+  release:
+    name: release (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
@@ -31,26 +31,24 @@ jobs:
       - name: Install broker (macOS)
         if: runner.os == 'macOS'
         run: brew install mosquitto openssl@3
-      - name: Match localhost to the IPv4-only test broker (Linux)
+      - name: Match localhost to IPv4 broker (Linux)
         if: runner.os == 'Linux'
         run: |
-          # The test broker listens on 127.0.0.1. Avoid spending three Happy
-          # Eyeballs delays on duplicate ::1 results where no broker listens.
           echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
-          python -c 'import socket; results=socket.getaddrinfo("localhost", None, 0, 0, 0, socket.AI_ADDRCONFIG); print(results); assert results[0][4][0] == "127.0.0.1"'
+          python -c 'import socket; results=socket.getaddrinfo("localhost", None, 0, 0, 0, socket.AI_ADDRCONFIG); assert results[0][4][0] == "127.0.0.1"'
       - name: Install verified MoonBit baseline
         run: |
           ./scripts/install-moonbit-ci.sh fixed
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
       - name: Install acceptance dependencies
         run: python -m pip install -r tests/integration/requirements.txt
-      - name: Shared software acceptance
-        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" ./scripts/check.sh core
+      - name: Shared Release acceptance
+        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" ./scripts/check.sh release
       - name: Preserve first-attempt evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: core-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_attempt }}
+          name: release-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_attempt }}
           path: |
             _build/acceptance/
             !_build/acceptance/**/*.key
@@ -59,3 +57,19 @@ jobs:
             !_build/acceptance/**/*.mqttrec
           if-no-files-found: error
           retention-days: 30
+
+  latest-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rolling stable MoonBit
+        run: |
+          ./scripts/install-moonbit-ci.sh latest
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Latest compatibility check
+        run: |
+          moon update
+          moon check --target native
+          moon test --target native
+          moon build --target native

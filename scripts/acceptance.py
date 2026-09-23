@@ -18,9 +18,33 @@ ROOT = Path(__file__).resolve().parents[1]
 def source_identity():
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=ROOT)
+    index = {}
+    for row in git("ls-files", "--stage", "-z").decode().split("\0"):
+        if row:
+            metadata, name = row.split("\t", 1)
+            index[name] = metadata.split()[0]
     names = git("ls-files", "--cached", "--others", "--exclude-standard", "-z").decode().split("\0")
-    files = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-             for name in sorted(set(names)) if name and (ROOT / name).is_file()}
+    files = {}
+    for name in sorted(set(names)):
+        if not name:
+            continue
+        path = ROOT / name
+        if path.is_symlink():
+            target = os.readlink(path)
+            mode = "120000"
+            digest = hashlib.sha256(target.encode()).hexdigest()
+            kind = "symlink"
+        elif path.is_file():
+            mode = "100755" if os.access(path, os.X_OK) else "100644"
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            kind = "file"
+            target = None
+        else:
+            raise AssertionError(f"source entry missing or unsupported: {name}")
+        assert index.get(name, mode) == mode, f"Git mode differs from filesystem: {name}"
+        files[name] = {"sha256": digest, "mode": mode, "kind": kind}
+        if target is not None:
+            files[name]["target"] = target
     return {"commit": git("rev-parse", "HEAD").decode().strip(),
             "tree": git("rev-parse", "HEAD^{tree}").decode().strip(),
             "dirty": bool(git("status", "--porcelain")),
