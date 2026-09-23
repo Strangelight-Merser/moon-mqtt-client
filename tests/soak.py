@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import platform
 import importlib.util
 import json
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import socket
 import statistics
@@ -18,17 +21,12 @@ import threading
 import time
 
 import paho.mqtt.client as paho
+from harness import free_port
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MOON = Path(os.environ.get("MOON", ROOT / "scripts/moon.sh"))
-BROKER = Path(os.environ.get("MOSQUITTO", ROOT / ".tools/mosquitto"))
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
+BROKER = Path(os.environ.get("MOSQUITTO", shutil.which("mosquitto") or ROOT / ".tools/mosquitto"))
 
 
 def wait_port(port: int, timeout: float = 4.0) -> None:
@@ -53,8 +51,8 @@ class Broker:
         self.log_path = artifact_dir / "broker.log"
         self.log = open(self.log_path, "a", encoding="utf-8")
         # A 30-minute, 16-worker QoS 1 run can emit an enormous per-packet broker
-        # log. The default is quiet (errors and warnings only); `normal` adds
-        # connection notices and `debug` restores `log_type all` for diagnosis.
+        # log. The soak default is normal, which records connection notices;
+        # `quiet` keeps only errors/warnings and `debug` logs all packets.
         # The file is also capped in `_cap_log`, so a long run cannot leave
         # multi-gigabyte artifacts behind.
         self.config = artifact_dir / "mosquitto.conf"
@@ -128,7 +126,7 @@ def process_sample(pid: int) -> tuple[int, int, int]:
     the caller can record the gap instead of reporting zeros as measurements.
     """
     if subprocess.run(["kill", "-0", str(pid)], capture_output=True).returncode:
-        return 0, 0, 0
+        raise SamplingUnavailable("process exited before live sample")
     proc = Path(f"/proc/{pid}")
     rss_kib = 0
     if (proc / "status").is_file():
@@ -152,9 +150,12 @@ def process_sample(pid: int) -> tuple[int, int, int]:
         lsof = shutil.which("lsof")
         if lsof:
             output = subprocess.run(
-                [lsof, "-n", "-p", str(pid)], capture_output=True, text=True
+                [lsof, "-n", "-F", "f", "-p", str(pid)], capture_output=True, text=True
             ).stdout
-            fd_count = max(0, len(output.splitlines()) - 1)
+            fd_count = len({line[1:] for line in output.splitlines()
+                            if line.startswith("f") and line[1:].isdigit()})
+        else:
+            raise SamplingUnavailable("lsof is required for live FD measurement")
     task_count = 0
     if (proc / "task").is_dir():
         task_count = len(list((proc / "task").iterdir()))
@@ -179,6 +180,35 @@ def percentile(histogram: dict[int, int], fraction: float) -> int | None:
     raise AssertionError("histogram accounting error")
 
 
+def broker_dial_ledger(path: Path) -> dict:
+    """Extract independent broker notices without inferring a client from TCP probes."""
+    rows = []
+    accepted = {}
+    for line in path.read_text(errors="replace").splitlines():
+        stamp = re.match(r"^(\d+): (.*)$", line)
+        if not stamp:
+            continue
+        second, message = int(stamp.group(1)), stamp.group(2)
+        tcp = re.match(r"New connection from ([^ ]+) on port (\d+)\.", message)
+        mqtt = re.match(r"New client connected from ([^ ]+) as ([^ ]+) ", message)
+        if tcp:
+            rows.append({"stage": "tcp_accepted", "broker_epoch_second": second,
+                         "endpoint": tcp.group(1), "line": line})
+        elif mqtt:
+            identity = mqtt.group(2)
+            rows.append({"stage": "mqtt_client_accepted", "broker_epoch_second": second,
+                         "endpoint": mqtt.group(1), "identity": identity,
+                         "line": line})
+            accepted[identity] = accepted.get(identity, 0) + 1
+        elif "disconnected" in message and "Client " in message:
+            rows.append({"stage": "broker_reported_close", "broker_epoch_second": second,
+                         "line": line})
+    return {"rows": rows, "accepted_by_identity": accepted,
+            "limitations": ["Mosquitto notices have one-second timestamp resolution",
+                            "TCP health probes have no MQTT identity and are excluded from MQTT dials",
+                            "No on-wire CONNACK bytes or TLS handshake phase captured by this logger"]}
+
+
 def write_mtls_files(directory: Path) -> None:
     spec = importlib.util.spec_from_file_location(
         "mqtt_integration", ROOT / "tests/integration/run.py",
@@ -189,9 +219,17 @@ def write_mtls_files(directory: Path) -> None:
 
 
 def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
-             downtime: float, artifacts: Path, broker_log: str = "quiet",
+             downtime: float, artifacts: Path, broker_log: str = "normal",
              broker_log_limit_mb: int = 64, mtls: bool = False) -> dict:
+    artifacts = artifacts.resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
+    subprocess.run([str(MOON), "build", "--target", "native"], cwd=ROOT, check=True)
+    binaries = list((ROOT / "_build/native/debug/build").glob("**/soak_driver/soak_driver.exe"))
+    assert len(binaries) == 1, binaries
+    binary = artifacts / "soak_driver.exe"
+    shutil.copyfile(binaries[0], binary)
+    binary.chmod(0o700)
+    binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
     port = free_port()
     broker = Broker(port, artifacts, log_level=broker_log,
                     log_limit_bytes=broker_log_limit_mb * 1024 * 1024)
@@ -205,8 +243,16 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "require_certificate true\n"
             + broker._log_directives()
         )
-    broker.start()
-    observed = {"messages": 0, "invalid": 0, "connections": 0}
+    try:
+        broker.start()
+    except BaseException:
+        broker.close()
+        raise
+    observed = {"messages": 0, "invalid": 0, "connections": 0,
+                "measurement_ids": 0, "coverage": "observer may disconnect; not proof of complete delivery"}
+    observed_last = {}
+    observed["out_of_order_or_duplicate_ids"] = 0
+    observed["id_count_semantics"] = "monotonic per-worker IDs; lower bound if observer reorders"
     oracle_ready = threading.Event()
     oracle = paho.Client(paho.CallbackAPIVersion.VERSION2, client_id="paho-soak-oracle")
     oracle.reconnect_delay_set(min_delay=1, max_delay=2)
@@ -219,6 +265,13 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
 
     def on_message(client, userdata, message):
         observed["messages"] += 1
+        parts = message.topic.split("/")
+        worker, sequence = int(parts[-2]), int(parts[-1])
+        if sequence > observed_last.get(worker, 0):
+            observed["measurement_ids"] += 1
+            observed_last[worker] = sequence
+        else:
+            observed["out_of_order_or_duplicate_ids"] += 1
         payload = message.payload
         if len(payload) != payload_bytes or any(
             value != index % 251 for index, value in enumerate(payload)
@@ -238,6 +291,9 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         oracle.connect("127.0.0.1", port)
     oracle.loop_start()
     if not oracle_ready.wait(4):
+        oracle.disconnect()
+        oracle.loop_stop()
+        broker.close()
         raise TimeoutError("Paho observer did not subscribe")
 
     log_path = artifacts / "driver.jsonl"
@@ -249,6 +305,8 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         "MQTT_SOAK_DURATION_SECONDS": str(duration),
         "MQTT_SOAK_CONCURRENCY": str(concurrency),
         "MQTT_SOAK_PAYLOAD_BYTES": str(payload_bytes),
+        "MQTT_RESOURCE_BARRIER": "1",
+        "MOONBIT_ASYNC_CHECK_FD_LEAK": "1",
     }
     if mtls:
         env.update({
@@ -258,9 +316,9 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "MQTT_SOAK_KEY": str(artifacts / "client.key"),
         })
     driver = subprocess.Popen(
-        [str(MOON), "run", "examples/soak_driver", "--target", "native"],
+        [str(binary)],
         cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=stderr_file,
-        text=True, bufsize=1,
+        stdin=subprocess.PIPE, text=True, bufsize=1,
     )
     assert driver.stdout
     events: queue.Queue[dict] = queue.Queue()
@@ -290,7 +348,32 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
                 return event
         raise TimeoutError(f"did not receive {kind}; recent events={seen[-5:]}")
 
-    ready = next_event("ready", 15)
+    try:
+        next_event("cold_start", 15)
+        cold_start = process_sample(driver.pid)
+        driver.stdin.write("\n"); driver.stdin.flush()
+        warmup_scopes = []
+        for _ in range(3):
+            next_event("warmup_closed", 15)
+            warmup_scopes.append(process_sample(driver.pid))
+            driver.stdin.write("\n"); driver.stdin.flush()
+        next_event("before_scope", 15)
+        before_scope = process_sample(driver.pid)
+        driver.stdin.write("\n"); driver.stdin.flush()
+        ready = next_event("ready", 15)
+    except BaseException:
+        if driver.poll() is None:
+            driver.kill()
+            driver.wait()
+        reader.join(3)
+        driver.stdout.close()
+        driver.stdin.close()
+        oracle.disconnect()
+        oracle.loop_stop()
+        broker.close()
+        log_file.close()
+        stderr_file.close()
+        raise
     wall_started = time.monotonic()
     samples: list[dict] = []
     sampling = True
@@ -315,18 +398,27 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
     sampler = threading.Thread(target=sample_resources, daemon=True)
     sampler.start()
     recoveries = []
+    fault_plan = []
     latest_generation = 1
+    observation_complete = False
     try:
         for cycle in range(cycles):
             target = wall_started + (cycle + 1) * duration / (cycles + 1)
             delay = target - time.monotonic()
             if delay > 0:
                 time.sleep(delay)
+            fault = {"fault_id": cycle + 1, "generation_before": latest_generation,
+                     "stop_invoked_wall_ms": int(time.time() * 1000),
+                     "stop_invoked_monotonic_ns": time.monotonic_ns()}
+            fault_plan.append(fault)
             broker.stop()
             stopped = time.monotonic()
+            fault["stopped_monotonic_ns"] = time.monotonic_ns()
             time.sleep(downtime)
             oracle_ready.clear()
+            fault["start_invoked_monotonic_ns"] = time.monotonic_ns()
             broker.start()
+            fault["started_monotonic_ns"] = time.monotonic_ns()
             deadline = time.monotonic() + 12
             while time.monotonic() < deadline:
                 event = next_event("connected", max(.1, deadline - time.monotonic()))
@@ -334,20 +426,35 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
                 if generation > latest_generation:
                     latest_generation = generation
                     recoveries.append(time.monotonic() - stopped)
+                    fault["recovered_generation"] = generation
+                    fault["recovered_monotonic_ns"] = time.monotonic_ns()
+                    fault["recovered_wall_ms"] = int(time.time() * 1000)
                     break
             else:
                 raise TimeoutError(f"cycle {cycle + 1} did not reconnect")
         final = next_event("final", duration + 30)
+        next_event("scope_closed", 10)
+        assert driver.poll() is None, "post-scope process exited before resource sampling"
+        post_scope = [process_sample(driver.pid) for _ in range(3)]
+        driver.stdin.write("\n"); driver.stdin.flush()
         code = driver.wait(15)
         if code != 0:
             raise RuntimeError(f"soak driver exited {code}; see {stderr_path}")
+        observation_complete = True
     finally:
         sampling = False
         sampler.join(3)
+        if not observation_complete:
+            (artifacts / "observation-incomplete.json").write_text(json.dumps({
+                "status": "incomplete", "reason": "watchdog, driver failure, or forced collector cancellation",
+                "fault_plan": fault_plan, "last_generation": latest_generation,
+                "driver_exit_code_before_cleanup": driver.poll(),
+            }, indent=2) + "\n")
         if driver.poll() is None:
             driver.kill()
             driver.wait()
         driver.stdout.close()
+        driver.stdin.close()
         reader.join(3)
         oracle.disconnect()
         oracle.loop_stop()
@@ -356,6 +463,7 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         stderr_file.close()
 
     histogram: dict[int, int] = {}
+    client_events = []
     while not events.empty():
         event = events.get_nowait()
         if event.get("event") == "latency_bucket":
@@ -365,14 +473,49 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         event = json.loads(line)
         if event.get("event") == "latency_bucket":
             histogram[int(event["ms"])] = int(event["count"])
+        if event.get("event") in ("connected", "disconnected"):
+            client_events.append(event)
+
+    classifications = []
+    connected_index = {}
+    for index, event in enumerate(client_events):
+        if event["event"] == "connected":
+            connected_index.setdefault(event["generation"], []).append(index)
+    for fault in fault_plan:
+        generation = fault["generation_before"]
+        starts = connected_index.get(generation, [])
+        ends = connected_index.get(generation + 1, [])
+        if len(starts) != 1 or len(ends) != 1:
+            continue
+        within = [event for event in client_events[starts[0] + 1:ends[0]]
+                  if event["event"] == "disconnected"]
+        for number, event in enumerate(within):
+            window = (fault["stop_invoked_wall_ms"] - 100 <= event["at_ms"]
+                      <= fault.get("recovered_wall_ms", -1) + 100)
+            classifications.append({"fault_id": fault["fault_id"],
+                                    "generation": event["generation"],
+                                    "at_ms": event["at_ms"],
+                                    "class": ("established_close" if number == 0 else
+                                              "recovery_pre_ready_failure") if window and
+                                              event["generation"] == generation else "unknown"})
+    classified = len(classifications)
+    consumed_disconnects = sum(e["event"] == "disconnected" for e in client_events)
+    unknown_class = sum(e["class"] == "unknown" for e in classifications)
+    unknown_class += consumed_disconnects - classified
+    (artifacts / "fault-plan.json").write_text(json.dumps(fault_plan, indent=2) + "\n")
+    (artifacts / "client-events.json").write_text(json.dumps(client_events, indent=2) + "\n")
+    peer_dials = broker_dial_ledger(broker.log_path)
+    (artifacts / "peer-dial-ledger.json").write_text(json.dumps(peer_dials, indent=2) + "\n")
 
     elapsed = time.monotonic() - wall_started
-    after_exit_rss, after_exit_fds, after_exit_tasks = process_sample(driver.pid)
     evidence_bytes = {
         path.name: path.stat().st_size
         for path in sorted(artifacts.iterdir()) if path.is_file()
     }
     result = {
+        "native_executable": {"path": str(binary), "pid": driver.pid,
+                              "sha256": binary_hash},
+        "environment": {"platform": platform.platform(), "measurement": "native PID, not moon launcher"},
         "parameters": {
             "duration_seconds": duration, "disconnect_cycles": cycles,
             "payload_bytes": payload_bytes, "concurrency": concurrency,
@@ -382,6 +525,13 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         },
         "evidence_bytes": evidence_bytes,
         "driver": final,
+        "fault_plan": fault_plan,
+        "peer_dial_ledger": {"mqtt_client_accepts": peer_dials["accepted_by_identity"].get(
+            "moon-soak-driver", 0), "limitations": peer_dials["limitations"]},
+        "disconnect_classification": {"rows": classifications,
+                                      "unknown_class": unknown_class,
+                                      "consumer_events": consumed_disconnects,
+                                      "broker_stage_limit": "No independent per-dial CONNACK or TLS stage trace; pre-ready classification is from client event order and fault windows."},
         "elapsed_seconds": elapsed,
         "throughput_ack_per_second": final["acknowledged"] / elapsed,
         "latency_ms": {
@@ -411,9 +561,11 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
             "tasks_end": samples[-1]["tasks"] if samples else None,
             "tasks_peak": max((s["tasks"] for s in samples), default=None),
             "process_exit_code": code,
-            "after_exit_rss_kib": after_exit_rss,
-            "after_exit_fds": after_exit_fds,
-            "after_exit_tasks": after_exit_tasks,
+            "before_scope_rss_fds_threads": before_scope,
+            "cold_start_rss_fds_threads": cold_start,
+            "warmup_closed_rss_fds_threads": warmup_scopes,
+            "post_scope_rss_fds_threads": post_scope,
+            "task_measurement": "OS threads plus native active_workers; not a census of internal async tasks",
         },
         "ready": ready,
     }
@@ -426,27 +578,55 @@ def run_soak(duration: int, cycles: int, payload_bytes: int, concurrency: int,
         "event_queue": 0,
         "generation": cycles + 1,
         "reconnects": cycles,
-        "disconnects": cycles,
+        "collector_complete": True,
+        "shutdown_failed": False,
     }
     for field, wanted in expected.items():
         if final.get(field) != wanted:
             failures.append(f"final.{field}={final.get(field)!r}, expected {wanted!r}")
     if len(recoveries) != cycles:
         failures.append(f"recovery count={len(recoveries)}, expected {cycles}")
+    if broker_log != "quiet" and peer_dials["accepted_by_identity"].get(
+        "moon-soak-driver", 0) < cycles + 1:
+        failures.append("broker notices lack the expected independent MQTT accepts")
+    if final.get("disconnects") != consumed_disconnects:
+        failures.append(f"emitted Disconnected={final.get('disconnects')} consumed={consumed_disconnects}")
+    if final.get("disconnected_events") != consumed_disconnects:
+        failures.append(f"collector counter={final.get('disconnected_events')} log={consumed_disconnects}")
+    if unknown_class:
+        failures.append(f"unclassified Disconnected events={unknown_class}")
+    for fault in fault_plan:
+        if sum(row["fault_id"] == fault["fault_id"] and row["class"] == "established_close"
+               for row in classifications) != 1:
+            failures.append(f"fault {fault['fault_id']} has no unique established close")
     if observed["invalid"] != 0:
         failures.append(f"observer.invalid={observed['invalid']}, expected 0")
     if observed["messages"] <= 0:
         failures.append("observer saw no messages")
     if code != 0:
         failures.append(f"driver exit code={code}, expected 0")
-    if after_exit_fds != 0 or after_exit_tasks != 0:
-        failures.append(
-            f"driver retained resources after exit: fds={after_exit_fds}, tasks={after_exit_tasks}"
-        )
+    if any(row[1] > before_scope[1] for row in post_scope):
+        failures.append(f"post-scope descriptors exceed pre-scope baseline: {before_scope}, {post_scope}")
+    if warmup_scopes[-1][1] > warmup_scopes[-2][1]:
+        failures.append(f"descriptor count grows across warmup scopes: {warmup_scopes}")
+    counts = {"acknowledged": 0, "unknown": 0, "not_sent": 0, "rejected": 0}
+    next_sequence = {}
+    for line in log_path.read_text().splitlines():
+        event = json.loads(line)
+        if event.get("event") == "outcome_range":
+            worker = event["worker"]
+            if event["first"] != next_sequence.get(worker, 1) or event["last"] < event["first"]:
+                failures.append(f"non-contiguous measurement outcomes: {event}")
+            next_sequence[worker] = event["last"] + 1
+            counts[event["outcome"]] += event["last"] - event["first"] + 1
+    if sum(counts.values()) != final["attempted"] or any(counts[k] != final[k] for k in counts):
+        failures.append(f"measurement ID accounting differs from driver counters: {counts}")
+    result["outcome_accounting"] = counts
     if sample_errors and not samples:
         # The soak can still be valid, but it must not imply resource evidence
         # it does not have.
         result["resources"]["resource_evidence_available"] = False
+        failures.append("required live resource sampling unavailable")
     elif samples:
         result["resources"]["resource_evidence_available"] = True
         start_rss, end_rss = samples[0]["rss_kib"], samples[-1]["rss_kib"]
@@ -473,8 +653,8 @@ def main() -> None:
     parser.add_argument("--downtime", type=float, default=.2)
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument(
-        "--broker-log", choices=["quiet", "normal", "debug"], default="quiet",
-        help="mosquitto verbosity; quiet keeps only warnings and errors",
+        "--broker-log", choices=["quiet", "normal", "debug"], default="normal",
+        help="mosquitto verbosity; normal records independent connection notices",
     )
     parser.add_argument(
         "--broker-log-limit-mb", type=int, default=64,
@@ -485,7 +665,7 @@ def main() -> None:
         help="require client certificates and use a private test PKI",
     )
     args = parser.parse_args()
-    artifacts = args.artifacts or Path(tempfile.mkdtemp(prefix="moon-mqtt-soak-"))
+    artifacts = args.artifacts or Path(os.environ.get("MQTT_EVIDENCE_DIR", ROOT / "_build/pro-audit")) / f"soak-{'mtls' if args.mtls else 'tcp'}-{time.time_ns()}"
     result = run_soak(
         args.duration, args.cycles, args.payload_bytes, args.concurrency,
         args.downtime, artifacts, args.broker_log, args.broker_log_limit_mb,

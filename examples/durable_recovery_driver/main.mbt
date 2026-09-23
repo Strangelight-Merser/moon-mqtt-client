@@ -111,5 +111,11 @@ async fn main {
         log("unknown reason=\{reason} cause=\{@debug.to_string(terminal.terminal_cause)}")
       _ => fail("durable handle wait returned a nonterminal phase")
     }
-  })
+  }) catch {
+    @mqtt.DurableStorage(cause) => {
+      log("storage-error=\{@debug.to_string(cause)}")
+      raise @mqtt.DurableStorage(cause)
+    }
+    error => raise error
+  }
 }

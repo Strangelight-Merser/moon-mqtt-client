@@ -1,0 +1,67 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Strangelight-Merser/moon-mqtt-client/internal/websocket"
+
+import {
+  "moonbitlang/async/io",
+  "moonbitlang/core/debug",
+}
+
+// Values
+
+// Errors
+pub suberror WebSocketError {
+  ConnectionClosed(CloseCode, String?)
+  InvalidHandshake(String)
+  ProtocolError(String)
+} derive(@debug.Debug)
+
+// Types and methods
+pub(all) enum CloseCode {
+  Normal
+  GoingAway
+  ProtocolError
+  UnsupportedData
+  Abnormal
+  InvalidFramePayload
+  PolicyViolation
+  MessageTooBig
+  MissingExtension
+  InternalError
+  Other(UInt16)
+} derive(Eq, @debug.Debug)
+
+type Conn
+pub fn Conn::close(Self) -> Unit
+pub async fn Conn::connect(&Transport, String, String) -> Self
+pub async fn Conn::end_message(Self) -> Unit
+pub async fn Conn::recv(Self) -> Message
+pub async fn Conn::send_binary(Self, BytesView) -> Unit
+pub async fn Conn::send_close(Self, code? : CloseCode, reason? : String) -> Unit
+pub fn Conn::start_message(Self, MessageKind) -> Unit raise
+pub async fn Conn::write(Self, &@io.Data) -> Unit
+pub async fn Conn::write_once(Self, Bytes, offset~ : Int, len~ : Int) -> Int
+pub async fn Conn::write_reader(Self, &@io.Reader) -> Unit
+pub impl @io.Writer for Conn
+
+pub struct Message {
+  kind : MessageKind
+  // private fields
+}
+pub async fn Message::drop(Self, Int) -> Int
+pub async fn Message::read(Self, FixedArray[Byte], offset? : Int, max_len? : Int) -> Int
+pub async fn Message::read_all(Self) -> &@io.Data
+pub async fn Message::read_exactly(Self, Int) -> Bytes
+pub async fn Message::read_some(Self, max_len? : Int) -> Bytes?
+pub async fn Message::read_until(Self, StringView) -> String?
+pub impl @io.Reader for Message
+
+pub(all) enum MessageKind {
+  Binary
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
+pub(open) trait Transport : @io.Reader + @io.Writer {
+  fn close(Self) -> Unit
+}

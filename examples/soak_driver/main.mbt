@@ -1,16 +1,26 @@
 ///|
 struct Metrics {
+  mut attempted : Int
+  mut rejected : Int
+  mut not_sent : Int
   mut acknowledged : Int
   mut unknown : Int
   mut not_connected : Int
   mut connected_events : Int
   mut disconnected_events : Int
   mut active_workers : Int
+  mut collector_complete : Bool
+  mut shutdown_failed : Bool
   latency_ms : Array[Int]
 }
 
 ///|
+let log_gate : @semaphore.Semaphore = @semaphore.Semaphore(1)
+
+///|
 async fn log_line(line : String) -> Unit {
+  log_gate.acquire()
+  defer log_gate.release()
   @stdio.stdout.write(@utf8.encode(line + "\n"))
 }
 
@@ -31,12 +41,10 @@ fn config() -> @mqtt.Config raise {
       Some(path) => @mqtt.CustomCA(path)
       None => @mqtt.Plain
     },
-    client_identity=match (
-      @env.get_env_var("MQTT_SOAK_CERT"),
-      @env.get_env_var("MQTT_SOAK_KEY"),
-    ) {
+    client_identity=match
+      (@env.get_env_var("MQTT_SOAK_CERT"), @env.get_env_var("MQTT_SOAK_KEY")) {
       (Some(certificate_chain_file), Some(private_key_file)) =>
-        Some({ certificate_chain_file, private_key_file })
+        Some({ certificate_chain_file, private_key_file, })
       (None, None) => None
       _ => fail("MQTT_SOAK_CERT and MQTT_SOAK_KEY must be provided together")
     },
@@ -53,6 +61,18 @@ fn config() -> @mqtt.Config raise {
 }
 
 ///|
+async fn outcome_range(
+  worker : Int,
+  first : Int,
+  last : Int,
+  outcome : String,
+) -> Unit {
+  log_line(
+    "{\"event\":\"outcome_range\",\"worker\":\{worker},\"first\":\{first},\"last\":\{last},\"outcome\":\"\{outcome}\"}",
+  )
+}
+
+///|
 async fn publish_worker(
   client : @mqtt.Client,
   worker : Int,
@@ -60,64 +80,90 @@ async fn publish_worker(
   payload : Bytes,
   metrics : Metrics,
 ) -> Unit {
-  defer { metrics.active_workers -= 1 }
+  defer {
+    metrics.active_workers -= 1
+  }
+  let mut sequence = 0
+  let mut acknowledged_start = 1
   while @async.now() < deadline {
+    sequence += 1
+    metrics.attempted += 1
     let started = @async.now()
-    try {
+    let outcome = try {
       client.publish(
-        "soak/qos1/\{worker}",
+        "soak/qos1/\{worker}/\{sequence}",
         payload,
         qos=@mqtt.AtLeastOnce,
       )
       let latency = (@async.now() - started).to_int().clamp(min=0, max=5000)
       metrics.acknowledged += 1
       metrics.latency_ms[latency] += 1
+      "acknowledged"
     } catch {
       @mqtt.OutcomeUnknown(_) => {
         metrics.unknown += 1
-        if @async.now() < deadline {
-          client.wait_connected()
-        }
+        "unknown"
       }
       @mqtt.NotConnected => {
         metrics.not_connected += 1
-        if @async.now() < deadline {
-          client.wait_connected()
-        }
+        metrics.rejected += 1
+        "rejected"
       }
       @mqtt.NotSent(_) => {
         metrics.not_connected += 1
-        if @async.now() < deadline {
-          client.wait_connected()
-        }
+        metrics.not_sent += 1
+        "not_sent"
       }
       error => raise error
     }
+    if outcome != "acknowledged" {
+      if acknowledged_start < sequence {
+        outcome_range(worker, acknowledged_start, sequence - 1, "acknowledged")
+      }
+      outcome_range(worker, sequence, sequence, outcome)
+      acknowledged_start = sequence + 1
+      if @async.now() < deadline {
+        client.wait_connected()
+      }
+    } else if sequence - acknowledged_start >= 999 {
+      outcome_range(worker, acknowledged_start, sequence, "acknowledged")
+      acknowledged_start = sequence + 1
+    }
+  }
+  if acknowledged_start <= sequence {
+    outcome_range(worker, acknowledged_start, sequence, "acknowledged")
   }
 }
 
 ///|
 async fn consume_events(
   client : @mqtt.Client,
-  deadline : Int64,
   metrics : Metrics,
 ) -> Unit {
-  while @async.now() < deadline || metrics.active_workers > 0 {
-    match @async.with_timeout_opt(100, () => client.next_event()) {
-      Some(@mqtt.Connected(generation)) => {
+  while true {
+    let event = try {
+      client.next_event()
+    } catch {
+      @mqtt.Closed => {
+        metrics.collector_complete = true
+        return
+      }
+      error => raise error
+    }
+    match event {
+      @mqtt.Connected(generation) => {
         metrics.connected_events += 1
         log_line(
           "{\"event\":\"connected\",\"generation\":\{generation},\"at_ms\":\{@async.now()}}",
         )
       }
-      Some(@mqtt.Disconnected(generation, _)) => {
+      @mqtt.Disconnected(generation, _) => {
         metrics.disconnected_events += 1
         log_line(
           "{\"event\":\"disconnected\",\"generation\":\{generation},\"at_ms\":\{@async.now()}}",
         )
       }
-      Some(@mqtt.MessageReceived(_)) => ()
-      None => ()
+      @mqtt.MessageReceived(_) => ()
     }
   }
 }
@@ -129,13 +175,36 @@ async fn main {
   let payload_bytes = required_int("MQTT_SOAK_PAYLOAD_BYTES")
   let payload = Bytes::makei(payload_bytes, index => (index % 251).to_byte())
   let metrics : Metrics = {
+    attempted: 0,
+    rejected: 0,
+    not_sent: 0,
     acknowledged: 0,
     unknown: 0,
     not_connected: 0,
     connected_events: 0,
     disconnected_events: 0,
     active_workers: concurrency,
+    collector_complete: false,
+    shutdown_failed: false,
     latency_ms: Array::make(5001, 0),
+  }
+  let resource_barrier = @env.get_env_var("MQTT_RESOURCE_BARRIER").unwrap_or(
+      "0",
+    ) ==
+    "1"
+  if resource_barrier {
+    log_line("{\"event\":\"cold_start\"}")
+    ignore(@stdio.stdin.read_exactly(1))
+    // Measure lazy runtime initialization separately from repeated scope use.
+    for _ in 0..<3 {
+      @mqtt.with_client(config(), async fn(client) {
+        client.publish("warmup/control", b"warmup", qos=@mqtt.AtLeastOnce)
+      })
+      log_line("{\"event\":\"warmup_closed\"}")
+      ignore(@stdio.stdin.read_exactly(1))
+    }
+    log_line("{\"event\":\"before_scope\"}")
+    ignore(@stdio.stdin.read_exactly(1))
   }
   @mqtt.with_client(config(), async fn(client) {
     client.set_reconnect_seed(0x5A17)
@@ -145,21 +214,34 @@ async fn main {
       "{\"event\":\"ready\",\"started_ms\":\{started},\"duration_seconds\":\{duration_seconds},\"concurrency\":\{concurrency},\"payload_bytes\":\{payload_bytes}}",
     )
     @async.with_task_group(group => {
+      let collector = group.spawn(() => consume_events(client, metrics))
       for worker in 0..<concurrency {
         group.spawn_bg(() => {
           publish_worker(client, worker, deadline, payload, metrics)
         })
       }
-      group.spawn_bg(() => consume_events(client, deadline, metrics))
+      while metrics.active_workers > 0 {
+        @async.sleep(10)
+      }
+      let drain_deadline = @async.now() + 5000L
+      let mut snapshot = client.stats()
+      while (
+              snapshot.pending_requests > 0 ||
+              snapshot.business_queue_depth > 0 ||
+              snapshot.control_queue_depth > 0
+            ) &&
+            @async.now() < drain_deadline {
+        @async.sleep(10)
+        snapshot = client.stats()
+      }
+      try {
+        client.disconnect()
+      } catch {
+        _ => metrics.shutdown_failed = true
+      }
+      collector.wait()
     })
-    let drain_deadline = @async.now() + 5000L
-    let mut snapshot = client.stats()
-    while (snapshot.pending_requests > 0 ||
-      snapshot.business_queue_depth > 0 || snapshot.control_queue_depth > 0) &&
-      @async.now() < drain_deadline {
-      @async.sleep(10)
-      snapshot = client.stats()
-    }
+    let snapshot = client.stats()
     for latency in 0..<metrics.latency_ms.length() {
       if metrics.latency_ms[latency] > 0 {
         log_line(
@@ -168,7 +250,11 @@ async fn main {
       }
     }
     log_line(
-      "{\"event\":\"final\",\"ended_ms\":\{@async.now()},\"acknowledged\":\{metrics.acknowledged},\"unknown\":\{metrics.unknown},\"not_connected\":\{metrics.not_connected},\"active_workers\":\{metrics.active_workers},\"connected_events\":\{metrics.connected_events},\"disconnected_events\":\{metrics.disconnected_events},\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests},\"business\":\{snapshot.business_queue_depth},\"control\":\{snapshot.control_queue_depth},\"event_queue\":\{snapshot.event_queue_depth}}",
+      "{\"event\":\"final\",\"ended_ms\":\{@async.now()},\"attempted\":\{metrics.attempted},\"accepted\":\{metrics.acknowledged + metrics.unknown + metrics.not_sent},\"rejected\":\{metrics.rejected},\"not_sent\":\{metrics.not_sent},\"acknowledged\":\{metrics.acknowledged},\"unknown\":\{metrics.unknown},\"not_connected\":\{metrics.not_connected},\"active_workers\":\{metrics.active_workers},\"connected_events\":\{metrics.connected_events},\"disconnected_events\":\{metrics.disconnected_events},\"collector_complete\":\{metrics.collector_complete},\"shutdown_failed\":\{metrics.shutdown_failed},\"generation\":\{snapshot.generation},\"reconnects\":\{snapshot.reconnects},\"disconnects\":\{snapshot.disconnects},\"pending\":\{snapshot.pending_requests},\"business\":\{snapshot.business_queue_depth},\"control\":\{snapshot.control_queue_depth},\"event_queue\":\{snapshot.event_queue_depth}}",
     )
   })
+  if resource_barrier {
+    log_line("{\"event\":\"scope_closed\"}")
+    ignore(@stdio.stdin.read_exactly(1))
+  }
 }

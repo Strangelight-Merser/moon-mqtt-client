@@ -2,48 +2,18 @@
 fn test_session(next_id? : Int = 1, outgoing_limit? : Int = 65536) -> Session {
   let (reader, raw_writer) = @io.pipe()
   let writer = @io.BufferedWriter::new(raw_writer, size=16)
-  {
-    generation: 1,
+  fixture_session(
     reader,
     writer,
-    close_transport: () => {
+    () => {
       reader.close()
       raw_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(8)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(4)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: {},
-    reserved_deliveries: {},
-    delivery_slots: 0,
-    qos1_outstanding: 0,
-    receive_maximum: 65535,
-    parked_business: None,
-    outgoing_limit,
-    delivery_changed: @cond_var.Cond(),
-    next_id,
-    alive: true,
-    last_write: 0L,
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }
-}
-
-///|
-/// Build a pending request for queue tests.
-fn test_pending(id : Int, kind : RequestKind) -> Pending {
-  {
-    id,
-    kind,
-    changed: @cond_var.Cond(),
-    started: false,
-    result: None,
-    queued_at: 0L,
-    refresh: None,
-  }
+    send_capacity=8,
+    control_capacity=4,
+    outgoing_limit=outgoing_limit,
+    next_id=next_id,
+  )
 }
 
 ///|
@@ -163,24 +133,8 @@ test "control packets are dequeued before business traffic in FIFO order" {
 ///|
 test "abort classifies unsent and started pending requests" {
   let session = test_session()
-  let unsent : Pending = {
-    id: 1,
-    kind: Publish1,
-    changed: @cond_var.Cond(),
-    started: false,
-    result: None,
-    queued_at: 0L,
-    refresh: None,
-  }
-  let started : Pending = {
-    id: 2,
-    kind: Publish1,
-    changed: @cond_var.Cond(),
-    started: true,
-    result: None,
-    queued_at: 0L,
-    refresh: None,
-  }
+  let unsent : Pending = test_pending(1, Publish1)
+  let started : Pending = test_pending(2, Publish1, started=true)
   session.pending[unsent.id] = unsent
   session.pending[started.id] = started
 
@@ -199,17 +153,51 @@ test "abort classifies unsent and started pending requests" {
 }
 
 ///|
+test "DISCONNECT local write completion wins a later reader close exactly once" {
+  let completed_session = test_session()
+  let completed = test_pending(0, Disconnect, started=true)
+  completed.local_write_complete = true
+  completed_session.pending[0] = completed
+  completed_session.abort("reader closed after local write")
+  match completed.result {
+    Some(Ok(Done)) => ()
+    _ => abort("completed local DISCONNECT write must succeed")
+  }
+
+  let partial_session = test_session()
+  let partial = test_pending(0, Disconnect, started=true)
+  partial_session.pending[0] = partial
+  partial_session.abort("reader closed during write")
+  match partial.result {
+    Some(Err(OutcomeUnknown(_))) => ()
+    _ => abort("started, incomplete DISCONNECT must remain unknown")
+  }
+
+  let queued_session = test_session()
+  let queued = test_pending(0, Disconnect)
+  queued_session.pending[0] = queued
+  queued_session.abort("reader closed before write")
+  match queued.result {
+    Some(Err(NotSent(_))) => ()
+    _ => abort("unstarted DISCONNECT must remain not sent")
+  }
+
+  let settled_session = test_session()
+  let settled = test_pending(0, Disconnect, started=true)
+  settled.finish(Err(OutcomeUnknown("first terminal result")))
+  settled.local_write_complete = true
+  settled_session.pending[0] = settled
+  settled_session.abort("late reader close")
+  match settled.result {
+    Some(Err(OutcomeUnknown(reason))) => assert_eq(reason, "first terminal result")
+    _ => abort("late success must not overwrite a published terminal result")
+  }
+}
+
+///|
 test "packet id allocation wraps and skips occupied identifiers" {
   let session = test_session(next_id=65535)
-  let occupied : Pending = {
-    id: 65535,
-    kind: Publish1,
-    changed: @cond_var.Cond(),
-    started: false,
-    result: None,
-    queued_at: 0L,
-    refresh: None,
-  }
+  let occupied : Pending = test_pending(65535, Publish1)
   session.pending[65535] = occupied
 
   assert_eq(session.allocate(4), 1)
@@ -220,15 +208,7 @@ test "packet id allocation wraps and skips occupied identifiers" {
 ///|
 test "packet id allocation enforces inflight limit" {
   let session = test_session(next_id=7)
-  let pending : Pending = {
-    id: 3,
-    kind: Subscribe([]),
-    changed: @cond_var.Cond(),
-    started: false,
-    result: None,
-    queued_at: 0L,
-    refresh: None,
-  }
+  let pending : Pending = test_pending(3, Subscribe([]))
   session.pending[3] = pending
 
   try {

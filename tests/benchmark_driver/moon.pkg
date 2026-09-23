@@ -1,0 +1,18 @@
+import {
+  "Strangelight-Merser/moon-mqtt-client" @mqtt,
+  "moonbitlang/async",
+  "moonbitlang/async/stdio",
+  "moonbitlang/async/io",
+  "moonbitlang/async/semaphore",
+  "moonbitlang/core/env",
+  "moonbitlang/core/string",
+  "moonbitlang/core/encoding/utf8",
+}
+
+supported_targets = "+native"
+
+pkgtype(kind: "executable")
+
+options(
+  "native-stub": [ "measurement.c" ],
+)

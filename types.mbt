@@ -118,7 +118,8 @@ pub(all) struct ClientStats {
   pending_requests : Int
   /// Cumulative successful reconnects since the client was created.
   reconnects : Int
-  /// Cumulative disconnects observed; each one starts a new generation.
+  /// Cumulative Disconnected notifications successfully queued for the client.
+  /// A failed recovery dial may add one without creating a new generation.
   disconnects : Int
   /// Requests that finished as `OutcomeUnknown`: written, never acknowledged.
   unknown_outcomes : Int

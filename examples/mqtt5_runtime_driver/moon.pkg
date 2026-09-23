@@ -1,6 +1,8 @@
 import {
   "Strangelight-Merser/moon-mqtt-client" @mqtt,
   "moonbitlang/async",
+  "moonbitlang/async/stdio",
+  "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/env",
   "moonbitlang/core/string",
 }

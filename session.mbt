@@ -1,4 +1,13 @@
 ///|
+priv enum HeartbeatState {
+  Idle
+  Queued
+  Writing
+  RespondedWhileWriting
+  AwaitingResponse(Int64)
+} derive(Eq, @debug.Debug)
+
+///|
 priv enum RequestKind {
   Publish0
   Publish1
@@ -21,6 +30,9 @@ priv struct Pending {
   kind : RequestKind
   changed : @cond_var.Cond
   mut started : Bool
+  /// Local writer returned successfully. MQTT DISCONNECT has no broker ACK;
+  /// this is its completion boundary even if the reader closes next.
+  mut local_write_complete : Bool
   mut result : Result[Reply, ClientError]?
   /// Monotonic time the request was accepted, used as the start of the
   /// `operation_timeout_ms` budget (queue time counts).
@@ -67,17 +79,14 @@ priv struct Session {
   mut qos1_outstanding : Int
   outgoing_limit : Int
   receive_maximum : Int
-  mut parked_business : Outgoing?
+  /// PUBLISH writes deferred behind Receive Maximum. These still count toward
+  /// business_depth and share outgoing's send_capacity; they add no slots.
+  deferred_business : Array[Outgoing]
   delivery_changed : @cond_var.Cond
   mut next_id : Int
   mut alive : Bool
   mut last_write : Int64
-  /// Heartbeat state in one field: `None` is idle, -1 is queued, -2 is writing,
-  /// -3 is an early PINGRESP waiting for write completion, and a non-negative
-  /// value is the completed-write timestamp. The current native async runtime
-  /// obtains `@async.now()` from an unsigned millisecond timestamp source, so
-  /// these private negative sentinels cannot overlap a runtime timestamp.
-  mut ping_sent : Int64?
+  mut heartbeat_state : HeartbeatState
   early_messages : Array[Message]
   /// First error that ended this generation. Keeping the typed value lets the
   /// supervisor distinguish terminal protocol failures from retryable I/O loss.
@@ -143,8 +152,15 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
     self.control_queue.close(error=Closed, clear=true)
     self.business_depth = 0
     self.control_depth = 0
-    self.ping_sent = None
+    self.heartbeat_state = Idle
     for _, request in self.pending {
+      // The reader can observe WS Close/TLS EOF after the local DISCONNECT
+      // write returned but before write_one removes slot zero. Keep that
+      // completed local write successful; Pending::finish remains first-wins.
+      if request.kind is Disconnect && request.local_write_complete {
+        request.finish(Ok(Done))
+        continue
+      }
       // `started` means the bytes reached the socket write call, so the peer
       // may have executed the request even though no ACK arrived.
       let error = if request.started {
@@ -161,7 +177,7 @@ fn Session::abort_with(self : Session, error : Error) -> Unit {
     self.deliveries.clear()
     self.delivery_slots = 0
     self.qos1_outstanding = 0
-    self.parked_business = None
+    self.deferred_business.clear()
     self.delivery_changed.broadcast()
   }
 }
@@ -256,7 +272,7 @@ fn Session::control_wire(
 ///|
 /// Choose the next write. Protocol control packets take priority over business
 /// traffic so heartbeats and acknowledgements cannot be delayed behind a large
-/// business backlog. Both queues are empty exactly when this returns `None`.
+/// business backlog. `None` also means only credit-blocked PUBLISH writes remain.
 fn Session::next_outgoing(self : Session) -> Outgoing? {
   // `try_get` raises once the queue has been closed by `abort`. Reaching that
   // state is normal shutdown, not a fault: the write loop must return quietly so
@@ -272,29 +288,56 @@ fn Session::next_outgoing(self : Session) -> Outgoing? {
     }
     None => ()
   }
-  let business = match self.parked_business {
-    Some(item) => Some(item)
-    None => self.outgoing.try_get() catch { _ => return None }
-  }
-  match business {
-    Some(item) => {
-      let requires_credit = item.delivery is Some(_) ||
-        (item.pending is Some(request) && request.kind is Publish1)
-      if requires_credit && self.qos1_outstanding >= self.receive_maximum {
-        self.parked_business = Some(item)
-        return None
-      }
-      self.parked_business = None
-      if self.business_depth > 0 {
-        self.business_depth -= 1
-      }
-      // A replay waiting for a bounded business slot can now try admission.
-      // The mirror describes actual queue occupancy, never blocked producers.
-      self.delivery_changed.broadcast()
-      Some(item)
+  let credit_available = self.qos1_outstanding < self.receive_maximum
+  if !self.deferred_business.is_empty() {
+    let first = self.deferred_business[0]
+    if credit_available || !first.requires_publish_credit() {
+      return self.selected_business(self.deferred_business.remove(0))
     }
-    None => None
   }
+  // Only PUBLISH writes enter the deferred buffer. Pull at most the remaining
+  // bounded business backlog, selecting the earliest non-PUBLISH. QoS0 stays
+  // behind earlier PUBLISH writes even though it consumes no receive credit.
+  while true {
+    let business = self.outgoing.try_get() catch { _ => return None }
+    match business {
+      Some(item) => {
+        if !item.is_publish() ||
+          (self.deferred_business.is_empty() &&
+          (credit_available || !item.requires_publish_credit())) {
+          return self.selected_business(item)
+        }
+        self.deferred_business.push(item)
+      }
+      None => return None
+    }
+  } nobreak {
+    None
+  }
+}
+
+///|
+fn Outgoing::is_publish(self : Outgoing) -> Bool {
+  self.delivery is Some(_) ||
+  (self.pending is Some(request) &&
+  (request.kind is Publish0 || request.kind is Publish1))
+}
+
+///|
+fn Outgoing::requires_publish_credit(self : Outgoing) -> Bool {
+  self.delivery is Some(_) ||
+  (self.pending is Some(request) && request.kind is Publish1)
+}
+
+///|
+fn Session::selected_business(self : Session, item : Outgoing) -> Outgoing? {
+  if self.business_depth > 0 {
+    self.business_depth -= 1
+  }
+  // Replays waiting for a slot may try admission. Moving into the deferred
+  // buffer never broadcasts or reduces occupancy.
+  self.delivery_changed.broadcast()
+  Some(item)
 }
 
 ///|
@@ -337,46 +380,27 @@ fn mark_started(request : Pending) -> Unit {
 }
 
 ///|
-/// Negative values are private heartbeat states. The current native runtime
-/// obtains timestamps from an unsigned millisecond source, so the existing
-/// optional field can distinguish these states without changing Session shape.
-fn ping_queued() -> Int64 {
-  -1L
-}
-
-///|
-fn ping_writing() -> Int64 {
-  -2L
-}
-
-///|
-fn ping_responded_while_writing() -> Int64 {
-  -3L
-}
-
-///|
 fn Session::queue_ping(self : Session, config : Config) -> Unit raise ClientError {
-  if self.ping_sent is Some(_) {
+  if !(self.heartbeat_state is Idle) {
     return
   }
-  self.ping_sent = Some(ping_queued())
+  self.heartbeat_state = Queued
   errdefer {
-    self.ping_sent = None
+    self.heartbeat_state = Idle
   }
   self.control_wire(@codec.PingreqPacket, config, is_ping=true)
 }
 
 ///|
 fn Session::receive_pingresp(self : Session) -> Unit {
-  match self.ping_sent {
-    Some(state) if state == ping_writing() ||
-      state == ping_responded_while_writing() =>
-      self.ping_sent = Some(ping_responded_while_writing())
+  match self.heartbeat_state {
+    Writing | RespondedWhileWriting =>
+      self.heartbeat_state = RespondedWhileWriting
     // A response cannot belong to this generation's PINGREQ until its writer
     // has begun. Ignore an unsolicited/stale response while it is only queued.
-    Some(state) if state == ping_queued() => ()
-    Some(_) => self.ping_sent = None
-    None => ()
+    Queued => ()
+    AwaitingResponse(_) => self.heartbeat_state = Idle
+    Idle => ()
   }
 }
 
@@ -588,10 +612,15 @@ async fn Session::write_one(
       // Mark writing inside the timeout closure, immediately before handing
       // bytes to the writer. A PINGRESP observed while the item was merely
       // queued must not satisfy this exchange.
-      if item.is_ping && self.ping_sent == Some(ping_queued()) {
-        self.ping_sent = Some(ping_writing())
+      if item.is_ping && self.heartbeat_state == Queued {
+        self.heartbeat_state = Writing
       }
       self.writer.write(bytes)
+      if item.pending is Some(request) {
+        // Set inside the writer future, before its caller can be cancelled by
+        // a concurrent reader close. Never infer this from peer EOF/WS Close.
+        request.local_write_complete = true
+      }
     })
   } catch {
     error => {
@@ -625,18 +654,18 @@ async fn Session::write_one(
     self.delivery_changed.broadcast()
   }
   if item.is_ping {
-    match self.ping_sent {
-      Some(state) if state == ping_responded_while_writing() =>
+    match self.heartbeat_state {
+      RespondedWhileWriting =>
         // The peer observed the bytes before the writer future completed.
         // Keep the slot occupied until this point, then finish the exchange.
-        self.ping_sent = None
-      Some(state) if state == ping_writing() =>
+        self.heartbeat_state = Idle
+      Writing =>
         // PINGRESP timeout starts only after the PINGREQ write completed.
-        self.ping_sent = Some(self.last_write)
-      Some(_) => ()
+        self.heartbeat_state = AwaitingResponse(self.last_write)
+      Queued | AwaitingResponse(_) => ()
       // Production PINGREQ writes are admitted only by queue_ping. If no
       // exchange remains, leave the heartbeat idle instead of reviving it.
-      None => ()
+      Idle => ()
     }
   }
   match item.pending {
@@ -820,24 +849,24 @@ async fn Session::heartbeat(
   while self.alive {
     @async.sleep(tick)
     let now = @async.now()
-    match self.ping_sent {
-      Some(sent) =>
-        if sent >= 0L &&
-          now - sent >= config.ping_response_timeout_ms.to_int64() {
+    match self.heartbeat_state {
+      AwaitingResponse(sent) =>
+        if now - sent >= config.ping_response_timeout_ms.to_int64() {
           raise PingResponseTimeout(
             "no PINGRESP within \{config.ping_response_timeout_ms} ms of the completed PINGREQ write",
           )
         }
-      None =>
+      Idle =>
         if now - self.last_write >= (interval / 2).to_int64() {
           self.queue_ping(config)
         }
+      Queued | Writing | RespondedWhileWriting => ()
     }
   }
 }
 
 ///|
-/// The parked FIFO head still occupies a bounded business slot.
+/// Deferred PUBLISH writes still occupy the same bounded business slots.
 fn Session::enqueue_business(self : Session, item : Outgoing) -> Bool raise {
   match self.outgoing.kind {
     @aqueue.Blocking(limit) if self.business_depth >= limit => false
