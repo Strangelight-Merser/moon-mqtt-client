@@ -27,6 +27,8 @@ def main():
     parser.add_argument("--workers", type=int, choices=(1, 16))
     parser.add_argument("--reconnect", action="store_true")
     parser.add_argument("--timeouts", action="store_true")
+    parser.add_argument("--durable-reopen", action="store_true")
+    parser.add_argument("--storage-failures", action="store_true")
     args = parser.parse_args()
     out = (args.artifacts or ROOT / "_build" / "task-census" / str(time.time_ns())).resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -41,7 +43,8 @@ def main():
         print("UNSUPPORTED", error)
         raise SystemExit(2)
     (out / "layout.json").write_text(json.dumps(layout, indent=2) + "\n")
-    assert sum((args.workers is not None, args.reconnect, args.timeouts)) <= 1
+    assert sum((args.workers is not None, args.reconnect, args.timeouts,
+                args.durable_reopen, args.storage_failures)) <= 1
     broker = None
     listener = None
     peer_thread = None
@@ -90,6 +93,12 @@ def main():
         child_env["CENSUS_MODE"] = "reconnect"
     if args.timeouts:
         child_env["CENSUS_MODE"] = "timeout"
+    if args.durable_reopen or args.storage_failures:
+        child_env["CENSUS_MODE"] = "durable_reopen" if args.durable_reopen else "storage_failure"
+        outbox = out / "durable.sqlite3"
+        child_env["CENSUS_OUTBOX"] = str(outbox)
+        if args.storage_failures:
+            outbox.write_bytes(b"not a sqlite database")
     process = subprocess.Popen([str(binary)], cwd=ROOT,
                                env=child_env,
                                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -107,35 +116,44 @@ def main():
     reader.start()
     samples = []
     try:
-        schedule = ([("cold", 0)] + [("timeout_closed", n) for n in range(1, 21)]
-                    if args.timeouts else
-                    [("cold", 0), ("ready", 0)] +
-                    [("reconnect_ready", n) for n in range(1, 21)] +
-                    [("scope_closed", 20)] if args.reconnect else
-                    [("cold", 0), ("workers_open", args.workers),
-                     ("workers_closed", args.workers)] if args.workers is not None else
-                    [("cold", 0)] + [(event, iteration) for iteration in range(1, 21)
-                                      for event in ("scope_open", "scope_closed")])
+        if args.timeouts:
+            schedule = [("cold", 0)] + [("timeout_closed", n) for n in range(1, 21)]
+        elif args.reconnect:
+            schedule = ([("cold", 0), ("ready", 0)] +
+                        [("reconnect_ready", n) for n in range(1, 21)] +
+                        [("scope_closed", 20)])
+        elif args.durable_reopen or args.storage_failures:
+            event = "durable_closed" if args.durable_reopen else "storage_failure"
+            schedule = [("cold", 0)] + [(event, n) for n in range(1, 21)]
+        elif args.workers is not None:
+            schedule = [("cold", 0), ("workers_open", args.workers),
+                        ("workers_closed", args.workers)]
+        else:
+            schedule = [("cold", 0)] + [(event, iteration)
+                                      for iteration in range(1, 21)
+                                      for event in ("scope_open", "scope_closed")]
         for event, iteration in schedule:
-                row = rows.get(timeout=10)
-                assert row == {"event": event, "iteration": iteration}, row
-                sample = snapshot(process.pid, layout)
-                sample.update(event=event, iteration=iteration)
-                samples.append(sample)
-                (out / "samples.json").write_text(json.dumps(samples, indent=2) + "\n")
-                if args.reconnect and event in ("ready", "reconnect_ready") and iteration < 20:
-                    broker.stop()
-                    broker.start()
-                process.stdin.write("\n")
-                process.stdin.flush()
+            row = rows.get(timeout=10)
+            assert row == {"event": event, "iteration": iteration}, row
+            sample = snapshot(process.pid, layout)
+            sample.update(event=event, iteration=iteration)
+            samples.append(sample)
+            (out / "samples.json").write_text(json.dumps(samples, indent=2) + "\n")
+            if args.reconnect and event in ("ready", "reconnect_ready") and iteration < 20:
+                broker.stop()
+                broker.start()
+            process.stdin.write("\n")
+            process.stdin.flush()
         code = process.wait(timeout=10)
         reader.join(2)
-        assert code == 0, process.stderr.read()
+        assert code == 0, f"census driver exited {code}; see driver.stderr.log"
         if args.timeouts:
             peer_thread.join(3)
             assert len(peer_rows) == 20 and not peer_errors, (peer_rows, peer_errors)
         baseline = samples[0]["count"]
-        closed = [row["count"] for row in samples if row["event"] in ("scope_closed", "workers_closed")]
+        closed = [row["count"] for row in samples if row["event"] in (
+            "scope_closed", "workers_closed", "timeout_closed", "durable_closed",
+            "storage_failure")]
         opened = [row["count"] for row in samples if row["event"] in ("scope_open", "workers_open")]
         ready_counts = [row["count"] for row in samples if row["event"] == "reconnect_ready"]
         report = {"binary_sha256": layout["sha256"], "baseline": baseline,
@@ -146,6 +164,8 @@ def main():
                   "method": "LLDB attach/read/detach at each barrier; no target calls or memory writes",
                   "scope": layout["scope"], "reconnect_cycles": 20 if args.reconnect else 0,
                   "timeout_cycles": 20 if args.timeouts else 0,
+                  "durable_reopen_cycles": 20 if args.durable_reopen else 0,
+                  "storage_failure_cycles": 20 if args.storage_failures else 0,
                   "timeout_peer_rows": peer_rows}
         (out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
         assert report["return_to_baseline"], report
@@ -158,6 +178,7 @@ def main():
             process.wait(timeout=5)
         reader.join(2)
         (out / "driver.jsonl").write_text("".join(raw))
+        (out / "driver.stderr.log").write_text(process.stderr.read())
         process.stdin.close()
         process.stdout.close()
         process.stderr.close()

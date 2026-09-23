@@ -16,6 +16,45 @@ async fn main {
     reconnect_attempts=1000,
   )
   pause_at("cold", 0)
+  if @env.get_env_var("CENSUS_MODE") is Some("durable_reopen") ||
+    @env.get_env_var("CENSUS_MODE") is Some("storage_failure") {
+    let durable_cfg = @mqtt.Config::new(
+      "127.0.0.1",
+      "task-census-durable",
+      port=@string.parse_int(@env.get_env_var("CENSUS_PORT").unwrap()),
+      session_policy=@mqtt.ResumeSession,
+      keep_alive_secs=0,
+    )
+    let options = @mqtt.DurableOutboxOptions::new(
+      @env.get_env_var("CENSUS_OUTBOX").unwrap(),
+      max_records=4,
+      max_payload_bytes=65536L,
+      max_pages=128,
+    )
+    if @env.get_env_var("CENSUS_MODE") is Some("storage_failure") {
+      for iteration in 1..=20 {
+        let mut failed = false
+        try {
+          ignore(@mqtt.inspect_durable_outbox(options, durable_cfg))
+        } catch {
+          @mqtt.DurableStoreCorrupt(_) => failed = true
+          _ => ()
+        }
+        if !failed {
+          fail("corrupt durable store did not produce DurableStoreCorrupt")
+        }
+        pause_at("storage_failure", iteration)
+      }
+    } else {
+      for iteration in 1..=20 {
+        @mqtt.with_durable_client(options, durable_cfg, fn(_client, _recovered) {
+          ()
+        })
+        pause_at("durable_closed", iteration)
+      }
+    }
+    return
+  }
   if @env.get_env_var("CENSUS_MODE") is Some("timeout") {
     let timeout_cfg = @mqtt.Config::new(
       "127.0.0.1",

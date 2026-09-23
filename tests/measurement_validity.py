@@ -27,6 +27,9 @@ def main():
     binary.chmod(0o700)
 
     assert percentile_with_overflow({10: 1, 99990: 1}, 1, .5) == 99990
+    assert percentile_with_overflow({99990: 1}, 0, 1) == 99990
+    assert percentile_with_overflow({}, 1, 1) == {
+        "lower_bound_us": 100000, "upper_bound_us": None}
     assert percentile_with_overflow({10: 1, 99990: 1}, 1, 1) == {
         "lower_bound_us": 100000, "upper_bound_us": None}
     results = []

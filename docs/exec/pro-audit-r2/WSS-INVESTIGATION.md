@@ -42,6 +42,7 @@ The synchronized marker observation preceded the peer close in every trial.
 |---|---:|---:|---:|---|
 | Original pending classification + test pause | 20/20 `OutcomeUnknown` and exit 1 | 20/20 | 20/20 | `1e4f0b2b…` / `829afa7d…` |
 | Private local-write-complete marker + same pause | 20/20 exit 0 | 20/20 | 20/20 | `6e06fdc4…` / `f1d28aff…` |
+| Fixed runtime, test-only hold *inside* WS writer before return | 20/20 `OutcomeUnknown` and exit 1 | 20/20 | 20/20 | `79c69b20…` / `c218a031…` |
 
 The full source copies, unredacted rows, peer timings, test harness and build
 logs remain in `_build/r2/wss-experiment/`. They are experimental binaries,
@@ -51,11 +52,16 @@ success from overwriting an earlier terminal result. A native unit test covers
 local completion, possible partial write, no write, and first-result-wins.
 The uninstrumented candidate also completed 60 raw mTLS/WSS peer-close trials,
 but those trials alone do not force the race.
+For the held-writer control, the peer had the entire MQTT DISCONNECT while the
+local `WebSocketWriter::write_once` call was still held. The private completion
+marker remained false, so all 60 outcomes stayed unknown. Each synchronized
+peer close followed the test marker. This confirms that peer receipt alone does
+not promote a possible partial local write to success.
 
 The fixed result identifies a reader-close race in the post-write settlement
 window. It does not show that every historical `OutcomeUnknown` had that cause.
-The other prescribed barrier classes (pre-admission, partial frame,
-peer-complete/write-future-held, cancellation/deadline overlap) remain to be
-executed. The current host has the Docker CLI but no Docker daemon; Linux
+The other prescribed barrier classes (pre-admission, partial frame, and
+cancellation/deadline overlap) remain to be executed. The current host has the
+Docker CLI but no Docker daemon; Linux
 hosted CI is required for the unchanged pinned EMQX 5.8.8 interop assertion.
 **WP2 remains open and Release HOLD** until those evidence gaps are reviewed.
