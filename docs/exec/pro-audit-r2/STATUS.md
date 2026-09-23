@@ -1,5 +1,10 @@
 # Second-round implementation and evidence ledger
 
+> The WP0–WP8 table below is the implementation ledger written before the
+> frozen `c52ba9b` Release run. The current review disposition and later
+> evidence are in the 2026-09-23 section at the end of this file. Historical
+> failures and measurements remain attached to their original commit.
+
 This ledger continues the frozen `0bf9e31bb53964682770af32ab9261468a106c43`
 candidate. The original source, package and operator hashes are in the local
 `_build/r2/input/manifest.json`. The old candidate and PR #6 remain intact.
@@ -45,3 +50,43 @@ files and checks, not a release verdict. WSS, independent per-dial soak stages,
 two-platform final evidence and physical B2 are separate findings. Publication
 still requires candidate approval, an authorized upload, fresh registry-only
 consumers, and release asset verification.
+
+## 2026-09-23 Pro review and bounded closeout
+
+PR #7 remains Draft at `c52ba9b9f7e8a8aee5ccb2e8b186feeecb6faee6`.
+[Release run 35820000248](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35820000248)
+bound its Linux, macOS and rolling jobs to that SHA. Linux Release passed
+42/42; macOS recorded 31 passes, 10 platform N/A and one E06 failure because
+trace A/B was indeterminate; rolling compatibility passed. The combined
+Release result is failed. Neither the pre-release extracted-package consumers
+nor `MOON_WORK` removal are registry-install acceptance. No merge, tag,
+publication or hardware acceptance has occurred.
+
+| Finding | Review disposition | Remaining evidence boundary |
+|---|---|---|
+| R2-01 | `disconnects` contract and collector event closure accepted; four raw 1800-second, 100-recovery TCP/mTLS ledgers agree with consumed events. | Independent per-dial TCP/TLS/CONNACK stage correlation is absent. `unknown_class=0` is only a client-event time-window classification. |
+| R2-02a | Retain the private local-write-completion marker for the identified DISCONNECT settlement race. The follow-up branch adds a real `write_one` regression and a mutation that fails when the marker assignment is changed. | This local-write outcome does not prove broker receipt. |
+| R2-02b | Historical first Linux EMQX WSS `OutcomeUnknown` remains unattributed. | The isolated raw barrier packet and forced deadline/cancel supplement are diagnostic builds; they cannot backfill the historical failure. |
+| R2-03 | Overflow histogram defect closed, including native 100/160/500 ms delayed-PUBACK counterexamples. | Old censored maxima cannot be reconstructed. |
+| R2-04 | Subscribe timing scope fixed. The hosted macOS trace comparison remains indeterminate; the existing off p99 CV is 27.38%. | A separate preregistered six-pair balanced local run finished within its trigger, but uses a local macOS 15 binary/environment and does not change the hosted Release result or establish a PR-to-baseline performance comparison. |
+| R2-05 | Read-only active-coroutine method and observed 1→3→1 / 1→18→1 calibration accepted. Follow-up assertions and a reconnect-ready barrier passed branch CI. | This is registered active-coroutine evidence, not all Task objects or a workload peak. |
+| R2-06 | Three specified recovery I/O windows closed within their tested scope. | No general filesystem-failure or power-loss claim. |
+| Evidence inventory | Original Linux list was internally correct for 425 entries, but omitted 57 nested `result.json` files. | Follow-up inventory includes nested results and is emitted even when a functional gate fails; old artifacts are not rewritten. |
+
+The isolated fixed-cancel WSS diagnostic binary was rerun for only the missing
+branches: five of five `WSS_PROBE_DEADLINE` markers and five of five
+`WSS_PROBE_SCOPE_RESULT completed=false` markers, each with a complete peer
+packet and writer marker before peer close. The peer close was delayed to
+400 ms; the branch budget was 100 ms. Raw rows and their hashes remain in the
+local review packet. The scope result denotes cancellation of the call, not a
+successful MQTT DISCONNECT, and neither batch attributes the historical
+Linux failure.
+
+The closeout branch `codex/pro-audit-r2-closeout` began at `c52ba9b` and adds
+test and evidence-acceptance code plus this status update. Commit `2641089b` passed local native
+tests 158/158, negative oracles for constant census samples, and the
+[two-platform Integration run 35868353679](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/35868353679).
+That selective CI is a regression check for the follow-up changes. It does
+not convert PR #7 into a new frozen Release candidate or close the per-dial
+stage gap. The v0.8 default retry policy, budget reset, schema and public API
+remain unchanged; the v0.9 research direction remains separate.
