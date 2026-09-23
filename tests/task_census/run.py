@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Twenty native scope lifetimes, sampled outside the process with LLDB."""
+"""Native scope lifetimes, sampled outside a controlled child process."""
 
 import argparse
 import json
@@ -30,7 +30,8 @@ def main():
     parser.add_argument("--durable-reopen", action="store_true")
     parser.add_argument("--storage-failures", action="store_true")
     args = parser.parse_args()
-    out = (args.artifacts or ROOT / "_build" / "task-census" / str(time.time_ns())).resolve()
+    base = Path(os.environ.get("MQTT_EVIDENCE_DIR", ROOT / "_build" / "task-census"))
+    out = (args.artifacts or base / f"census-{time.time_ns()}").resolve()
     out.mkdir(parents=True, exist_ok=False)
     subprocess.run([os.environ.get("MOON", str(ROOT / "scripts/moon.sh")),
                     "build", "--target", "native"], cwd=ROOT, check=True)
@@ -161,7 +162,9 @@ def main():
                   "reconnect_ready_counts": ready_counts,
                   "return_to_baseline": all(value == baseline for value in closed),
                   "workers": args.workers,
-                  "method": "LLDB attach/read/detach at each barrier; no target calls or memory writes",
+                  "method": ("SIGSTOP and read-only /proc/pid/mem; SIGCONT in finally"
+                             if layout.get("format") == "ELF64 x86-64 PIE" else
+                             "LLDB attach/read/detach; no target calls or memory writes"),
                   "scope": layout["scope"], "reconnect_cycles": 20 if args.reconnect else 0,
                   "timeout_cycles": 20 if args.timeouts else 0,
                   "durable_reopen_cycles": 20 if args.durable_reopen else 0,
@@ -172,6 +175,13 @@ def main():
         if args.reconnect:
             assert len(ready_counts) == 20 and len(set(ready_counts)) == 1, report
         print("Task census scope run passed:", out)
+    except Unsupported as error:
+        (out / "unsupported.json").write_text(json.dumps({
+            "reason": str(error), "binary_sha256": layout["sha256"],
+            "samples_completed": len(samples),
+        }, indent=2) + "\n")
+        print("UNSUPPORTED", error)
+        raise SystemExit(2)
     finally:
         if process.poll() is None:
             process.kill()
