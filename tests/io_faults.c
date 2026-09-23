@@ -26,7 +26,7 @@ static int arm_prefix_exists(const char *root, const char *prefix) {
   closedir(directory);
   return found;
 }
-static int selected(int fd, const char *operation) {
+static int selected(int fd, const char *operation, const char *syscall_name) {
   const char *root = getenv("MQTT_IO_ROOT"), *op = getenv("MQTT_IO_OPERATION");
   const char *arm = getenv("MQTT_IO_ARM"), *marker = getenv("MQTT_IO_MARKER");
   const char *contains = getenv("MQTT_IO_PATH_CONTAINS");
@@ -54,7 +54,7 @@ static int selected(int fd, const char *operation) {
   if (atomic_exchange(&fired, 1)) return 0;
   int log = open(marker, O_WRONLY | O_CREAT | O_APPEND, 0600);
   if (log >= 0) {
-    dprintf(log, "%s EIO %s\n", operation, path);
+    dprintf(log, "%s EIO %s\n", syscall_name, path);
     close(log);
   }
   errno = EIO;
@@ -73,7 +73,7 @@ static int selected(int fd, const char *operation) {
 #endif
 
 int WRAP(fsync)(int fd) {
-  if (selected(fd, "fsync")) return -1;
+  if (selected(fd, "fsync", "fsync")) return -1;
 #ifdef __APPLE__
   return fsync(fd); /* dyld does not interpose calls from this image itself. */
 #else
@@ -84,7 +84,7 @@ int WRAP(fsync)(int fd) {
 INTERPOSE(fsync)
 
 ssize_t WRAP(pwrite)(int fd, const void *bytes, size_t size, off_t offset) {
-  if (selected(fd, "pwrite")) return -1;
+  if (selected(fd, "pwrite", "pwrite")) return -1;
 #ifdef __APPLE__
   return pwrite(fd, bytes, size, offset);
 #else
@@ -95,8 +95,15 @@ ssize_t WRAP(pwrite)(int fd, const void *bytes, size_t size, off_t offset) {
 INTERPOSE(pwrite)
 
 #ifndef __APPLE__
+/* Python's Linux SQLite build may sync a rollback journal with fdatasync. */
+int fdatasync(int fd) {
+  if (selected(fd, "fsync", "fdatasync")) return -1;
+  int (*real_call)(int) = dlsym(RTLD_NEXT, "fdatasync");
+  return real_call(fd);
+}
+
 ssize_t pwrite64(int fd, const void *bytes, size_t size, off64_t offset) {
-  if (selected(fd, "pwrite")) return -1;
+  if (selected(fd, "pwrite", "pwrite64")) return -1;
   ssize_t (*real_call)(int, const void *, size_t, off64_t) = dlsym(RTLD_NEXT, "pwrite64");
   return real_call(fd, bytes, size, offset);
 }

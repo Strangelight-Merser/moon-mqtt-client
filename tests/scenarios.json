@@ -30,7 +30,7 @@
     {"id":"candidate-consumers","level":"release","command":["{python}","scripts/verify-candidate.py"]},
     {"id":"hostile-input","level":"release","command":["{python}","tests/security.py"]},
     {"id":"storage-faults","level":"release","command":["{python}","tests/storage_faults.py"]},
-    {"id":"recovery-io-windows","level":"release","command":["{python}","tests/recovery_io_windows.py"]},
+    {"id":"recovery-io-windows","level":"integration","command":["{python}","tests/recovery_io_windows.py"]},
     {"id":"b2-host-consumer","level":"integration","command":["{python}","tests/b2_consumer.py"]},
     {"id":"b2-evidence-classifier","level":"integration","command":["{python}","tests/b2_evidence.py"]},
     {"id":"durable-six-boundaries","level":"integration","command":["{python}","tests/durable_crash_boundaries.py"]},
