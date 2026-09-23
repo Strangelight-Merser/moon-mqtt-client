@@ -13,6 +13,7 @@ import threading
 import time
 
 from snapshot import Unsupported, binary_layout, snapshot
+from calibration import require_worker_sample
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests"))
@@ -172,6 +173,8 @@ def main():
                   "timeout_peer_rows": peer_rows}
         (out / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
         assert report["return_to_baseline"], report
+        if args.workers is not None:
+            require_worker_sample(baseline, opened, args.workers)
         if args.reconnect:
             assert len(ready_counts) == 20 and len(set(ready_counts)) == 1, report
         print("Task census scope run passed:", out)

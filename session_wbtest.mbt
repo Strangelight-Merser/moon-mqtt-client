@@ -195,6 +195,34 @@ test "DISCONNECT local write completion wins a later reader close exactly once" 
 }
 
 ///|
+async test "DISCONNECT write_one marks local completion after writer returns" {
+  let session = test_session()
+  let request = test_pending(0, Disconnect, queued_at=@async.now())
+  session.pending[0] = request
+  assert_false(
+    session.write_one(
+      {
+        bytes: b"\xe0\x00",
+        pending: Some(request),
+        delivery: None,
+        is_ping: false,
+      },
+      1000,
+      1000,
+      2,
+    ),
+  )
+  assert_true(request.started)
+  assert_true(request.local_write_complete)
+  match request.result {
+    Some(Ok(Done)) => ()
+    _ => abort("real DISCONNECT write did not complete locally")
+  }
+  assert_eq(session.pending.length(), 0)
+  session.abort("test complete")
+}
+
+///|
 test "packet id allocation wraps and skips occupied identifiers" {
   let session = test_session(next_id=65535)
   let occupied : Pending = test_pending(65535, Publish1)

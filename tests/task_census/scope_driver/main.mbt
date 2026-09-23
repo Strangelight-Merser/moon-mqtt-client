@@ -88,10 +88,17 @@ async fn main {
   if @env.get_env_var("CENSUS_MODE") is Some("reconnect") {
     @mqtt.with_client(cfg, async fn(client) {
       let mut generation = client.stats().generation
+      if !client.stats().connected {
+        fail("initial census scope is not ready")
+      }
       pause_at("ready", 0)
       for iteration in 1..=20 {
         while client.stats().generation <= generation {
           @async.sleep(10)
+        }
+        client.wait_connected()
+        if !client.stats().connected {
+          fail("reconnected census scope is not ready")
         }
         generation = client.stats().generation
         pause_at("reconnect_ready", iteration)
