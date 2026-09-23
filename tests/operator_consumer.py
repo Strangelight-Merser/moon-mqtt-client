@@ -45,6 +45,14 @@ def main():
         for name, expected in checksums.items():
             assert Path(name).name == name, name
             assert hashlib.sha256((operator / name).read_bytes()).hexdigest() == expected, name
+        operator_version = (operator / "VERSION").read_text().strip()
+        provenance = json.loads((operator / "provenance.json").read_text())
+        formats = json.loads((operator / "FORMAT-SUPPORT.json").read_text())
+        assert provenance["operator_version"] == operator_version
+        assert formats == {"durable_schema": [2], "recovery_request": [1],
+                           "archive_manifest": [1], "recovery_journal": [1],
+                           "online_recovery_transport": ["plain_tcp"],
+                           "resolve_resume": "experimental"}
         subprocess.run([sys.executable, "-m", "venv", str(work / "venv")], check=True, env=env)
         python = work / "venv/bin/python"
         subprocess.run([str(python), "-m", "pip", "install", "--disable-pip-version-check",
@@ -80,12 +88,14 @@ import {{
         suite = unittest.defaultTestLoader.loadTestsFromTestCase(OperatorBundle)
         result = unittest.TextTestRunner(verbosity=2).run(suite)
         record = {"source": "extracted library and operator candidates", "workspace_override": True,
-            "clean_venv": True, "MOON_WORK_removed": "MOON_WORK" not in env, "module_version": version,
+            "clean_venv": True, "MOON_WORK_removed": "MOON_WORK" not in env,
+            "module_version": version, "operator_version": operator_version,
+            "format_support": formats,
             "tests_run": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),
             "skipped": len(result.skipped), "successful": result.wasSuccessful() and not result.skipped,
             "operator_sha256": hashlib.sha256(args.operator.read_bytes()).hexdigest(),
             "library_sha256": hashlib.sha256(args.package.read_bytes()).hexdigest(),
-            "provenance": json.loads((operator / "provenance.json").read_text())}
+            "provenance": provenance}
         args.evidence.parent.mkdir(parents=True, exist_ok=True)
         args.evidence.write_text(json.dumps(record, indent=2) + "\n")
         if not record["successful"]:

@@ -1,5 +1,11 @@
 # Recovery operator bundle
 
+The operator has its own version in `scripts/operator-version.txt` (currently
+`0.1.0`), independent of the MoonBit library's `0.7.1` module version. An
+audit ZIP name also carries a source revision and payload digest; it is not a
+published operator release. The ZIP's `VERSION`, `FORMAT-SUPPORT.json` and
+`provenance.json` state the exact supported formats and source candidate.
+
 The versioned operator ZIP is built from the same source snapshot as the library
 candidate. It contains `durable_recovery.py`, `requirements.txt`, the recovery
 contract, this guide, provenance and `SHA256SUMS.json`. It is separate from the

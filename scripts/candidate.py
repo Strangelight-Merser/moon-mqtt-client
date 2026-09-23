@@ -20,6 +20,8 @@ def main():
     args = parser.parse_args()
     identity = source_identity()
     version = re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "moon.mod").read_text(), re.M).group(1)
+    operator_version = (ROOT / "scripts/operator-version.txt").read_text().strip()
+    assert re.fullmatch(r"\d+\.\d+\.\d+", operator_version), operator_version
     tree_digest = hashlib.sha256(json.dumps(identity["files"], sort_keys=True).encode()).hexdigest()
     candidate = f"{version}-audit-{identity['commit'][:8]}-{tree_digest[:12]}"
     output = args.output.resolve() / candidate
@@ -44,20 +46,32 @@ def main():
     files = {"durable_recovery.py": ROOT / "scripts/durable_recovery.py",
              "requirements.txt": ROOT / "tests/integration/requirements.txt",
              "DURABLE-RECOVERY.md": ROOT / "docs/architecture/DURABLE-RECOVERY.md",
-             "README.md": ROOT / "docs/OPERATOR-INSTALL.md", "LICENSE": ROOT / "LICENSE"}
+             "README.md": ROOT / "docs/OPERATOR-INSTALL.md", "LICENSE": ROOT / "LICENSE",
+             "VERSION": ROOT / "scripts/operator-version.txt"}
     payloads = {name: path.read_bytes() for name, path in files.items()}
-    payloads["provenance.json"] = (json.dumps({"candidate": candidate, "module_version": version,
+    payloads["FORMAT-SUPPORT.json"] = (json.dumps({
+        "durable_schema": [2], "recovery_request": [1], "archive_manifest": [1],
+        "recovery_journal": [1], "online_recovery_transport": ["plain_tcp"],
+        "resolve_resume": "experimental"}, indent=2) + "\n").encode()
+    operator_digest = hashlib.sha256(b"".join(name.encode() + b"\0" + payloads[name]
+                                             for name in sorted(payloads))).hexdigest()
+    operator_candidate = f"{operator_version}-audit-{identity['commit'][:8]}-{operator_digest[:12]}"
+    payloads["provenance.json"] = (json.dumps({"candidate": candidate,
+        "operator_candidate": operator_candidate, "operator_version": operator_version,
+        "module_version": version,
         "source_commit": identity["commit"], "source_dirty": identity["dirty"],
         "source_files_sha256": tree_digest, "published": False}, indent=2) + "\n").encode()
     payloads["SHA256SUMS.json"] = (json.dumps({name: hashlib.sha256(data).hexdigest()
         for name, data in payloads.items()}, indent=2) + "\n").encode()
-    operator = output / f"moon-mqtt-operator-{candidate}.zip"
+    operator = output / f"moon-mqtt-operator-{operator_candidate}.zip"
     with zipfile.ZipFile(operator, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, data in sorted(payloads.items()):
             info = zipfile.ZipInfo(name, (1980, 1, 1, 0, 0, 0))
             info.external_attr = 0o100644 << 16
             archive.writestr(info, data)
-    manifest = {"candidate": candidate, "module_version": version, "published": False,
+    manifest = {"candidate": candidate, "module_version": version,
+        "operator_candidate": operator_candidate, "operator_version": operator_version,
+        "published": False,
         "source": identity, "library": str(library), "operator": str(operator),
         "sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (library, operator)}}
     (output / "candidate.json").write_text(json.dumps(manifest, indent=2) + "\n")

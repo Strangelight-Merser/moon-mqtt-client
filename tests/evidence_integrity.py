@@ -31,9 +31,14 @@ def main():
         candidate["source"]["files"] == start["files"]
         and candidate["source"]["commit"] == start["commit"]
     )
+    assert candidate["operator_version"] == (ROOT / "scripts/operator-version.txt").read_text().strip()
+    assert candidate["operator_candidate"].startswith(candidate["operator_version"] + "-audit-")
     for name in ("library-consumer.json", "operator-consumer.json"):
         result = read(directory / name)
         assert result["successful"], (name, result)
+    operator_consumer = read(directory / "operator-consumer.json")
+    assert operator_consumer["operator_version"] == candidate["operator_version"]
+    assert operator_consumer["provenance"]["operator_candidate"] == candidate["operator_candidate"]
     benchmarks = list(directory.glob("benchmark-*/summary.json"))
     assert len(benchmarks) == 1
     benchmark = read(benchmarks[0])
