@@ -104,3 +104,29 @@ the preregistered 15% limit. Its comparison verdict is **indeterminate**.
 The workflow's successful execution does not change the original macOS
 Release E06 failure or Release HOLD. The local macOS 15.6 `within_trigger`
 supplement remains a separate environment and cannot replace hosted evidence.
+
+## 2026-09-25 hosted dial-stage diagnostic
+
+The isolated Mac diagnostic job in [run 36214058165](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/36214058165)
+succeeded at `91a4eef`, based on frozen `c52ba9b` source with test-only stage
+markers and selected broker logging. Two fixed 1800-second, 100-restart runs
+passed their soak gates. TCP recorded 135 process-wide attempts: 104 ready
+dials and 31 pre-TCP `Connection refused` attempts, with 131 emitted and 131
+consumed disconnect events. mTLS recorded 130 attempts: 104 ready dials and
+26 pre-TCP refused attempts, with 126/126 disconnect-event closure. All ready
+dials matched a source port, broker instance, MQTT identity and numeric
+CONNACK 0; mTLS also had 104 TLS-handshake success markers. All 57 failed
+attempts began inside recorded broker downtime windows. The raw artifact,
+patch and binary hashes, broker notices, outcome counts and event order were
+independently checked. This attributes the extra notifications **in these
+diagnostic runs**; it does not backfill the old hosted Release artifact or
+explain the historical Linux WSS failure.
+
+The overall diagnostic workflow is marked failed because always-on stage
+markers in that diagnostic commit disturbed exact-stderr assertions in its
+ordinary Integration jobs. A later test-only commit `194a03a` gates those
+markers to diagnostic runs; [run 36214594093](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/36214594093)
+passed ordinary Linux and macOS Integration. The long-run artifact remains
+bound to `91a4eef`, not the later commit. Neither diagnostic commit changes
+the frozen PR #7 candidate or converts the failed macOS Release into a pass.
+Release HOLD remains.
