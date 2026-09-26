@@ -88,6 +88,7 @@ def main():
     env = os.environ.copy()
     env["MOON"] = subprocess.check_output(["which", "moon"], text=True).strip()
     env["MOSQUITTO"] = subprocess.check_output(["which", "mosquitto"], text=True).strip()
+    env["MQTT_DIAL_DIAGNOSTIC"] = "1"
     env["MQTT_DIAL_FILTER_BROKER"] = "1"
 
     def run(name, command, timeout):

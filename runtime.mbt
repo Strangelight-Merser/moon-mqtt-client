@@ -117,6 +117,9 @@ let dial_probe_counter : @ref.Ref[Int] = @ref.Ref(0)
 
 ///|
 async fn dial_probe(attempt : Int, stage : String, detail : String) -> Unit {
+  if @env.get_env_var("MQTT_DIAL_DIAGNOSTIC").unwrap_or("0") != "1" {
+    return
+  }
   @stdio.stderr.write(
     @utf8.encode(
       "DIAL_STAGE attempt=\{attempt} stage=\{stage} at_ms=\{@async.now()} \{detail}\n",
