@@ -123,9 +123,10 @@ diagnostic runs**; it does not backfill the old hosted Release artifact or
 explain the historical Linux WSS failure.
 
 The overall diagnostic workflow is marked failed because always-on stage
-markers in that diagnostic commit disturbed exact-stderr assertions in its
-ordinary Integration jobs. A later test-only commit `194a03a` gates those
-markers to diagnostic runs; [run 36214594093](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/36214594093)
+markers in that diagnostic commit caused a native stderr-write panic and
+disturbed an exact-stderr assertion in ordinary Integration jobs. A later
+test-only commit `194a03a` gates those markers to diagnostic runs;
+[run 36214594093](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/36214594093)
 passed ordinary Linux and macOS Integration. The long-run artifact remains
 bound to `91a4eef`, not the later commit. Neither diagnostic commit changes
 the frozen PR #7 candidate or converts the failed macOS Release into a pass.
