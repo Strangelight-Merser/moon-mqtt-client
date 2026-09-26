@@ -1,0 +1,23 @@
+{
+  "name": "r2-hosted-macos-balanced-trace-ab-c52ba9b",
+  "purpose": "Supplemental observation-cost study; preserve the original Release E06 failure",
+  "source_commit": "c52ba9b9f7e8a8aee5ccb2e8b186feeecb6faee6",
+  "benchmark_py_sha256": "63dea0388c2763cc01f38c61ec28da1f6f2f6366a09b0a1bc9fdc2ca0253fb48",
+  "platform": "GitHub Actions macos-latest arm64",
+  "workload": "durable-stages",
+  "warmup_seconds": 5,
+  "sample_seconds": 30,
+  "orders": [
+    ["off", "on"],
+    ["on", "off"],
+    ["off", "on"],
+    ["on", "off"],
+    ["off", "on"],
+    ["on", "off"]
+  ],
+  "variation_limit_population_cv": 0.15,
+  "throughput_drop_trigger": 0.20,
+  "p99_rise_trigger": 0.25,
+  "stopping": "Run exactly six pairs once, retain all twelve trials and failures; do not append selected samples.",
+  "limits": "Same-source trace off/on comparison; no PR-to-baseline performance claim or automatic Release approval."
+}
