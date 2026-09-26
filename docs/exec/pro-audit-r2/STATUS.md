@@ -36,10 +36,10 @@ passed on Linux and macOS; the Linux artifact records `fdatasync EIO` on that
 exact journal and three completed recovery windows. This repairs the evidence
 fixture, not the library's persistence code. The previous Release failure stays
 failed and a new exact-source Release is still required.
-The pasted plan names R2-01 through R2-06 without defining their individual
-texts. They cannot be mapped faithfully until the underlying Pro review or
-`CODEX_NEXT_ROUND.md` is available. The visible WP0–WP8 requirements are mapped
-above. The selected retry policy and research direction supersede the old
+The pasted plan alone named R2-01 through R2-06 without defining their individual
+texts. The later Pro review supplied those definitions; the 2026-09-23 table
+below maps each finding. The visible WP0–WP8 requirements are mapped above.
+The selected retry policy and research direction supersede the old
 "waiting for Pro" choice rows P01–P03, while WSS findings and release support
 claims still require review.
 
@@ -90,3 +90,17 @@ That selective CI is a regression check for the follow-up changes. It does
 not convert PR #7 into a new frozen Release candidate or close the per-dial
 stage gap. The v0.8 default retry policy, budget reset, schema and public API
 remain unchanged; the v0.9 research direction remains separate.
+
+## 2026-09-25 hosted trace supplement
+
+The preregistered six-pair Mac trace A/B supplement ran on GitHub Actions
+macOS 26.6.2 arm64 at diagnostic commit `71b1271` using the unchanged frozen
+`c52ba9b` library and benchmark source. [Run 36214415419](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/36214415419)
+completed all 12 trials and passed ordinary Linux/macOS Integration. The raw
+artifact's protocol, single native binary, 12 result files, trace switches and
+outcome accounting were independently checked. Throughput population CV was
+9.83% off and 10.78% on; p99 CV was **20.83% off and 26.92% on**, both above
+the preregistered 15% limit. Its comparison verdict is **indeterminate**.
+The workflow's successful execution does not change the original macOS
+Release E06 failure or Release HOLD. The local macOS 15.6 `within_trigger`
+supplement remains a separate environment and cannot replace hosted evidence.
