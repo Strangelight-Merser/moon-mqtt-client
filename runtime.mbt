@@ -112,6 +112,21 @@ async fn mqtt_connect_exchange(
 }
 
 ///|
+/// Test-only diagnostic build. This function is absent from frozen c52.
+let dial_probe_counter : @ref.Ref[Int] = @ref.Ref(0)
+
+///|
+async fn dial_probe(attempt : Int, stage : String, detail : String) -> Unit {
+  @stdio.stderr.write(
+    @utf8.encode(
+      "DIAL_STAGE attempt=\{attempt} stage=\{stage} at_ms=\{@async.now()} \{detail}\n",
+    ),
+  ) catch {
+    _ => ()
+  }
+}
+
+///|
 fn websocket_handshake_error(error : Error, encrypted : Bool) -> Error {
   match error {
     @ws.InvalidHandshake(reason) =>
@@ -128,12 +143,13 @@ fn websocket_handshake_error(error : Error, encrypted : Bool) -> Error {
 ///|
 
 ///|
-async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
+async fn Client::dial(self : Client, diagnostic_attempt : Int) -> (Session, Bool, NegotiatedSettings) {
   @async.with_timeout(self.config.connect_timeout_ms, () => {
     let tcp = @socket.Tcp::connect_to_host(
       self.config.host[:],
       port=self.config.port,
     )
+    dial_probe(diagnostic_attempt, "tcp_connected", "local=\{tcp.addr} remote_port=\{self.config.port}")
     errdefer tcp.close()
     let (stream_reader, stream_writer, close_stream) : (
       &@io.Reader,
@@ -165,6 +181,7 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
             raise TlsFailure(msg)
           }
         }
+        dial_probe(diagnostic_attempt, "tls_handshake_ok", "local_port=\{tcp.addr.port()}")
         (
           tls,
           tls,
@@ -205,6 +222,7 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
     // Encode outside the transport classifier so invalid MQTT configuration can
     // never be mislabeled as a TLS failure.
     let connect_bytes = self.config.connect_bytes()
+    dial_probe(diagnostic_attempt, "mqtt_connect_start", "local_port=\{tcp.addr.port()}")
     let response = mqtt_connect_exchange(
       reader,
       writer,
@@ -212,9 +230,23 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
       self.config.max_packet_size,
       !(self.config.tls is Plain),
       protocol=self.config.protocol,
-    )
+    ) catch {
+      error => {
+        dial_probe(diagnostic_attempt, "mqtt_connect_error", "local_port=\{tcp.addr.port()} error=\{error}")
+        raise error
+      }
+    }
     let (session_present, negotiated) = match response {
       Incoming311(@codec.ConnackPacket(ack)) => {
+        let code = match ack.return_code {
+          @codec.ConnectionAccepted => 0
+          @codec.UnacceptableProtocolVersion => 1
+          @codec.IdentifierRejected => 2
+          @codec.ServerUnavailable => 3
+          @codec.BadUserNameOrPassword => 4
+          @codec.NotAuthorized => 5
+        }
+        dial_probe(diagnostic_attempt, "connack_311", "local_port=\{tcp.addr.port()} code=\{code}")
         if ack.return_code != @codec.ConnectionAccepted {
           raise ConnectionRefused(@debug.to_string(ack.return_code))
         }
@@ -234,6 +266,7 @@ async fn Client::dial(self : Client) -> (Session, Bool, NegotiatedSettings) {
         )
       }
       Incoming5(@mqtt5.Connack(present, reason, properties)) => {
+        dial_probe(diagnostic_attempt, "connack_5", "local_port=\{tcp.addr.port()} code=\{reason}")
         if reason != 0 {
           raise BrokerRejected(broker_reason(reason, properties))
         }
@@ -485,6 +518,9 @@ async fn Client::supervise(self : Client) -> Unit {
     self.changed.broadcast()
   }
   while !self.stopped {
+    dial_probe_counter.val += 1
+    let diagnostic_attempt = dial_probe_counter.val
+    dial_probe(diagnostic_attempt, "attempt_start", "remote_port=\{self.config.port}")
     // This flag describes exactly this dial. Consuming it before the attempt
     // means a successful CONNACK or a transport failure cannot leak its origin
     // into a later ordinary-network retry.
@@ -492,7 +528,8 @@ async fn Client::supervise(self : Client) -> Unit {
     server_disconnect_dial_pending = false
     try {
       let first_connection = !ever_ready
-      let (session, session_present, negotiated) = self.dial()
+      let (session, session_present, negotiated) = self.dial(diagnostic_attempt)
+      dial_probe(diagnostic_attempt, "dial_ready", "generation=\{session.generation}")
       self.session = Some(session)
       self.negotiated = Some(negotiated)
       defer session.abort("connection ended")
@@ -623,6 +660,7 @@ async fn Client::supervise(self : Client) -> Unit {
       session.abort("session ended")
     } catch {
       error => {
+        dial_probe(diagnostic_attempt, "supervisor_error", "generation=\{self.generation} error=\{error}")
         // The task-group body can observe a pending request's OutcomeUnknown
         // after another loop already recorded the error that caused it. Preserve
         // every such concrete first cause. `SessionLost` is synthetic: it only
@@ -715,6 +753,7 @@ async fn Client::supervise(self : Client) -> Unit {
             return
           }
           self.emit(Disconnected(self.generation, reason))
+          dial_probe(diagnostic_attempt, "disconnected_emitted", "generation=\{self.generation} cause=server_disconnect")
           server_disconnect_attempts += 1
           let jitter_ms = self.backoff.next() % server_disconnect_delay
           @async.sleep(
@@ -735,6 +774,7 @@ async fn Client::supervise(self : Client) -> Unit {
           raise cause
         }
         self.emit(Disconnected(self.generation, reason))
+        dial_probe(diagnostic_attempt, "disconnected_emitted", "generation=\{self.generation} cause=ordinary_retry")
         attempts += 1
         if attempts > self.config.reconnect_attempts {
           let exhausted = ReconnectExhausted(reason)

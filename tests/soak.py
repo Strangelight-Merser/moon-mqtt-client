@@ -48,6 +48,7 @@ class Broker:
         self.log_level = log_level
         self.log_limit_bytes = log_limit_bytes
         self.process: subprocess.Popen[str] | None = None
+        self.reader_thread: threading.Thread | None = None
         self.log_path = artifact_dir / "broker.log"
         self.log = open(self.log_path, "a", encoding="utf-8")
         # A 30-minute, 16-worker QoS 1 run can emit an enormous per-packet broker
@@ -93,10 +94,28 @@ class Broker:
     def start(self) -> None:
         # No `-v` here: `log_type` in the config already selects what is
         # logged, and `-v` would force per-packet output regardless.
+        selective = self.log_level == "debug" and os.environ.get("MQTT_DIAL_FILTER_BROKER") == "1"
         self.process = subprocess.Popen(
             [str(BROKER), "-c", str(self.config)],
-            stdout=self.log, stderr=subprocess.STDOUT, text=True,
+            stdout=subprocess.PIPE if selective else self.log,
+            stderr=subprocess.STDOUT, text=True,
         )
+        if selective:
+            assert self.process.stdout is not None
+            stream = self.process.stdout
+
+            def keep_connection_stages() -> None:
+                for line in stream:
+                    if any(stage in line for stage in (
+                        "mosquitto version", "New connection from", "New client connected from",
+                        "Sending CONNACK to", "Client connection from", "Client ",
+                        "Socket error on client", "OpenSSL Error", "Error:",
+                    )):
+                        self.log.write(line)
+                self.log.flush()
+
+            self.reader_thread = threading.Thread(target=keep_connection_stages, daemon=True)
+            self.reader_thread.start()
         wait_port(self.port)
 
     def stop(self) -> None:
@@ -107,6 +126,9 @@ class Broker:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait()
+        if self.reader_thread:
+            self.reader_thread.join(3)
+            self.reader_thread = None
         self._cap_log()
 
     def close(self) -> None:
@@ -671,6 +693,8 @@ def main() -> None:
         args.downtime, artifacts, args.broker_log, args.broker_log_limit_mb,
         mtls=args.mtls,
     )
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)
     print(f"soak evidence: {artifacts}", flush=True)
 

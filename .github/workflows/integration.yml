@@ -56,3 +56,47 @@ jobs:
             !_build/acceptance/**/*.mqttrec
           if-no-files-found: error
           retention-days: 30
+
+  r2-dial-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && github.ref_name == 'codex/r2-dial-diagnostic'
+    name: R2 isolated dial stages (macos-arm64)
+    runs-on: macos-latest
+    timeout-minutes: 110
+    env:
+      MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install broker
+        run: brew install mosquitto openssl@3
+      - name: Install verified MoonBit baseline
+        run: |
+          ./scripts/install-moonbit-ci.sh fixed
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Install acceptance dependencies
+        run: python -m pip install -r tests/integration/requirements.txt
+      - name: Calibrate and run fixed diagnostic budget
+        run: python tests/diagnostics/dial_stage/run_hosted.py
+      - name: Preserve diagnostic evidence without test private keys
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r2-dial-diagnostic-macos-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            _build/dial-stage-hosted/*.json
+            _build/dial-stage-hosted/*.log
+            _build/dial-stage-hosted/*.patch
+            _build/dial-stage-hosted/*/result.json
+            _build/dial-stage-hosted/*/dial-stage-ledger.json
+            _build/dial-stage-hosted/*/driver.jsonl
+            _build/dial-stage-hosted/*/driver.stderr.log
+            _build/dial-stage-hosted/*/broker.log
+            _build/dial-stage-hosted/*/client-events.json
+            _build/dial-stage-hosted/*/fault-plan.json
+            _build/dial-stage-hosted/*/resources.jsonl
+            _build/dial-stage-hosted/*/peer-dial-ledger.json
+            _build/dial-stage-hosted/*/soak_driver.exe
+          if-no-files-found: error
+          retention-days: 30
