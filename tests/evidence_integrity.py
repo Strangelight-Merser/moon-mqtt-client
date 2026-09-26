@@ -14,19 +14,50 @@ def read(path):
     return json.loads(path.read_text())
 
 
-def main():
-    directory = Path(os.environ["MQTT_EVIDENCE_DIR"])
+def inventory_files(directory):
+    # Root result/log files are updated after this process exits. Nested
+    # per-trial result.json files are already final and must be sealed.
+    excluded_root = {"result.json", "evidence-integrity.log", "inventory.json"}
+    excluded_suffixes = {".key", ".pem", ".mqttrec", ".dmg", ".sqlite3"}
+    return {
+        str(relative): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in directory.rglob("*")
+        if path.is_file()
+        for relative in (path.relative_to(directory),)
+        if str(relative) not in excluded_root
+        and path.suffix not in excluded_suffixes
+        and ".sqlite3-" not in path.name
+    }
+
+
+def write_inventory(directory, state, complete):
+    inventory = {
+        "source_commit": state.get("source_commit"),
+        "candidate": state.get("candidate"),
+        "source_unchanged": state.get("source_unchanged", False),
+        "required_measurements_complete": complete,
+        "files": inventory_files(directory),
+    }
+    (directory / "inventory.json").write_text(json.dumps(inventory, indent=2) + "\n")
+
+
+def validate(directory, state):
     start = read(directory / "source.json")
+    state["source_commit"] = start["commit"]
     spec = importlib.util.spec_from_file_location(
         "audit_acceptance", ROOT / "scripts/acceptance.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     end = module.source_identity()
-    assert start["commit"] == end["commit"] and start["files"] == end["files"], (
+    state["source_unchanged"] = (
+        start["commit"] == end["commit"] and start["files"] == end["files"]
+    )
+    assert state["source_unchanged"], (
         "source changed during acceptance"
     )
     candidate = read(directory / "candidate.json")
+    state["candidate"] = candidate["candidate"]
     assert (
         candidate["source"]["files"] == start["files"]
         and candidate["source"]["commit"] == start["commit"]
@@ -83,30 +114,17 @@ def main():
     assert all(
         row["status"] in ("passed", "platform-not-applicable") for row in attempts
     ), attempts
-    # Exclude secrets/test PKI, raw stores and recovery archives from the share
-    # inventory. The local evidence directory may still contain synthetic data.
-    excluded = {".key", ".pem", ".mqttrec", ".dmg", ".sqlite3"}
-    inventory = {
-        str(p.relative_to(directory)): hashlib.sha256(p.read_bytes()).hexdigest()
-        for p in directory.rglob("*")
-        if p.is_file()
-        and p.suffix not in excluded
-        and ".sqlite3-" not in p.name
-        and p.name not in ("result.json", "evidence-integrity.log", "inventory.json")
-    }
-    (directory / "inventory.json").write_text(
-        json.dumps(
-            {
-                "source_commit": start["commit"],
-                "candidate": candidate["candidate"],
-                "source_unchanged": True,
-                "required_measurements_complete": True,
-                "files": inventory,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+
+
+def main():
+    directory = Path(os.environ["MQTT_EVIDENCE_DIR"])
+    state = {}
+    complete = False
+    try:
+        validate(directory, state)
+        complete = True
+    finally:
+        write_inventory(directory, state, complete)
     print(
         "Final source, candidate consumers, 39 benchmarks, 2 long soaks, six crash windows and storage evidence verified"
     )
