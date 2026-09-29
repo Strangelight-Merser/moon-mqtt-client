@@ -333,5 +333,11 @@
     "websocket_wbtest.mbt": "caaa8027070d9f9f0fd7da4b1f22da84816727841c483b1c05904c5ffca993a9",
     "wire.mbt": "faed14efcf49008a463f507a9a4210aea1e87327a7e820ca493da5641693b71a",
     "wire_wbtest.mbt": "5a1323226f2c831f6d08380855328c9b86033c247c810706e2d77c96f171ccf2"
+  },
+  "directory_symlinks": {
+    "third_party/async-tls/src/testdata": {
+      "target": "../testdata",
+      "sha256": "dcfd331274f2ae2bdc721c987c2a5647850419c5fb32ed40731a4430b7e855c2"
+    }
   }
 }
