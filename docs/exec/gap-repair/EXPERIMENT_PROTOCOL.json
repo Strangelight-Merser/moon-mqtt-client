@@ -1,0 +1,59 @@
+{
+  "registered_at": "2026-09-29T12:35:39.520841+00:00",
+  "base": "5ee6912fdfc8b9a9fd7747a316f1138d41000aca",
+  "E06": {
+    "conditions": {
+      "A": "original observer and trace off",
+      "B": "original observer and trace on",
+      "C": "bounded deferred stage/peer observer and trace off",
+      "D": "bounded deferred stage/peer and trace on with deferred trace output"
+    },
+    "orders": [
+      [
+        "A",
+        "B",
+        "C",
+        "D"
+      ],
+      [
+        "D",
+        "C",
+        "B",
+        "A"
+      ],
+      [
+        "B",
+        "A",
+        "D",
+        "C"
+      ]
+    ],
+    "warmup_seconds": 5,
+    "sample_seconds": 30,
+    "repeats": 3,
+    "formal_gate_unchanged": true,
+    "diagnostic_only": true,
+    "external_profile": "one extra A/B only if permitted; macOS sudo unavailable; no SIP or auth changes"
+  },
+  "WSS": {
+    "close_modes": [
+      "ws_close",
+      "tls_close_notify",
+      "transport_eof"
+    ],
+    "repeats_per_boundary": 3,
+    "subscriber_close_trials": 10,
+    "mutation": "marker assignment disabled in isolated generated source only"
+  },
+  "device": {
+    "firmware_writes": false,
+    "physical_output": "blocked pending confirmed board mapping and independent observation",
+    "logical_receipts": "continuous serial, same boot, status/count bookends, MQTT IDs, negative controls"
+  },
+  "final_acceptance": {
+    "macOS": "this local macOS arm64; no platform shopping",
+    "Linux": "existing local x86_64 Docker environment if equivalent checks available; otherwise isolated test ref CI required",
+    "attempts_per_frozen_revision_per_platform": 1,
+    "no_retry_without_root_fix": true
+  }
+}
