@@ -1,0 +1,49 @@
+name: Linux sync diagnostic (not Release)
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/linux-sync-diagnostic]
+    paths-ignore: ["docs/**", "README.md"]
+permissions:
+  contents: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install diagnostic build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc libc6-dev binutils libssl-dev
+          python -m pip install -r tests/integration/requirements.txt
+      - name: Install the fixed compiler and dependencies
+        run: |
+          ./scripts/install-moonbit-ci.sh fixed
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          "$HOME/.moon/bin/moon" update
+      - name: Record and enable scheduler accounting on this disposable runner
+        run: |
+          mkdir -p _build/linux-sync-environment
+          sysctl kernel.sched_schedstats | tee _build/linux-sync-environment/schedstats-before.txt
+          sudo sysctl -w kernel.sched_schedstats=1 | tee _build/linux-sync-environment/schedstats-after.txt
+          uname -a > _build/linux-sync-environment/uname.txt
+          findmnt -T . > _build/linux-sync-environment/mount.txt
+      - name: Qualify and collect one fixed three-pair diagnostic
+        env:
+          MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
+        run: python tests/closure/linux_sync_study.py --output _build/linux-sync-diagnostic
+      - name: Preserve first-attempt diagnostic including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-sync-diagnostic-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            _build/linux-sync-environment/
+            _build/linux-sync-diagnostic/
+            !_build/linux-sync-diagnostic/**/*.sqlite3*
+          if-no-files-found: error
+          retention-days: 30

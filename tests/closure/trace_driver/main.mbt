@@ -66,6 +66,11 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
       group.spawn_bg(async fn() {
         let mut seq = 0
         let histogram = Array::make(10001, 0)
+        let tail_capacity = 4096
+        let tail_ns = Array::make(tail_capacity, 0L)
+        let tail_seq = Array::make(tail_capacity, 0)
+        let mut tail_count = 0
+        let mut tail_lost = 0
         let mut max_ns = 0L
         let mut completed_count = 0
         let mut rejected = 0
@@ -112,9 +117,16 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
             completed_count += 1
             let elapsed_ns = (now_ns() - began).max(0L)
             max_ns = max_ns.max(elapsed_ns)
-            let bucket = (elapsed_ns / 10000L)
-              .to_int()
-              .clamp(min=0, max=10000)
+            let bucket = (elapsed_ns / 10000L).min(10000L).to_int()
+            if elapsed_ns >= 100000000L {
+              if tail_count < tail_capacity {
+                tail_ns[tail_count] = elapsed_ns
+                tail_seq[tail_count] = seq
+                tail_count += 1
+              } else {
+                tail_lost += 1
+              }
+            }
             histogram[bucket] += 1
           } else {
             if outcome == "rejected" {
@@ -137,6 +149,14 @@ async fn workload(client : @mqtt.Client, phase : String, seconds : Int) -> Unit 
           }
         }
         range(phase, worker, range_start, seq, last_outcome)
+        for i in 0..<tail_count {
+          log(
+            "{\"event\":\"tail\",\"phase\":\"\{phase}\",\"worker\":\{worker},\"sequence\":\{tail_seq[i]},\"elapsed_ns\":\{tail_ns[i]}}",
+          )
+        }
+        log(
+          "{\"event\":\"tail_buffer\",\"version\":2,\"phase\":\"\{phase}\",\"worker\":\{worker},\"capacity\":\{tail_capacity},\"count\":\{tail_count},\"lost\":\{tail_lost}}",
+        )
         for bucket in 0..<10000 {
           if histogram[bucket] > 0 {
             log(
@@ -250,6 +270,13 @@ async fn run(client : @mqtt.Client) -> Unit {
 ///|
 async fn main {
   let kind = setting("KIND", "publish")
+  let token = setting("TRIAL_TOKEN", "")
+  let trace_mode = number("TRACE_ENABLED", "1")
+  let warmup = number("WARMUP", "5")
+  let sample = number("SECONDS", "30")
+  log(
+    "{\"event\":\"measurement_identity\",\"version\":2,\"token\":\"\{token}\",\"kind\":\"\{kind}\",\"trace_enabled\":\{trace_mode},\"warmup\":\{warmup},\"sample\":\{sample}}",
+  )
   let cfg = @mqtt.Config::new(
     "127.0.0.1",
     "moon-benchmark",

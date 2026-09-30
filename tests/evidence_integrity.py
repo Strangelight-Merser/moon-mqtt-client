@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+from measurement_audit import audit_trace
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -76,7 +77,8 @@ def validate(directory, state):
     assert benchmark["full_default_matrix"] and len(benchmark["results"]) == 39
     assert benchmark["trace_ab_requested"]
     assert len(benchmark["trace_ab"]["pairs"]) == 3
-    assert benchmark["trace_ab"]["comparison"]["verdict"] == "within_trigger", (
+    comparison = audit_trace(benchmarks[0].parent, benchmark, start)
+    assert comparison["verdict"] == "within_trigger", (
         "trace A/B requires investigation or is indeterminate", benchmark["trace_ab"]["comparison"])
     for trial in benchmark["results"]:
         assert trial["native"]["pid"] > 0 and len(trial["native"]["sha256"]) == 64

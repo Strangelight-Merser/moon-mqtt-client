@@ -12,11 +12,11 @@ import platform
 import queue
 import shutil
 import socket
-import statistics
 import subprocess
 import threading
 import time
 from harness import stop_process
+import measurement_audit
 from durable_outbox import packet, body_offset, publish_id
 from mqtt5_runtime import frame
 from soak import process_sample, percentile
@@ -63,29 +63,7 @@ def percentile_with_overflow(histogram, overflow_count, fraction):
 
 
 def trace_comparison(pairs):
-    assert len(pairs) == 3
-    throughputs = {mode: [pair[mode]["throughput_per_s"] for pair in pairs]
-                   for mode in ("off", "on")}
-    p99 = {mode: [pair[mode]["latency_us"]["p99"] for pair in pairs]
-           for mode in ("off", "on")}
-    variable = any(statistics.pstdev(values) / statistics.mean(values) > .15
-                   for values in throughputs.values() if statistics.mean(values))
-    if any(not isinstance(value, int) for values in p99.values() for value in values):
-        variable = True
-    else:
-        variable |= any(statistics.pstdev(values) / statistics.mean(values) > .15
-                        for values in p99.values() if statistics.mean(values))
-    if variable:
-        return {"verdict": "indeterminate", "reason": "variance above 15% or censored p99",
-                "throughput": throughputs, "p99_us": p99}
-    off_t = statistics.median(throughputs["off"])
-    on_t = statistics.median(throughputs["on"])
-    off_p = statistics.median(p99["off"])
-    on_p = statistics.median(p99["on"])
-    return {"verdict": "investigate" if on_t < off_t * .8 or on_p > off_p * 1.25 else "within_trigger",
-            "throughput": throughputs, "p99_us": p99,
-            "throughput_drop_fraction": (off_t - on_t) / off_t,
-            "p99_rise_fraction": (on_p - off_p) / off_p if off_p else None}
+    return measurement_audit.trace_comparison(pairs)
 
 
 class Peer:
@@ -284,13 +262,16 @@ class Peer:
         assert not self.thread.is_alive(), "peer did not close"
 
 
-def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
+def trial(binary, settings, warmup, seconds, directory, trace_enabled=True,
+          native_env=None, diagnostic_sampler=None):
     directory.mkdir(parents=True, exist_ok=False)
     peer = Peer(settings, directory)
+    token = hashlib.sha256(os.urandom(32)).hexdigest()
     env = {
         **os.environ,
         "MOONBIT_ASYNC_CHECK_FD_LEAK": "1",
         "MQTT_BENCH_PORT": str(peer.port),
+        "MQTT_BENCH_TRIAL_TOKEN": token,
         "MQTT_BENCH_WARMUP": str(warmup),
         "MQTT_BENCH_SECONDS": str(seconds),
         "MQTT_BENCH_DB": str(directory / "outbox.sqlite3"),
@@ -298,6 +279,7 @@ def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
         "MQTT_BENCH_TRACE_ENABLED": "1" if trace_enabled else "0",
     }
     env.update({"MQTT_BENCH_" + k.upper(): str(v) for k, v in settings.items()})
+    env.update(native_env or {})
     stdout = (directory / "native.jsonl").open("w")
     stderr = (directory / "stderr.log").open("w")
     identity = {
@@ -314,6 +296,11 @@ def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
         text=True,
         bufsize=1,
     )
+    (directory / "identity.json").write_text(json.dumps({
+        "version": measurement_audit.VERSION, "binary_sha256": identity["sha256"], "token": token,
+        "settings": settings, "warmup": warmup, "sample": seconds,
+        "trace_enabled": trace_enabled, "trial": directory.name,
+    }, indent=2) + "\n")
     identity["pid"] = process.pid
     events = queue.Queue()
     samples = []
@@ -353,6 +340,8 @@ def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
         while not sampling.wait(1):
             if process.poll() is not None:
                 break
+            if diagnostic_sampler is not None:
+                diagnostic_sampler(process.pid)
             samples.append(
                 [
                     time.clock_gettime_ns(time.CLOCK_MONOTONIC),
@@ -364,6 +353,8 @@ def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
     try:
         barrier("before_scope", 10)
         before = process_sample(process.pid)
+        if diagnostic_sampler is not None:
+            diagnostic_sampler(process.pid)
         release()
         barrier("warmed", warmup + 30)
         warmed = process_sample(process.pid)
@@ -372,6 +363,8 @@ def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
         release()
         barrier("scope_closed", seconds + 40)
         post = [process_sample(process.pid) for _ in range(3)]
+        if diagnostic_sampler is not None:
+            diagnostic_sampler(process.pid)
         release()
         code = process.wait(10)
         assert code == 0, (code, (directory / "stderr.log").read_text())
@@ -489,6 +482,12 @@ def trial(binary, settings, warmup, seconds, directory, trace_enabled=True):
             "internal_task_census": "unavailable; no public instrumentation added",
         },
     }
+    if settings["kind"] in ("publish", "stages", "durable"):
+        # Preserve the original censored histogram while adding exact tail ranks.
+        for phase in ("warmup", "sample"):
+            audited = measurement_audit.audit_phase(rows, phase)
+            if phase == "sample":
+                result["measurement"] = audited
     if settings["kind"] in ("stages", "durable"):
         evidence = {}
         for file in (directory / "wire.jsonl", directory / "sqlite.jsonl"):
@@ -602,7 +601,14 @@ def main():
         binary,
     )
     binary.chmod(0o700)
+    import sys
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from acceptance import source_identity
     report = {
+        "source_identity": source_identity(),
+        "measurement_protocol": {"version": measurement_audit.VERSION,
+            "build": "debug-native", "warmup": args.warmup,
+            "sample": args.seconds, "pairs": args.repeats, "order": ["off", "on"]},
         "platform": platform.platform(),
         "clock": "CLOCK_MONOTONIC ns in native and peer; same host",
         "results": [],

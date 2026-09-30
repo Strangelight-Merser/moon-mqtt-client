@@ -44,6 +44,7 @@
     {"id":"b2-host-consumer","level":"integration","command":["{python}","tests/b2_consumer.py"]},
     {"id":"b2-evidence-classifier","level":"integration","command":["{python}","tests/b2_evidence.py"]},
     {"id":"durable-six-boundaries","level":"integration","command":["{python}","tests/durable_crash_boundaries.py"]},
+    {"id":"measurement-audit","level":"core","command":["{python}","tests/measurement_audit_test.py"]},
     {"id":"measurement-validity","level":"release","command":["{python}","tests/measurement_validity.py"]},
     {"id":"benchmark","level":"release","timeout":2100,"command":["{python}","tests/benchmark.py","--trace-ab"]},
     {"id":"soak-tcp","level":"release","timeout":2000,"command":["{python}","tests/soak.py","--duration","1800","--cycles","100"]},
