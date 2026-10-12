@@ -1060,10 +1060,16 @@ async fn Client::read_loop(self : Client, session : Session) -> Unit {
 async fn read_session_byte(session : Session) -> Byte? {
   while session.alive {
     let incoming = @async.with_timeout_opt(100, () => {
-      session.reader.read_exactly(1)
+      // with_timeout_opt starts this body in a child coroutine. Teardown may
+      // close the transport after the outer loop check but before admission.
+      if !session.alive {
+        return None
+      }
+      Some(session.reader.read_exactly(1))
     })
     match incoming {
-      Some(bytes) => return Some(bytes[0])
+      Some(Some(bytes)) => return Some(bytes[0])
+      Some(None) => return None
       None => ()
     }
   }
@@ -1077,11 +1083,19 @@ async fn read_session_byte(session : Session) -> Byte? {
 async fn read_session_chunk(session : Session, max_len : Int) -> Bytes? {
   while session.alive {
     let incoming = @async.with_timeout_opt(100, () => {
+      if !session.alive {
+        return None
+      }
       session.reader.read_some(max_len~)
     })
     match incoming {
       Some(Some(bytes)) => return Some(bytes)
-      Some(None) => raise @io.ReaderClosed
+      Some(None) => {
+        if !session.alive {
+          return None
+        }
+        raise @io.ReaderClosed
+      }
       None => ()
     }
   }
