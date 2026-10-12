@@ -1,0 +1,86 @@
+name: software acceptance closure
+on:
+  workflow_dispatch:
+  push:
+    branches: [codex/software-acceptance-closure]
+    paths-ignore: ['docs/**', 'README.md']
+permissions:
+  contents: read
+jobs:
+  calibration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install fixed environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mosquitto openssl libssl-dev
+          python -m pip install -r tests/integration/requirements.txt
+          ./scripts/install-moonbit-ci.sh fixed
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
+          "$HOME/.moon/bin/moon" update
+      - name: Qualify external observation and negative controls
+        run: python tests/closure/dial_calibration.py --output _build/dial-calibration
+      - name: Preserve calibration including failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dial-calibration-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            _build/dial-calibration/
+            !_build/dial-calibration/**/*.key
+            !_build/dial-calibration/**/*.pem
+          retention-days: 30
+  acceptance:
+    needs: calibration
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [release, tcp, mtls]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install fixed environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mosquitto openssl libssl-dev
+          python -m pip install -r tests/integration/requirements.txt
+          ./scripts/install-moonbit-ci.sh fixed
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
+          "$HOME/.moon/bin/moon" update
+      - name: Original complete Release on its own runner
+        if: matrix.mode == 'release'
+        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" python tests/closure/software_acceptance.py
+      - name: Observed TCP soak on its own runner
+        if: matrix.mode == 'tcp'
+        run: python tests/closure/dial_soak.py --output _build/dial-tcp
+      - name: Observed mTLS soak on its own runner
+        if: matrix.mode == 'mtls'
+        run: python tests/closure/dial_soak.py --output _build/dial-mtls --mtls
+      - name: Preserve first attempt including failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: software-${{ matrix.mode }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            _build/software-closure/
+            _build/dial-tcp/
+            _build/dial-mtls/
+            !_build/**/*.key
+            !_build/**/*.pem
+            !_build/**/*.sqlite3*
+            !_build/**/*.mqttrec
+          if-no-files-found: error
+          retention-days: 30

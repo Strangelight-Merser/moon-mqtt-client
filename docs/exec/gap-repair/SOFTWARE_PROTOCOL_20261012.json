@@ -1,0 +1,66 @@
+{
+  "base": "0fbd0c5b963313879e1539118be56ca1545c7c68",
+  "registered_date": "2026-10-12",
+  "scope": "E06 environment control, external per-dial evidence, final software acceptance; no publication or hardware",
+  "protected": "Existing tests, scenarios, thresholds, dependency versions, public API, schema and persistence strength remain unchanged",
+  "E06": {
+    "environments": [
+      "existing local macOS arm64 APFS worktree",
+      "one Ubuntu 24.04 x64 hosted runner per frozen revision"
+    ],
+    "intervention": "Use a dedicated non-synced local evidence directory; serial workloads; no other agent-owned benchmark/build/soak on that host during the benchmark. Record filesystem, mount options, disk space, load, compiler, OS, processes and timing before/after. Do not stop unrelated processes.",
+    "formal_program": "original scripts/check.sh release including original tests/benchmark.py --trace-ab",
+    "warmup_seconds": 5,
+    "sample_seconds": 30,
+    "pairs": 3,
+    "order": [
+      "off1",
+      "on1",
+      "off2",
+      "on2",
+      "off3",
+      "on3"
+    ],
+    "thresholds": {
+      "population_cv_max": 0.15,
+      "throughput_drop_max": 0.2,
+      "p99_rise_max": 0.25
+    },
+    "attempts_per_revision_per_platform": 1,
+    "stop": "If the original gate fails, retain failure and diagnose its specific evidence. No favorable reruns, RAM disk, WAL change, weaker sync, batching, workload reduction or environment shopping. A diagnostic pass is not formal acceptance."
+  },
+  "dial": {
+    "candidate": "Unmodified native executable from the frozen source; external socket interposer and test gateway only",
+    "identity": "Process PID and executable hash; resolver allocation/free lifetime identifies one serial Client::dial, monotonically unique connect lifetimes identify its Happy Eyeballs TCP attempts. Match gateway accept by exact tuple, never timestamp proximity. Concurrent resolver objects, missing records and ambiguous tuple reuse fail closed.",
+    "gateway": "Bounded in-memory TLS and first MQTT packet records; actual numeric TLS alerts and CONNACK bytes; forwards to isolated Mosquitto for long runs. Test-only TLS termination changes the observed environment and is not direct-broker TLS acceptance.",
+    "calibration_cases": [
+      "normal",
+      "initial_refusal",
+      "recovery_refusal_then_success",
+      "tcp_refused",
+      "tls_verification_failure",
+      "tls_timeout",
+      "tls_success_then_eof_before_connack",
+      "maintenance_to_ordinary"
+    ],
+    "repetitions": 3,
+    "negative_controls": [
+      "missing_record",
+      "fd_reuse",
+      "observer_excluded",
+      "buffer_overflow",
+      "output_failure",
+      "wrong_dial"
+    ],
+    "long_runs": {
+      "transports": [
+        "tcp",
+        "mtls"
+      ],
+      "seconds": 1800,
+      "recoveries": 100
+    },
+    "stop": "Calibration failure prevents long runs. Lost records or ambiguous attribution fail evidence. Original soak outcome/resource/recovery assertions must remain active.",
+    "verification_failure_case": "The independent calibration driver presents client-unrelated.pem to a server requiring client-ca.pem; retain actual server alert 48 and verify_code 20. Client-side rejection need not flush an alert onto the wire and is not inferred from its error text."
+  }
+}
