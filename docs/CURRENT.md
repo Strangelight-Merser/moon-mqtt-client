@@ -7,8 +7,8 @@
 | Audit baseline | `f0a0e9ec33b7aee2aeee26ea20572904d05e3069` |
 | Review candidate | Local `0.7.1-audit-<commit>-<source digest>` assets; not a new registry version |
 | Candidate manifest | Generated `_build/candidate/<id>/candidate.json` binds exact source files and ZIP checksums |
-| Formal next version/release | Awaiting Pro/release-owner decision; no tag, upload or release in this implementation |
-| Current task and evidence | [Pro implementation ledger](exec/pro-audit/README.md) |
+| Formal next version/release | Release HOLD; complete remaining evidence gates before any merge, tag or publication |
+| Current task and evidence | [2026-10-12 audit and read-race/source-freeze fixes](exec/gap-repair/AUDIT_20261012.md); tested implementation `f67d624` |
 | Historical acceptance | Existing `docs/exec/STATE.md`, release notes and validation reports are historical snapshots |
 
 ## Support matrix

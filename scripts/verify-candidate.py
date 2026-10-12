@@ -19,7 +19,9 @@ def main():
     args = parser.parse_args()
     path = args.manifest or Path(json.loads((ROOT / "_build/candidate/latest.json").read_text())["manifest"])
     manifest = json.loads(path.read_text())
-    assert source_identity()["files"] == manifest["source"]["files"], "candidate source or consumer entrypoints changed"
+    source = source_identity()
+    assert source["commit"] == manifest["source"]["commit"], "candidate source commit changed"
+    assert source["files"] == manifest["source"]["files"], "candidate source or consumer entrypoints changed"
     for key in ("library", "operator"):
         package = Path(manifest[key])
         assert hashlib.sha256(package.read_bytes()).hexdigest() == manifest["sha256"][package.name]
@@ -42,6 +44,9 @@ def main():
     failed = False
     for command in commands:
         failed |= subprocess.run(command, cwd=ROOT).returncode != 0
+    end = source_identity()
+    assert end["commit"] == source["commit"] and end["files"] == source["files"], (
+        "source changed during candidate consumer verification")
     if failed:
         raise SystemExit(1)
 

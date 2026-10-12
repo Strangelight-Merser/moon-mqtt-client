@@ -1,0 +1,28 @@
+name: source freeze contract
+on:
+  push:
+    paths:
+      - scripts/acceptance.py
+      - scripts/candidate.py
+      - scripts/verify-candidate.py
+      - tests/closure/source_freeze_test.py
+      - .github/workflows/source-freeze.yml
+  pull_request:
+    paths:
+      - scripts/acceptance.py
+      - scripts/candidate.py
+      - scripts/verify-candidate.py
+      - tests/closure/source_freeze_test.py
+      - .github/workflows/source-freeze.yml
+permissions:
+  contents: read
+jobs:
+  source-freeze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python tests/closure/source_freeze_test.py
