@@ -114,10 +114,20 @@ def main():
             # Keep the complete log and its hash in the attempt directory.
             print(log.read_text(errors="replace")[-12000:], flush=True)
         (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
-    result["successful"] = all(r["status"] in ("passed", "platform-not-applicable") for r in records)
+    try:
+        end = source_identity()
+        (directory / "source-end.json").write_text(json.dumps(end, indent=2) + "\n")
+        result["source_unchanged"] = source["commit"] == end["commit"] and source["files"] == end["files"]
+    except (OSError, subprocess.SubprocessError, AssertionError) as error:
+        result["source_unchanged"] = False
+        result["source_error"] = str(error)
+    result["successful"] = result["source_unchanged"] and all(
+        r["status"] in ("passed", "platform-not-applicable") for r in records)
     result["full_level"] = not bool(args.only)
     (directory / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(f"Evidence: {directory}")
+    if not result["source_unchanged"]:
+        print("FAILED source identity changed or could not be verified after acceptance", flush=True)
     if not result["successful"]:
         raise SystemExit(1)
 

@@ -74,6 +74,9 @@ def main():
         "published": False,
         "source": identity, "library": str(library), "operator": str(operator),
         "sha256": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (library, operator)}}
+    end = source_identity()
+    assert end["commit"] == identity["commit"] and end["files"] == identity["files"], (
+        "source changed during candidate packaging; no candidate manifest published")
     (output / "candidate.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (output / "SHA256SUMS").write_text("".join(f"{digest}  {name}\n" for name, digest in manifest["sha256"].items()))
     # A pointer is convenience only; consumers verify the immutable manifest.
