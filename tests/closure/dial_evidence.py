@@ -274,8 +274,9 @@ def correlate(socket_path, peer_path, pid):
             previous.append((rows[0]['ns'], rows[-1]['ns']))
         # Both recorders use the same host CLOCK_MONOTONIC. This is strict
         # lifetime containment, not nearest-timestamp matching. A connect
-        # record is after connect(), and close is recorded before close():
-        # the narrower window conservatively rejects an early/late accept.
+        # timestamp is captured before connect(), close before close(). Older
+        # captures timestamped connect after its return: their narrower window
+        # remains strict; an early accept is rejected, never guessed back in.
         candidates = [p for p in accepts if tuple(p['remote']) in endpoints
                       and p['local']==rows[0]['remote']
                       and rows[0]['ns'] < p['ns'] < rows[-1]['ns']]

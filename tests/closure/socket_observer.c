@@ -41,10 +41,10 @@ static struct endpoint endpoint(const struct sockaddr *a) {
   if(a->sa_family==AF_INET6) { const struct sockaddr_in6 *p=(const void*)a; inet_ntop(AF_INET6,&p->sin6_addr,e.ip,sizeof e.ip);e.port=ntohs(p->sin6_port); }
   return e;
 }
-static void record(int fd,int kind,int rc,int error,int soerror) {
+static void record(int fd,int kind,int rc,int error,int soerror,uint64_t ns) {
   if(fd<0 || fd>=FDS || !lives[fd]) return;
   struct sockaddr_storage addr; socklen_t n=sizeof addr;
-  struct event r={0};r.ns=clock_ns();r.life=lives[fd];r.dial=dials[fd];r.fd=fd;r.kind=kind;r.rc=rc;r.error=error;r.soerror=soerror;r.remote=remotes[fd];
+  struct event r={0};r.ns=ns;r.life=lives[fd];r.dial=dials[fd];r.fd=fd;r.kind=kind;r.rc=rc;r.error=error;r.soerror=soerror;r.remote=remotes[fd];
   if(!getsockname(fd,(void*)&addr,&n)) r.local=endpoint((void*)&addr);
   if(total<capacity) rows[total]=r;
   total++;
@@ -86,8 +86,9 @@ static int observed_connect(int fd,const struct sockaddr *addr,socklen_t length)
   if(fd<0 || fd>=FDS || (addr->sa_family!=AF_INET && addr->sa_family!=AF_INET6)) {pthread_mutex_unlock(&lock);errno=saved;return original_connect(fd,addr,length);}
   if(lives[fd]) _exit(125);
   lives[fd]=++sequence;dials[fd]=active_dial;remotes[fd]=endpoint(addr);
+  uint64_t entered=clock_ns();
   errno=saved;int rc=original_connect(fd,addr,length);int error=errno;
-  record(fd,0,rc,rc<0?error:0,0);pthread_mutex_unlock(&lock);errno=error;return rc;
+  record(fd,0,rc,rc<0?error:0,0,entered);pthread_mutex_unlock(&lock);errno=error;return rc;
 }
 static int observed_getsockopt(int fd,int level,int option,void *value,socklen_t *length) {
 #ifdef __APPLE__
@@ -96,7 +97,7 @@ static int observed_getsockopt(int fd,int level,int option,void *value,socklen_t
   if(!original_getsockopt) original_getsockopt=dlsym(RTLD_NEXT,"getsockopt");
 #endif
   int rc=original_getsockopt(fd,level,option,value,length);int error=errno;
-  if(enabled && level==SOL_SOCKET && option==SO_ERROR) {pthread_mutex_lock(&lock);record(fd,1,rc,rc<0?error:0,rc==0?*(int*)value:-1);pthread_mutex_unlock(&lock);}
+  if(enabled && level==SOL_SOCKET && option==SO_ERROR) {pthread_mutex_lock(&lock);record(fd,1,rc,rc<0?error:0,rc==0?*(int*)value:-1,clock_ns());pthread_mutex_unlock(&lock);}
   errno=error;return rc;
 }
 static int observed_close(int fd) {
@@ -108,7 +109,7 @@ static int observed_close(int fd) {
   int saved=errno;
   if(!enabled) return original_close(fd);
   pthread_mutex_lock(&lock);
-  size_t index=total;record(fd,2,0,0,0);
+  size_t index=total;record(fd,2,0,0,0,clock_ns());
   errno=saved;int rc=original_close(fd);int error=errno;
   if(total>index && index<capacity) {rows[index].rc=rc;rows[index].error=rc<0?error:0;}
   if(fd>=0 && fd<FDS) lives[fd]=0;

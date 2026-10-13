@@ -1,9 +1,10 @@
 """Exercise actual observer failure paths, not just edited JSON fixtures."""
 import json
 import os
+import platform
 from pathlib import Path
 import subprocess
-from dial_evidence import observed_env, require
+from dial_evidence import HERE, observed_env, require
 
 
 def check(library, out):
@@ -22,5 +23,12 @@ def check(library, out):
     result=subprocess.run([binary],env=env,capture_output=True)
     require(result.returncode==122 and output.read_text()=='do not overwrite\n','observer output failure was accepted or replaced evidence')
     report={'real_overflow_exit':123,'real_output_failure_exit':122,'preserved_existing_output':True}
+    timing=directory/'observer_timing'
+    options=['-pthread'] + (['-ldl'] if platform.system()=='Linux' else [])
+    subprocess.run(['cc','-O2','-Wall','-Wextra','-Werror',str(HERE/'observer_timing_control.c'),
+                    *options,'-o',str(timing)],check=True)
+    result=subprocess.run([timing],capture_output=True,text=True,timeout=10)
+    require(result.returncode==0, 'observer misses accept before connect returns: '+result.stdout+result.stderr)
+    report['accept_before_connect_return']=json.loads(result.stdout)
     (directory/'report.json').write_text(json.dumps(report,indent=2)+'\n')
     return report
