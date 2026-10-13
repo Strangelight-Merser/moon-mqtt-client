@@ -8,7 +8,10 @@
 | Review candidate | Local `0.7.1-audit-<commit>-<source digest>` assets; not a new registry version |
 | Candidate manifest | Generated `_build/candidate/<id>/candidate.json` binds exact source files and ZIP checksums |
 | Formal next version/release | Release HOLD; complete remaining evidence gates before any merge, tag or publication |
-| Current task and evidence | [2026-10-12 audit and read-race/source-freeze fixes](exec/gap-repair/AUDIT_20261012.md); tested implementation `f67d624` |
+| Current software acceptance | [2026-10-13 software closure](exec/gap-repair/SOFTWARE_ACCEPTANCE_20261013.md): frozen candidate `978966c` passed original Linux/macOS Release and E06; external TCP/mTLS per-dial evidence complete |
+| Evidence tooling | `f5d00f5`: strict socket lifetimes, first TCP completion, shared clock and connect-entry capture; 14 regressions and 24 calibration cases per platform passed; does not inherit candidate Release PASS |
+| Remaining release gate | B2 physical output and independent execution counts; software state does not establish physical effects |
+| Prior implementation audit | [2026-10-12 read-race/source-freeze fixes](exec/gap-repair/AUDIT_20261012.md) |
 | Historical acceptance | Existing `docs/exec/STATE.md`, release notes and validation reports are historical snapshots |
 
 ## Support matrix

@@ -1,0 +1,274 @@
+{
+  "measured_candidate": "978966cdf5188d4ceae27cf7ab6a00d916f48ebc",
+  "decoder_commit": "f5d00f5c9b415a2d4ac0926af1448af9178cc359",
+  "original_ci_run": 38263817517,
+  "original_workflow_conclusion": "failure",
+  "software_candidate_acceptance": "PASS",
+  "release": "HOLD",
+  "historical_E06_cause": "not_fully_determined",
+  "platforms": {
+    "macOS": {
+      "directory": "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749",
+      "scenarios": {
+        "passed": 34,
+        "platform-not-applicable": 11
+      },
+      "native_tests": 165,
+      "library_consumer_tests": 34,
+      "operator_consumer_tests": 9,
+      "inventory_files": 469,
+      "source_files": 371,
+      "trace_comparison": {
+        "version": 2,
+        "verdict": "within_trigger",
+        "population_cv": {
+          "throughput": {
+            "off": 0.0017259176459733052,
+            "on": 0.003256992214151775
+          },
+          "p99": {
+            "off": 0.03020761493398643,
+            "on": 0.009756603355342742
+          }
+        },
+        "throughput": {
+          "off": [
+            433.6272499496462,
+            432.2611109087219,
+            434.00101472443686
+          ],
+          "on": [
+            431.05769887115076,
+            434.48846515783134,
+            432.443775976125
+          ]
+        },
+        "p99_ns": {
+          "off": [
+            2600000,
+            2780000,
+            2620000
+          ],
+          "on": [
+            2590000,
+            2550000,
+            2530000
+          ]
+        },
+        "throughput_drop_fraction": 0.0027292426240709267,
+        "p99_rise_fraction": -0.026717557251908386
+      },
+      "packages": {
+        "moon-mqtt-client-0.7.1-audit-978966cd-8adeccb85ec2.zip": "c45098c88cfcdc83cd86a256d1f4dd00ff3b80b2f64459d380f903c5c0588ce6",
+        "moon-mqtt-operator-0.1.0-audit-978966cd-55923ee8f2a2.zip": "33d7dc73e8fb64477e4fa3422cc2f8352448460d0dd53b4b8e4eaaf04a9a31a4"
+      }
+    },
+    "Linux": {
+      "directory": "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700",
+      "scenarios": {
+        "passed": 45
+      },
+      "native_tests": 165,
+      "library_consumer_tests": 38,
+      "operator_consumer_tests": 9,
+      "inventory_files": 533,
+      "source_files": 371,
+      "trace_comparison": {
+        "version": 2,
+        "verdict": "within_trigger",
+        "population_cv": {
+          "throughput": {
+            "off": 0.004291360000533865,
+            "on": 0.004675482964389995
+          },
+          "p99": {
+            "off": 0.006697919054098987,
+            "on": 0.01026236255286325
+          }
+        },
+        "throughput": {
+          "off": [
+            202.73846301166037,
+            201.04210973218656,
+            200.79149646122528
+          ],
+          "on": [
+            200.67073081973734,
+            198.85684685861207,
+            198.56287743300285
+          ]
+        },
+        "p99_ns": {
+          "off": [
+            5980000,
+            6070000,
+            5990000
+          ],
+          "on": [
+            6010000,
+            6060000,
+            6160000
+          ]
+        },
+        "throughput_drop_fraction": 0.01086967738492961,
+        "p99_rise_fraction": 0.011686143572620988
+      },
+      "packages": {
+        "moon-mqtt-client-0.7.1-audit-978966cd-8adeccb85ec2.zip": "5f135bdc6ba9d126fc210710d92f29480e2b28ebf67a4ef8312d3d6a18a859cb",
+        "moon-mqtt-operator-0.1.0-audit-978966cd-55923ee8f2a2.zip": "33d7dc73e8fb64477e4fa3422cc2f8352448460d0dd53b4b8e4eaaf04a9a31a4"
+      }
+    }
+  },
+  "dial": {
+    "tcp": {
+      "replay": "_build/dial-reanalysis-f5d00f5/tcp-replay.json",
+      "logical_dials": 104,
+      "socket_lifetimes": 301,
+      "matched_peers": 104,
+      "excluded_peers": 101,
+      "native_sha256": "08af7f45ef11a3ffaec60cd0e42e5c21074b3e7b5567a56025860603df19d054",
+      "tcp_failures": 197,
+      "original_gate": {
+        "passed": true,
+        "failures": []
+      },
+      "original_capture_complete": false
+    },
+    "mtls": {
+      "replay": "_build/dial-reanalysis-f5d00f5/mtls-replay.json",
+      "logical_dials": 104,
+      "socket_lifetimes": 287,
+      "matched_peers": 104,
+      "excluded_peers": 101,
+      "native_sha256": "08af7f45ef11a3ffaec60cd0e42e5c21074b3e7b5567a56025860603df19d054",
+      "tcp_failures": 183,
+      "original_gate": {
+        "passed": true,
+        "failures": []
+      },
+      "original_capture_complete": false
+    }
+  },
+  "evidence": {
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/result.json": "01af34fd37431497aca7ccfab418f7c29f7f57686c7f5b0e6d94e8ef869bd1fd",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/source.json": "614330ff0d83a91d546bc847779f6fcfc585bc7f1a1ca0d2bf31f93e9c62d7c6",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/source-end.json": "614330ff0d83a91d546bc847779f6fcfc585bc7f1a1ca0d2bf31f93e9c62d7c6",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/inventory.json": "a357a70f2ef7e17021db522428f916bf3d539c2fd7db21c3e2570e1e61293473",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/candidate.json": "186a327b19da8908bcb89e0286d56bc978074443029490211dc97db02212cda9",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/library-consumer.json": "734448de257162d446a64cff21b8ee95b15a59c4cec99c64e7be5c8c3fc20f66",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/operator-consumer.json": "c738a1b261e3e06d5dcf26dbf66902ef6b068ebccebf3d1b9914dd6b51e8ea14",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/b2-consumer.json": "e03bcea9f5bc4fe73fb88da7d804f958ba69287f1fea960db1748b9be023866e",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/benchmark-1791815859217947000/summary.json": "38e1c88ab562831b2f0d6a5f746d877e95c972531f3f6e7fa1e84fa0ea9b0749",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/soak-tcp-1791817458304733000/summary.json": "0c0f2e7c0b1c9f070a15236ceed9c10bac5b918dd0a718cd40f125928f66ebbb",
+    "_build/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Darwin/acceptance/release-20261012T143437.826726Z-7749/soak-mtls-1791819260059995000/summary.json": "5d9c8ab443a48b9853b92ddf8d3126fa4165672f281c26aa42c134aa30a247c1",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/result.json": "5a31778ed2cd1dc54b419b56d7681556a0827144b188f9ec38e1564582dcb4b4",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/source.json": "bb1ebd5f54b529e776a1932fdd4b5013169d311862e9e2e354da0df1be4545cc",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/source-end.json": "bb1ebd5f54b529e776a1932fdd4b5013169d311862e9e2e354da0df1be4545cc",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/inventory.json": "c38fa450c3371fa3888a7c2c300e6dd6e032d94982a3c85e5280b25f26706ddd",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/candidate.json": "85cb54d6f524143c10fa82c37fda837a210701e498231bb50b6742c7d2955350",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/library-consumer.json": "af744f1258efec3d4634c7e59067b77beb8b126e05cef82087e7520d05d7fe4b",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/operator-consumer.json": "7a4db2ff6e9fd413ce475addc8731df3f7b8e4285881505c2fc1cf6174267af3",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/b2-consumer.json": "fb51965246b98f89388a23d420f5e59c7ee199d7246c84e16d74cfc4d2344a8d",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/benchmark-1791816165309702304/summary.json": "34a9f55e8433a455e4055ea1f3065cae4fc85e1bd5dba504ac50e9f2b2187c0d",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/soak-tcp-1791817770126876867/summary.json": "f823d6b703cca1799179dc9ada8b3371fe9564d9439e9da3413da02d5b8ef15f",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/soak-mtls-1791819570940811176/summary.json": "bfaf79d36e73bba593347398867bfc1ae9ca9a7b462c8c696a6439c115e7a2ff",
+    "_build/dial-reanalysis-f5d00f5/tcp-replay.json": "3ea82f28bb8dfd3bccc0d9fa8ccc1a735b6a292fa2c89555338b0e68ffa8a943",
+    "_build/remote-dial-tcp-978966c/dial-tcp/summary.json": "998ba130f12e25848c8aadb3e2ea6091496dca14d1ce9178abe41d4308fbdfa2",
+    "_build/remote-dial-tcp-978966c/dial-tcp/dial-report.json": "219c26527b81b61037fa37738cb6bf59e9a5b32a72556c3129cf6632e5d07171",
+    "_build/remote-dial-tcp-978966c/dial-tcp/sockets.jsonl": "c1fb3681521895e9a6258b6d0789d579b40214b107b19ca94924361672ee385e",
+    "_build/remote-dial-tcp-978966c/dial-tcp/peer.jsonl": "11e097b6579e0115f684dc0f126acb23d92bf3012c9d7c4d48558e7059f1eab6",
+    "_build/remote-dial-tcp-978966c/dial-tcp/client-events.json": "19916c904e7a15dfbfe96e4ba523f4ac43d2d9bffabddcc4f0efa9085a1a5915",
+    "_build/remote-dial-tcp-978966c/dial-tcp/soak_driver.exe": "08af7f45ef11a3ffaec60cd0e42e5c21074b3e7b5567a56025860603df19d054",
+    "_build/remote-dial-tcp-978966c/dial-tcp/socket_observer.so": "4604dcdefe242ca333ed4b33f0857f4e6a55701731856207559c7276f5178f60",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/soak-tcp-1791817770126876867/soak_driver.exe": "08af7f45ef11a3ffaec60cd0e42e5c21074b3e7b5567a56025860603df19d054",
+    "_build/dial-reanalysis-f5d00f5/mtls-replay.json": "49b4d3deb48e3441d804dba04b953b222364f8395e91aced3da55bc00f744bdd",
+    "_build/remote-dial-mtls-978966c/dial-mtls/summary.json": "ce8b0b4e16cbe9f6c0005869d49be55c623a99c3521184da75aa0919b314459f",
+    "_build/remote-dial-mtls-978966c/dial-mtls/dial-report.json": "0d17602a9757fecdd3acba31501f9d69afa914b2ec3f5f751f3cf5ff6e290efd",
+    "_build/remote-dial-mtls-978966c/dial-mtls/sockets.jsonl": "daf701490fca4dca0d67d6fb7bfc7c55ae07a3c5120b0f927cb19d983d712989",
+    "_build/remote-dial-mtls-978966c/dial-mtls/peer.jsonl": "dcf79c81c21cf9faa8d89548d11472704871eb18d287a220396ef79095e56b37",
+    "_build/remote-dial-mtls-978966c/dial-mtls/client-events.json": "46ebf19bbee8cba990236bce018286027e4da6cbb57424206106bc81c196e0f0",
+    "_build/remote-dial-mtls-978966c/dial-mtls/soak_driver.exe": "08af7f45ef11a3ffaec60cd0e42e5c21074b3e7b5567a56025860603df19d054",
+    "_build/remote-dial-mtls-978966c/dial-mtls/socket_observer.so": "4604dcdefe242ca333ed4b33f0857f4e6a55701731856207559c7276f5178f60",
+    "_build/remote-release-978966c/software-closure/978966cdf5188d4ceae27cf7ab6a00d916f48ebc/Linux/acceptance/release-20261012T143544.605089Z-3700/soak-mtls-1791819570940811176/soak_driver.exe": "08af7f45ef11a3ffaec60cd0e42e5c21074b3e7b5567a56025860603df19d054",
+    "_build/dial-calibration-f5d00f5/summary.json": "36771bb04c463cc8d26b9bb7709581bfdfda30be26466daf781b7fbc6710c88b",
+    "_build/dial-reanalysis-f5d00f5/linux-calibration-replay.json": "c38b4df4b8a2317049fca79c9eed45cd32e4fc44d4867065db0a4d975348b40b",
+    "_build/dial-reanalysis-f5d00f5/macos-calibration-replay.json": "43bb9190a0064e02bef808c633c159822d752ea9ebe877df20c768eaa6fe5474",
+    "_build/remote-dial-calibration-f5d00f5/summary.json": "0a228c931161a4dcc73cde9f3cb50f109605ca0709b316b76e8add49c1e85459",
+    "_build/dial-soak-tcp-f5d00f5-smoke/dial-report.json": "6ee9f8f48723b538e6b51faa9612a245eb9bb8fcf67acc97e328d2bf80246d2f",
+    "_build/dial-soak-mtls-f5d00f5-smoke/dial-report.json": "77de16fc565a667203c01e13e215853e567e9a317c6c737455ca3a88ab3466fc"
+  },
+  "calibration": {
+    "macOS": {
+      "path": "_build/dial-calibration-f5d00f5/summary.json",
+      "cases": 24,
+      "source": "f5d00f5c9b415a2d4ac0926af1448af9178cc359",
+      "negative_controls": [
+        "missing-record",
+        "overflow",
+        "wrong-pid",
+        "wrong-dial",
+        "fd-reuse",
+        "observer-excluded"
+      ],
+      "observer_controls": {
+        "real_overflow_exit": 123,
+        "real_output_failure_exit": 122,
+        "preserved_existing_output": true,
+        "accept_before_connect_return": {
+          "connect_ns": 49811757069000,
+          "accept_ns": 49811757336000,
+          "return_ns": 49811757357000,
+          "close_ns": 49811757361000
+        }
+      }
+    },
+    "linux_prior_raw_replay_cases": 24,
+    "Linux": {
+      "path": "_build/remote-dial-calibration-f5d00f5/summary.json",
+      "cases": 24,
+      "source": "f5d00f5c9b415a2d4ac0926af1448af9178cc359",
+      "ci_run": 38340407535,
+      "negative_controls": [
+        "missing-record",
+        "overflow",
+        "wrong-pid",
+        "wrong-dial",
+        "fd-reuse",
+        "observer-excluded"
+      ],
+      "observer_controls": {
+        "real_overflow_exit": 123,
+        "real_output_failure_exit": 122,
+        "preserved_existing_output": true,
+        "accept_before_connect_return": {
+          "connect_ns": 193511114727,
+          "accept_ns": 193511193267,
+          "return_ns": 193511219093,
+          "close_ns": 193511221417
+        }
+      }
+    }
+  },
+  "protected": {
+    "base": "5d5e2a0982164ab2f0aa658962fd70425e6305ba",
+    "unchanged_files": 104
+  },
+  "remaining": {
+    "hardware_physical_output": "evidence_insufficient",
+    "execution_counts": "requires_independent_observation",
+    "power_loss_tested": false
+  },
+  "preserved_tool_failures": [
+    {
+      "revision": "6d66049",
+      "ci_run": 38339933950,
+      "cause": "accept occurred 82254 ns before post-return connect record",
+      "raw_directory": "_build/remote-dial-calibration-6d66049"
+    },
+    {
+      "kind": "old observer deterministic control",
+      "path": "_build/observer-timing-red/red.log",
+      "exit": 1
+    }
+  ]
+}
