@@ -253,10 +253,15 @@ def correlate(socket_path, peer_path, pid):
         dial = rows[0]['dial']
         require(dial in resolutions and all(r['dial']==dial for r in rows), 'missing or ambiguous dial ownership')
         require(resolutions[dial][0]['index'] < rows[0]['index'] < resolutions[dial][1]['index'], 'connect outside resolver lifetime')
-        success = rows[0]['rc'] == 0 or any(r['kind']==1 and r['rc']==0 and r['so_error']==0 for r in rows)
-        error = next((r['so_error'] for r in rows if r['kind']==1 and r['rc']==0 and r['so_error']!=0), None)
-        if error is None and rows[0]['rc'] < 0 and rows[0]['errno'] not in (36,115):
-            error = rows[0]['errno'] # Darwin/Linux EINPROGRESS is not a completed result.
+        # SO_ERROR is read-and-clear: a later zero cannot erase a refusal.
+        if rows[0]['rc'] == 0:
+            completion = 0
+        elif rows[0]['errno'] not in (36,115):
+            completion = rows[0]['errno'] # Darwin/Linux EINPROGRESS is pending.
+        else:
+            completion = next((r['so_error'] for r in rows if r['kind']==1 and r['rc']==0), None)
+        success = completion == 0
+        error = completion if completion else None
         require(success or error, 'TCP attempt lacks a numeric completion result')
         require(rows[0]['ns'] < rows[-1]['ns'], 'native lifetime has invalid clock order')
         require(all(a['ns'] <= b['ns'] for a,b in zip(rows,rows[1:])), 'native clock order reversed')

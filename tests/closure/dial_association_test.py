@@ -1,5 +1,4 @@
 """Independent controls for source-port reuse and causal socket attribution."""
-import copy
 import json
 from pathlib import Path
 import tempfile
@@ -86,6 +85,15 @@ class AssociationControls(unittest.TestCase):
         rows = native(); rows[2].update(rc=-1, errno=111)
         with self.assertRaisesRegex(ValueError, 'numeric completion'):
             self.check(rows, [])
+
+    def test_cleared_so_error_cannot_erase_refusal(self):
+        rows = native(success=False)
+        rows.insert(3, dict(rows[2], ns=21, so_error=0))
+        result = self.check(rows, [])
+        self.assertFalse(result['attempts'][0]['tcp_success'])
+        self.assertEqual(result['attempts'][0]['tcp_error'], 111)
+        with self.assertRaisesRegex(ValueError, 'lifetime match'):
+            self.check(rows, peer())
 
     def test_refusal_with_in_window_accept_is_invalid(self):
         with self.assertRaisesRegex(ValueError, 'lifetime match'):
