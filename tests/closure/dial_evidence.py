@@ -52,7 +52,7 @@ class Ledger:
             index = self.total
             self.total += 1
             if index < self.capacity:
-                self.rows.append({'index': index, 'ns': time.monotonic_ns(), 'event': event, **fields})
+                self.rows.append({'index': index, 'ns': time.clock_gettime_ns(time.CLOCK_MONOTONIC), 'event': event, **fields})
 
     def save(self, path):
         with self.lock:
@@ -238,7 +238,14 @@ def correlate(socket_path, peer_path, pid):
     for dial, rows in resolutions.items():
         require(dial > 0 and [r['kind'] for r in rows] == [3,4], 'incomplete resolver lifetime')
     accepts = [r for r in peers if r['event'] == 'accept']
-    matched = set(); result = []
+    require(len({p['peer'] for p in accepts}) == len(accepts), 'duplicate peer accept')
+    for accepted in accepts:
+        events = [p for p in peers if p.get('peer') == accepted['peer']]
+        require(events[0] == accepted and events[-1]['event'] == 'close'
+                and sum(p['event']=='close' for p in events)==1,
+                'peer lifecycle must run from accept to one close')
+        require(all(a['ns'] <= b['ns'] for a,b in zip(events,events[1:])), 'peer clock order reversed')
+    matched = set(); result = []; intervals = {}
     for life, rows in lives.items():
         require(rows[0]['kind'] == 0 and rows[-1]['kind'] == 2, 'socket lifetime lacks connect/close')
         require(sum(r['kind']==0 for r in rows) == 1 and sum(r['kind']==2 for r in rows) == 1, 'ambiguous socket lifetime')
@@ -247,9 +254,27 @@ def correlate(socket_path, peer_path, pid):
         require(dial in resolutions and all(r['dial']==dial for r in rows), 'missing or ambiguous dial ownership')
         require(resolutions[dial][0]['index'] < rows[0]['index'] < resolutions[dial][1]['index'], 'connect outside resolver lifetime')
         success = rows[0]['rc'] == 0 or any(r['kind']==1 and r['rc']==0 and r['so_error']==0 for r in rows)
+        error = next((r['so_error'] for r in rows if r['kind']==1 and r['rc']==0 and r['so_error']!=0), None)
+        if error is None and rows[0]['rc'] < 0 and rows[0]['errno'] not in (36,115):
+            error = rows[0]['errno'] # Darwin/Linux EINPROGRESS is not a completed result.
+        require(success or error, 'TCP attempt lacks a numeric completion result')
+        require(rows[0]['ns'] < rows[-1]['ns'], 'native lifetime has invalid clock order')
+        require(all(a['ns'] <= b['ns'] for a,b in zip(rows,rows[1:])), 'native clock order reversed')
         endpoints = {tuple(r['local']) for r in rows if r['local'][1]}
-        candidates = [p for p in accepts if tuple(p['remote']) in endpoints and p['local']==rows[0]['remote']]
-        require(len(candidates) == (1 if success else 0), 'missing or ambiguous TCP-to-peer match')
+        for endpoint in endpoints:
+            key = (endpoint, tuple(rows[0]['remote']))
+            previous = intervals.setdefault(key, [])
+            require(all(rows[-1]['ns'] <= start or end <= rows[0]['ns'] for start,end in previous),
+                    'overlapping native lifetimes for one TCP tuple')
+            previous.append((rows[0]['ns'], rows[-1]['ns']))
+        # Both recorders use the same host CLOCK_MONOTONIC. This is strict
+        # lifetime containment, not nearest-timestamp matching. A connect
+        # record is after connect(), and close is recorded before close():
+        # the narrower window conservatively rejects an early/late accept.
+        candidates = [p for p in accepts if tuple(p['remote']) in endpoints
+                      and p['local']==rows[0]['remote']
+                      and rows[0]['ns'] < p['ns'] < rows[-1]['ns']]
+        require(len(candidates) == (1 if success else 0), 'missing or ambiguous TCP-to-peer lifetime match')
         peer = candidates[0]['peer'] if candidates else None
         require(peer is None or peer not in matched, 'peer reused for another socket lifetime')
         if peer:
@@ -260,7 +285,8 @@ def correlate(socket_path, peer_path, pid):
         connects = [r for r in events if r['event']=='connect']
         require(len(connacks)<=1 and len(connects)<=1, 'duplicate MQTT stage')
         require(not connacks or connects, 'CONNACK without CONNECT')
-        result.append({'life':life,'dial':dial,'fd':rows[0]['fd'],'tcp_success':success,'syscalls':rows,
+        require(not connacks or connects[0]['index'] < connacks[0]['index'], 'CONNACK precedes CONNECT')
+        result.append({'life':life,'dial':dial,'fd':rows[0]['fd'],'tcp_success':success,'tcp_error':error,'syscalls':rows,
                        'peer':peer,'events':events,'connack':connacks[0] if connacks else None})
     dials = []
     for dial, resolution in resolutions.items():

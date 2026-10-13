@@ -14,6 +14,45 @@ from acceptance import source_identity
 from harness import free_port
 
 
+def audit_capture(out, result, mtls):
+    require(result['gate']['passed'], 'original soak gate failed')
+    cycles = result['parameters']['disconnect_cycles']
+    joined = correlate(out/'sockets.jsonl', out/'peer.jsonl', result['native_executable']['pid'])
+    successes = [a for a in joined['attempts'] if a['connack'] and a['connack']['reason'] == 0]
+    require(len(successes) == cycles+4, 'warmup/main CONNACK conservation failed')
+    require(all(not a['connack'] or a['connack']['reason']==0 for a in joined['attempts']), 'unexpected broker refusal')
+    events = json.loads((out/'client-events.json').read_text())
+    expected_events = []
+    generation = 0
+    for index, dial in enumerate(joined['dials']):
+        dial['scope'] = 'warmup' if index < 3 else 'main'
+        if index < 3:
+            require(dial['connack'] and dial['connack']['reason']==0, 'warmup dial was not successful')
+            dial['generation'] = 1
+            continue
+        if dial['connack'] and dial['connack']['reason']==0:
+            generation += 1
+            expected_events.append(('connected',generation))
+            if generation <= cycles:
+                expected_events.append(('disconnected',generation))
+        else:
+            require(generation > 0, 'initial main dial failed')
+            expected_events.append(('disconnected',generation))
+        dial['generation'] = generation
+        for attempt in joined['attempts']:
+            if attempt['dial']==dial['dial']:
+                attempt.update(scope=dial['scope'],generation=generation)
+    actual_events = [(e['event'],e['generation']) for e in events]
+    require(actual_events == expected_events, 'logical dial/client event conservation failed')
+    require(generation == cycles+1, 'main generation conservation failed')
+    if mtls:
+        for attempt in joined['attempts']:
+            if attempt['connack']:
+                tls = [e for e in attempt['events'] if e['event']=='tls_success']
+                require(len(tls)==1 and tls[0]['verified_client'] and tls[0]['certificate_sha256'], 'missing verified client handshake')
+    return joined, events
+
+
 def run(out, duration, cycles, mtls):
     out.mkdir(parents=True, exist_ok=False)
     source = source_identity()
@@ -66,40 +105,10 @@ def run(out, duration, cycles, mtls):
         result = soak.run_soak(duration, cycles, 1024, 16, .2, out, mtls=mtls)
         require(result['gate']['passed'], 'original soak gate failed')
         native = result['native_executable']
-        joined = correlate(out/'sockets.jsonl', save_peer(ledger, out), native['pid'])
-        successes = [a for a in joined['attempts'] if a['connack'] and a['connack']['reason'] == 0]
-        require(len(successes) == cycles+4, 'warmup/main CONNACK conservation failed')
-        require(all(not a['connack'] or a['connack']['reason']==0 for a in joined['attempts']), 'unexpected broker refusal')
-        events = json.loads((out/'client-events.json').read_text())
-        expected_events = []
-        generation = 0
-        for index, dial in enumerate(joined['dials']):
-            dial['scope'] = 'warmup' if index < 3 else 'main'
-            if index < 3:
-                require(dial['connack'] and dial['connack']['reason']==0, 'warmup dial was not successful')
-                dial['generation'] = 1
-                continue
-            if dial['connack'] and dial['connack']['reason']==0:
-                generation += 1
-                expected_events.append(('connected',generation))
-                if generation <= cycles:
-                    expected_events.append(('disconnected',generation))
-            else:
-                require(generation > 0, 'initial main dial failed')
-                expected_events.append(('disconnected',generation))
-            dial['generation'] = generation
-            for attempt in joined['attempts']:
-                if attempt['dial']==dial['dial']:
-                    attempt.update(scope=dial['scope'],generation=generation)
-        actual_events = [(e['event'],e['generation']) for e in events]
-        require(actual_events == expected_events, 'logical dial/client event conservation failed')
-        require(generation == cycles+1, 'main generation conservation failed')
-        if mtls:
-            for attempt in joined['attempts']:
-                if attempt['connack']:
-                    tls = [e for e in attempt['events'] if e['event']=='tls_success']
-                    require(len(tls)==1 and tls[0]['verified_client'] and tls[0]['certificate_sha256'], 'missing verified client handshake')
-        require(source_identity()==source, 'source changed during observed soak')
+        report['source_end'] = source_identity()
+        require(report['source_end']==source, 'source changed during observed soak')
+        save_peer(ledger, out)
+        joined, events = audit_capture(out, result, mtls)
         report.update(complete=True, native_executable=native, evidence=joined,
                       original_gate=result['gate'], client_events=events)
     finally:

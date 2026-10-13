@@ -25,7 +25,9 @@ jobs:
           echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
           "$HOME/.moon/bin/moon" update
       - name: Qualify external observation and negative controls
-        run: python tests/closure/dial_calibration.py --output _build/dial-calibration
+        run: |
+          python tests/closure/dial_association_test.py
+          python tests/closure/dial_calibration.py --output _build/dial-calibration
       - name: Preserve calibration including failure
         if: always()
         uses: actions/upload-artifact@v4
@@ -38,6 +40,9 @@ jobs:
           retention-days: 30
   acceptance:
     needs: calibration
+    # Full measurement is explicitly dispatched once per frozen candidate.
+    # Decoder-only pushes qualify evidence tooling without remeasuring it.
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
