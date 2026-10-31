@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        probe: [1, 2, 3]
+        probe: [1]
     runs-on: macos-latest
     timeout-minutes: 15
     env:
@@ -42,8 +42,27 @@ jobs:
         run: |
           moon build --target native
           MOON="$(command -v moon)" python tests/integration/run.py IntegrationTest.test_mtls_qos1_roundtrip IntegrationTest.test_mtls_tls13_only_qos1_roundtrip IntegrationTest.test_mtls_rejection_matrix
-          cd third_party/async-tls
-          moon test --target native
+          moon test --target native --build-only
+          python - <<'PY'
+          import json, pathlib, subprocess
+          rows = []
+          # Bounded diagnosis only: run the original test bodies individually
+          # to identify a stalled case. These are not acceptance passes.
+          for filename in ['identity_test.mbt', 'cancellation_test.mbt']:
+              path = pathlib.Path('third_party/async-tls/src') / filename
+              count = sum(line.startswith('async test ') for line in path.read_text().splitlines())
+              for index in range(count):
+                  print('DIAGNOSTIC_CASE', filename, index, flush=True)
+                  try:
+                      r = subprocess.run(['moon', 'test', str(path), '--index', str(index), '--target', 'native'], timeout=60)
+                      row = {'file': filename, 'index': index, 'returncode': r.returncode}
+                  except subprocess.TimeoutExpired:
+                      row = {'file': filename, 'index': index, 'diagnostic_timeout': 60}
+                  rows.append(row)
+                  print('DIAGNOSTIC_RESULT', json.dumps(row), flush=True)
+                  pathlib.Path('_build/mtls-diagnosis/unit-cases.json').write_text(json.dumps(rows, indent=2))
+          assert all(row.get('returncode') == 0 for row in rows), rows
+          PY
       - name: Preserve diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
