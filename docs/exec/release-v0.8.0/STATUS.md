@@ -10,10 +10,12 @@ Working branch: `codex/competition-release-v0.8.0` in the existing
 `moon-mqtt-release-record` worktree. Baseline: `8933416`; no hardware-operation
 commits are included. Fixed compiler: `0.10.17+d971670cd`.
 
-Current status: **published; post-merge macOS mTLS regression under investigation**.
-The previously completed release verification is preserved below, but final closure
-is reopened after a newer hosted runner failed positive mTLS cases. This is a project
-self-check, not a claim that the organizer has completed acceptance.
+Current status: **superseded by the verified 0.8.1 release**. The original
+0.8.0 publication and tests remain recorded below. The post-merge macOS system
+LibreSSL issue was reproduced independently and fixed by using Homebrew OpenSSL 3.
+See [0.8.1 acceptance](../release-v0.8.1/STATUS.md) for the new full Release run,
+actual registry publication and clean installation results. Physical B2 remains
+outside this software delivery.
 
 ## Post-merge finding
 

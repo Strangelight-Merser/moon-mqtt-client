@@ -1,9 +1,12 @@
-## Current follow-up — 2026-10-31
+## Current software delivery — 0.8.1, 2026-10-31
 
-Version 0.8.1 is being validated to replace the macOS system LibreSSL path with
-Homebrew OpenSSL 3 after the post-merge failure in 0.8.0. See
-[0.8.1 acceptance](release-v0.8.1/STATUS.md). The 0.8.0 publication remains
-recorded below; its original passes do not certify this new source.
+Version 0.8.1 is published on GitHub and Mooncakes after fresh full Linux/macOS
+acceptance on MoonBit 0.10.17. The macOS backend uses Homebrew OpenSSL 3; the old
+system LibreSSL interoperability issue is fixed. See
+[the final 0.8.1 acceptance record](release-v0.8.1/STATUS.md) for exact commits,
+package hashes, original failures, complete tests and clean registry verification.
+The original checkout is synchronized to main with the verified local toolchain.
+Older entries below are historical snapshots. Physical B2 remains unaccepted.
 
 ## Current software delivery — 2026-10-31
 

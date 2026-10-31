@@ -1,5 +1,7 @@
 # 0.8.0 — 软件验收版本
 
+此版本已由 [0.8.1](RELEASE-NOTES-v0.8.1.md) 替代，后者修复新 macOS 环境的 TLS 1.3 双向认证问题。
+
 2026-10-31 已发布：[GitHub Release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.8.0) · [Mooncakes](https://mooncakes.io/docs/Strangelight-Merser/moon-mqtt-client)。
 
 固定工具链升级到 `moonc 0.10.17+d971670cd`（`moon 0.1.20261023`），满足

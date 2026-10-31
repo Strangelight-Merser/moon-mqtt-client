@@ -1,5 +1,7 @@
 # 0.8.1 — macOS TLS 1.3 双向认证修复
 
+2026-10-31 已发布：[GitHub Release](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.8.1) · [Mooncakes](https://mooncakes.io/docs/Strangelight-Merser/moon-mqtt-client)。
+
 macOS TLS 运行时改为明确加载 Homebrew OpenSSL 3，移除系统旧 LibreSSL 路径。
 依赖更新为 `Strangelight-Merser/async-tls@0.1.1`；固定 MoonBit 0.10.17 不变。
 

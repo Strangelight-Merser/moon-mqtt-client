@@ -2,12 +2,12 @@
 
 | Item | Current state |
 |---|---|
-| Last public release | [v0.8.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.8.0), published 2026-10-31 |
-| Source module version | `0.8.1`; OpenSSL 3 fix candidate |
+| Last public release | [v0.8.1](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.8.1), published 2026-10-31 |
+| Source module version | `0.8.1`; published and verified |
 | Fixed toolchain | `moonc 0.10.17+d971670cd`, `moon 0.1.20261023`; exceeds the competition minimum 0.10.16 |
-| Software baseline | 0.8.1 keeps the MQTT implementation and replaces macOS system LibreSSL with Homebrew OpenSSL 3 |
-| Current acceptance | Fresh 0.8.1 validation pending; see [0.8.1 acceptance](exec/release-v0.8.1/STATUS.md) |
-| Publication | 0.8.0 remains published with its post-release limitation recorded; 0.8.1 publication awaits fresh acceptance |
+| Software baseline | Tested `af6c9f6d`; merged/tagged `bcaecd6f`, identical tree; macOS uses Homebrew OpenSSL 3 |
+| Current acceptance | Fresh Core, Integration and full Release passed on Linux/macOS; see [0.8.1 acceptance](exec/release-v0.8.1/STATUS.md) |
+| Publication | Mooncakes HTTP 200; clean registry TCP/mTLS plus 34 tests passed; all 9 GitHub attachments verified anonymously |
 | Hardware | B2 physical output and independent execution counts remain unaccepted; excluded from this software release |
 | Prior implementation audit | [2026-10-12 read-race/source-freeze fixes](exec/gap-repair/AUDIT_20261012.md) |
 | Historical acceptance | Existing `docs/exec/STATE.md`, release notes and validation reports are historical snapshots |
@@ -31,7 +31,7 @@ Do not copy a previous pass to a later candidate. Each run records commit, dirty
 source hashes, compiler, platform and exact command. Final Release acceptance
 must bind the frozen source and candidate ZIPs on both software platforms.
 
-After 0.8.1 is published, run
+To repeat the completed registry verification, run
 `tests/registry_roadmap.py --version 0.8.1 --evidence <result.json>`
 from the reviewed checkout. It removes `MOON_WORK`, creates a clean consumer and
 installs the named registry dependency without local source substitution.
