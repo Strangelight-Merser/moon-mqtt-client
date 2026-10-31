@@ -8,6 +8,13 @@
 
 ## 安装
 
+macOS 使用 Homebrew 的 OpenSSL 3（Apple Silicon：`/opt/homebrew/opt/openssl@3`；
+Intel：`/usr/local/opt/openssl@3`），不再加载系统自带的旧 LibreSSL：
+
+```sh
+brew install openssl@3
+```
+
 ```sh
 moon add Strangelight-Merser/async-tls
 ```
