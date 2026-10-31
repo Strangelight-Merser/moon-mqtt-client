@@ -1,6 +1,6 @@
 name = "Strangelight-Merser/moon-mqtt-client"
 
-version = "0.8.0"
+version = "0.8.1"
 
 repository = "https://github.com/Strangelight-Merser/moon-mqtt-client"
 
@@ -15,6 +15,6 @@ preferred_target = "native"
 import {
   "moonbitlang/async@0.21.3",
   "zbhzs1/moonbit-mqtt@0.1.0",
-  "Strangelight-Merser/async-tls@0.1.0",
+  "Strangelight-Merser/async-tls@0.1.1",
   "moonbit-community/sqlite3@0.2.2",
 }

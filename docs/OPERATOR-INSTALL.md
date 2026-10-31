@@ -1,7 +1,7 @@
 # Recovery operator bundle
 
 The operator has its own version in `scripts/operator-version.txt` (currently
-`0.1.0`), independent of the MoonBit library's `0.8.0` module version. An
+`0.1.0`), independent of the MoonBit library's `0.8.1` module version. An
 audit ZIP name also carries a source revision and payload digest; it is not a
 published operator release. The ZIP's `VERSION`, `FORMAT-SUPPORT.json` and
 `provenance.json` state the exact supported formats and source candidate.
