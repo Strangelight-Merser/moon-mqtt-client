@@ -10,14 +10,84 @@ Working branch: `codex/competition-release-v0.8.0` in the existing
 `moon-mqtt-release-record` worktree. Baseline: `8933416`; no hardware-operation
 commits are included. Fixed compiler: `0.10.17+d971670cd`.
 
-Current status: preparing and validating the release; not yet published.
-Evidence is retained under `_build/release-v0.8.0/` and each timestamped
-`_build/acceptance/` invocation. No historical pass is assigned to this new build.
-Original tests, scenario list, budgets and historical evidence remain unchanged.
+Current status: **published and verified on 2026-10-31**. The nine supplied
+software-delivery requirements are met by the evidence below. This is a project
+self-check, not a claim that the organizer has completed acceptance.
 
-Completion requires fixed-toolchain checks/build/tests, independent broker and
-package consumers, current CI, a versioned registry upload, and clean registry
-installation with runnable examples. Every publication result will be recorded.
+## Published identity
+
+- Tested source: `af0fb80180d0a9c8ef828479053191909c622a11`.
+- PR [#12](https://github.com/Strangelight-Merser/moon-mqtt-client/pull/12) merged
+  with development history preserved. Tag `v0.8.0` points to
+  `e30f2baa3029ef9a4a5b5653c57fafedc25980b4`; its Git tree exactly equals the tested tree.
+- [GitHub v0.8.0](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.8.0)
+  contains the library ZIP, tagged source, both full CI evidence archives,
+  publication verification, acceptance summary and SHA256SUMS.
+- [Mooncakes 0.8.0](https://mooncakes.io/docs/Strangelight-Merser/moon-mqtt-client):
+  actual upload returned **HTTP 200**, registered at `2026-10-31T18:03:24Z`;
+  the registry reports `build_status=success`, version/latest version `0.8.0`.
+- Published library SHA256:
+  `42d84459f9d491a08204d4d1b16047b0c1c957a7f6634837cd74fa8c0b009de8`.
+  This equals the local and hosted macOS accepted ZIP. The Linux ZIP has different
+  archive bytes (`2500a22425af4daada53674a418d04f7f0f5a03bed7422e5d075ad3d7b439226`);
+  all **322 filenames and file payloads** are identical across the three packages.
+- These completion notes follow the release as a documentation-only update;
+  the released source/package and original CI evidence remain immutable.
+
+## Verification
+
+| Check | Result |
+|---|---|
+| Pinned compiler | `moonc 0.10.17+d971670cd`, `moon 0.1.20261023`; official archive hashes checked |
+| Core CI | [41207184937](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/41207184937), Linux/macOS passed; native tests 165/165 |
+| Integration CI | [41207181315](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/41207181315), Linux 37 passed; macOS 26 passed and 11 explicitly not applicable |
+| Full Release CI | [41207207014](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/41207207014), first final-source attempt: Linux 46 passed; macOS 35 passed and 11 explicitly not applicable |
+| Benchmarks and E06 | 39 trials per platform; three trace A/B pairs; `within_trigger` on both platforms; original thresholds retained |
+| Long recovery | Each platform: TCP and mTLS each 1800 seconds and 100 recoveries; resource and recovery gates passed |
+| Source/evidence integrity | Frozen source unchanged; candidate consumers and complete evidence inventory passed; downloaded inventory hashes rechecked |
+| Latest compiler | Rolling-stable compatibility check/build/test passed in the full Release workflow |
+| Candidate installation | Local extracted library 34/34 and operator 9/9 passed; hosted Release also validates its own extracted candidates |
+| Published registry installation | Fresh temporary consumers, `MOON_WORK` removed, no local workspace override: TCP/mTLS QoS1 round trips plus 34/34 behavior cases, zero skips/errors/failures |
+| Runnable example | All four `examples/mqtt_demo/demo.py` scenarios passed against the real broker and independent simulated device |
+| License/public access | Public GitHub repository; Apache-2.0, NOTICE and upstream WebSocket attribution included |
+
+macOS excludes the 11 Linux-only integration stages explicitly; Linux runs those
+stages. Its registry consumer suite excludes EMQX Docker interoperation; raw WS
+framing still runs. Software simulation is not physical B2 acceptance. Compilation
+passes with existing dependency/API deprecation and unused-code warnings; this
+release does not claim a warning-free build or full MQTT protocol certification.
+
+Evidence is retained under `_build/release-v0.8.0/` and timestamped
+`_build/acceptance/` directories, with durable public copies attached to the
+GitHub release. Original tests, scenario list, budgets and historical failures
+remain unchanged. No previous release's pass is assigned to this build.
+
+## Local handoff and public downloads
+
+All seven GitHub release attachments were downloaded anonymously. Their bytes
+match the local assets and GitHub's SHA256 digests. The original working directory
+`/Users/huaiyi/Documents/ChatGPT/moon-mqtt-client` is on `main` with the fixed
+0.10.17 toolchain. Its actual `./scripts/check.sh core` entry passed after the
+switch, with unchanged source identity. The previous compiler is preserved at
+`.tools/moon-0.10.12-before-v0.8.0`; unrelated worktrees and hardware files were
+not changed. Included draft PRs #8–#11 were closed after their heads were verified
+as ancestors of merged main.
+
+## Requirement mapping
+
+1. MoonBit implements the runtime and examples; the pinned compiler exceeds 0.10.16.
+2. The GitHub repository is public and the merge preserves development history.
+3. Core behavior is covered by the Linux/macOS acceptance suites and support matrix.
+4. README documents the goal, pinned installation, usage and reproducible examples.
+5. CI executes check, native tests and build, plus integration and Release suites.
+6. The four-scenario runnable demonstration passed.
+7. Core, negative protocol, certificate, recovery, persistence and consumer paths passed.
+8. Mooncakes 0.8.0 is actually published and independently installed/tested.
+9. Apache-2.0 and applicable upstream attribution are included.
+
+The supplied organizer notice says approved contestants need no further form.
+No additional form, signature or organizer message was sent. Final organizer
+acceptance and physical B2 remain separate from this software completion.
 
 ## First-attempt finding
 

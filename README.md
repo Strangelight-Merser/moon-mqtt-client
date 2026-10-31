@@ -11,7 +11,7 @@
 
 ## 安装与构建
 
-本源码版本为 **0.8.0**，包含接收额度调度、心跳状态和关闭竞态修复。
+**0.8.0 已发布到 Mooncakes 和 GitHub Releases**，包含接收额度调度、心跳状态和关闭竞态修复。
 发布状态、验收证据及支持矩阵见[发布状态](docs/CURRENT.md)。
 添加注册表依赖的命令为：
 
@@ -363,6 +363,11 @@ PYTHON=.venv/bin/python ./tests/integration/run.sh
 MOONBIT_ASYNC_CHECK_FD_LEAK=1 .venv/bin/python tests/soak.py \
   --duration 1800 --cycles 100 --artifacts tests/integration/artifacts/soak
 ```
+
+当前 **v0.8.0** 已通过 165 项原生测试、Linux/macOS 完整发布验收、两平台各 39 组基准，
+以及 TCP/mTLS 各 30 分钟、100 次恢复测试。发布后从 Mooncakes 全新安装的消费者完成
+TCP/mTLS 收发及 34 项行为测试，四场景演示通过。逐项结果、平台排除项和原始证据见
+[0.8.0 验收记录](docs/exec/release-v0.8.0/STATUS.md)。编译仍有依赖/API 弃用和未使用代码警告。
 
 早期 v0.2 版本记录的验证包括 26 项单元测试、12 项集成测试、10 项协议故障测试、4 个状态同步场景、
 EMQX 互操作，以及 30 分钟、100 次断线恢复的压力测试。长测的 RSS/FD 资源采样不可用，

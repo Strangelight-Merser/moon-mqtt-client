@@ -1,3 +1,12 @@
+## Current software delivery — 2026-10-31
+
+Version 0.8.0 is published on GitHub and Mooncakes after fresh Linux/macOS full
+Release acceptance on MoonBit 0.10.17. See [the current acceptance record](release-v0.8.0/STATUS.md)
+for exact commits, tests, package hashes and clean registry installation results.
+The earlier entries below are historical snapshots; their old software HOLD or
+publication states do not override this release. Physical B2 remains unaccepted
+and no lab/serial/firmware operation was performed in this software delivery.
+
 # Execution state
 
 ## B-stage software integrated — 2026-09-21
