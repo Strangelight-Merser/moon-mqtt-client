@@ -6,7 +6,7 @@
 | Source module version | `0.8.0`; published software release |
 | Fixed toolchain | `moonc 0.10.17+d971670cd`, `moon 0.1.20261023`; exceeds the competition minimum 0.10.16 |
 | Software baseline | Tested `af0fb801`; merged/tagged `e30f2baa`, identical Git tree |
-| Current acceptance | Core, Integration and full Release passed on Linux/macOS; see [0.8.0 acceptance](exec/release-v0.8.0/STATUS.md) |
+| Current acceptance | Original Core/Integration/Release passed; newer post-merge macOS mTLS failure under investigation; see [0.8.0 acceptance](exec/release-v0.8.0/STATUS.md) |
 | Publication | Mooncakes HTTP 200; clean registry TCP/mTLS plus 34 behavior tests passed; GitHub release assets verified |
 | Hardware | B2 physical output and independent execution counts remain unaccepted; excluded from this software release |
 | Prior implementation audit | [2026-10-12 read-race/source-freeze fixes](exec/gap-repair/AUDIT_20261012.md) |

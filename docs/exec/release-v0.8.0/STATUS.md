@@ -10,9 +10,21 @@ Working branch: `codex/competition-release-v0.8.0` in the existing
 `moon-mqtt-release-record` worktree. Baseline: `8933416`; no hardware-operation
 commits are included. Fixed compiler: `0.10.17+d971670cd`.
 
-Current status: **published and verified on 2026-10-31**. The nine supplied
-software-delivery requirements are met by the evidence below. This is a project
+Current status: **published; post-merge macOS mTLS regression under investigation**.
+The previously completed release verification is preserved below, but final closure
+is reopened after a newer hosted runner failed positive mTLS cases. This is a project
 self-check, not a claim that the organizer has completed acceptance.
+
+## Post-merge finding
+
+[Integration 41227465200](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/41227465200)
+passed Linux but failed nine positive macOS mTLS cases and its source consumer.
+The source tree is identical to the accepted candidate. The failed runner image
+is `macos-26-arm64 20261026.0455.2`; the passed full Release used
+`20261013.0424.1`. These facts do not yet identify the cause. No retry has replaced
+the failure. The original broker logs and failed artifact are preserved. The
+previous full Release and post-publication registry passes remain true, but do
+not establish compatibility with this newly observed environment.
 
 ## Published identity
 
