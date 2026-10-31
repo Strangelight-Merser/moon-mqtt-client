@@ -11,7 +11,8 @@
 
 ## 安装与构建
 
-当前版本、候选版本和支持矩阵集中维护在[发布状态](docs/CURRENT.md)，源码能力不代表已发布。
+本源码版本为 **0.8.0**，包含接收额度调度、心跳状态和关闭竞态修复。
+发布状态、验收证据及支持矩阵见[发布状态](docs/CURRENT.md)。
 添加注册表依赖的命令为：
 
 ```sh
@@ -19,7 +20,14 @@ moon add Strangelight-Merser/moon-mqtt-client
 ```
 
 需要从源码运行示例或测试时，使用支持 native 目标的 MoonBit 工具链。
-已验证版本为 `moon 0.1.20260904` 和 `moonc v0.10.12+1634b282e`（2026-09-07）。
+本版本固定使用 `moon 0.1.20261023` 和 `moonc v0.10.17+d971670cd`（2026-10-23），
+满足验收要求的 `moonc >= 0.10.16`。首次安装固定工具链：
+
+```sh
+MOON_HOME="$PWD/.tools/moon" ./scripts/install-moonbit-ci.sh fixed
+export MOON_HOME="$PWD/.tools/moon"
+export PATH="$MOON_HOME/bin:$PATH"
+```
 
 ```sh
 moon update

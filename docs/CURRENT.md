@@ -3,14 +3,12 @@
 | Item | Current state |
 |---|---|
 | Last public release | [v0.7.1](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.1), published 2026-09-19 |
-| Source module version | `0.7.1`; source includes unreleased changes |
-| Audit baseline | `f0a0e9ec33b7aee2aeee26ea20572904d05e3069` |
-| Review candidate | Local `0.7.1-audit-<commit>-<source digest>` assets; not a new registry version |
-| Candidate manifest | Generated `_build/candidate/<id>/candidate.json` binds exact source files and ZIP checksums |
-| Formal next version/release | Release HOLD; complete remaining evidence gates before any merge, tag or publication |
-| Current software acceptance | [2026-10-13 software closure](exec/gap-repair/SOFTWARE_ACCEPTANCE_20261013.md): frozen candidate `978966c` passed original Linux/macOS Release and E06; external TCP/mTLS per-dial evidence complete |
-| Evidence tooling | `f5d00f5`: strict socket lifetimes, first TCP completion, shared clock and connect-entry capture; 14 regressions and 24 calibration cases per platform passed; does not inherit candidate Release PASS |
-| Remaining release gate | B2 physical output and independent execution counts; software state does not establish physical effects |
+| Source module version | `0.8.0`; competition software release candidate |
+| Fixed toolchain | `moonc 0.10.17+d971670cd`, `moon 0.1.20261023`; exceeds the competition minimum 0.10.16 |
+| Software baseline | `8933416`, including the previously accepted `978966c` runtime and subsequent evidence-tool corrections |
+| Current acceptance | New-toolchain checks and clean package consumers pending; see [0.8.0 acceptance](exec/release-v0.8.0/STATUS.md) |
+| Publication | Pending fresh software acceptance and registry verification; last public release remains 0.7.1 until recorded below |
+| Hardware | B2 physical output and independent execution counts remain unaccepted; excluded from this software release |
 | Prior implementation audit | [2026-10-12 read-race/source-freeze fixes](exec/gap-repair/AUDIT_20261012.md) |
 | Historical acceptance | Existing `docs/exec/STATE.md`, release notes and validation reports are historical snapshots |
 
@@ -18,7 +16,7 @@
 
 | Capability | Software acceptance scope | Claim boundary |
 |---|---|---|
-| Native MQTT311 / MQTT5 application subset, QoS0/1 | Fixed compiler on Linux/macOS; raw peers and Mosquitto | Not protocol certification or full MQTT5 |
+| Native MQTT311 / MQTT5 application subset, QoS0/1 | Pinned 0.10.17 compiler; Linux/macOS software checks required | Not protocol certification or full MQTT5 |
 | TCP / TLS / mTLS | Linux/macOS, positive and negative certificate matrix | No insecure-verification option; identity files checked on each dial |
 | WS framing | Linux/macOS independent raw peers | Native binary frames only |
 | WS/WSS / EMQX interoperation | Pinned Linux Docker images | Hosted macOS has no Docker broker service; explicitly not applicable there |

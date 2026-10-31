@@ -3,8 +3,8 @@ set -eu
 
 channel=${1:-fixed}
 case "$(uname -s):$(uname -m)" in
-  Darwin:arm64) target=darwin-aarch64; expected_sha=6ddad0d536e85d22e23d69567211e9dbc6534fa9366cee5d276a37275917e07e ;;
-  Linux:x86_64) target=linux-x86_64; expected_sha=9bbda7d342fa39654a65c23805e5ff5a3915a26b36627a2565a6b1a99d099e01 ;;
+  Darwin:arm64) target=darwin-aarch64; expected_sha=39e02f7730486cea54d12e8e781d83a665f245f6a621d01e17a3a13f104eb437 ;;
+  Linux:x86_64) target=linux-x86_64; expected_sha=d0a96eaf91c77cfcdd7b7df75390c5a1a95d0b8a328b1a5ed6fee050cfbf8d50 ;;
   *) echo "unsupported CI platform: $(uname -s) $(uname -m)" >&2; exit 2 ;;
 esac
 
@@ -26,11 +26,11 @@ fi
 
 # The CDN version is the compiler version without the leading "v".
 # Pin the compiler archive and its matching core bundle, not the latest alias.
-version='0.10.12%2B1634b282e'
+version='0.10.17%2Bd971670cd'
 archive="$download_dir/moonbit.tar.gz"
 published="$download_dir/moonbit.sha256"
 core_archive="$download_dir/core.tar.gz"
-expected_core_sha=784a12ce4e204a3a98a0b704a021f747b916412efacd4dfe2f4e5c27ae183ac1
+expected_core_sha=2d837ecbef5933c09726d63682a7695123d622e6aee13525fbc98c4b49433714
 base="https://cli.moonbitlang.com/binaries/$version/moonbit-${target}.tar.gz"
 curl -fsSL "$base" -o "$archive"
 curl -fsSL "$base.sha256" -o "$published"
@@ -63,12 +63,12 @@ export PATH="$install_home/bin:$PATH"
 
 first_line=$("$moon_bin" version --all | sed -n '1p')
 case "$first_line" in
-  "moon 0.1.20260904 (94521db 2026-09-04) "*) ;;
+  "moon 0.1.20261023 (3778465 2026-10-23) "*) ;;
   *) echo "unexpected fixed MoonBit version: $first_line" >&2; exit 1 ;;
 esac
 compiler_line=$("$install_home/bin/moonc" -v)
 case "$compiler_line" in
-  "v0.10.12+1634b282e (2026-09-07)") ;;
+  "v0.10.17+d971670cd (2026-10-23)") ;;
   *) echo "unexpected fixed compiler version: $compiler_line" >&2; exit 1 ;;
 esac
 "$moon_bin" -C "$install_home/lib/core" bundle --warn-list -a --all
