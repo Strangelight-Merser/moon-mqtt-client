@@ -18,3 +18,19 @@ Original tests, scenario list, budgets and historical evidence remain unchanged.
 Completion requires fixed-toolchain checks/build/tests, independent broker and
 package consumers, current CI, a versioned registry upload, and clean registry
 installation with runnable examples. Every publication result will be recorded.
+
+## First-attempt finding
+
+`f5ff954` passed every Core scenario on Linux and macOS, but correctly failed the
+source-identity gate. MoonBit 0.10.17 writes generated API descriptors during the
+build: seven tracked descriptors use the explicit `Int32` spelling instead of
+`Int`, and four executable packages lacked descriptors. Local reproduction and
+the downloaded Linux source/source-end manifests identify exactly the same
+files. No test assertions or implementation changed. The generated descriptors
+are committed before restarting acceptance; the source-freeze gate is unchanged.
+
+First push run: [41205820711](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/41205820711).
+Its failed status and original artifacts are retained. The first full Release
+run was canceled after this invalid source snapshot was identified, before
+spending the long-soak budget. Local initial index download interruption is
+recorded separately; it did not execute code tests.

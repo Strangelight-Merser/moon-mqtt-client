@@ -7,13 +7,13 @@ import {
 }
 
 // Values
-pub fn decode(Bytes, Int) -> Packet raise CodecError
+pub fn decode(Bytes, Int32) -> Packet raise CodecError
 
-pub fn decode_publish_properties(Bytes, Int) -> Array[Property] raise CodecError
+pub fn decode_publish_properties(Bytes, Int32) -> Array[Property] raise CodecError
 
-pub fn encode(@moonbit-mqtt.Packet, Array[Property], Int) -> Bytes raise CodecError
+pub fn encode(@moonbit-mqtt.Packet, Array[Property], Int32) -> Bytes raise CodecError
 
-pub fn encode_publish_properties(Array[Property], Int) -> Bytes raise CodecError
+pub fn encode_publish_properties(Array[Property], Int32) -> Bytes raise CodecError
 
 // Errors
 pub(all) suberror CodecError {
@@ -23,43 +23,43 @@ pub(all) suberror CodecError {
 
 // Types and methods
 pub(all) enum Packet {
-  Connack(Bool, Int, Array[Property])
+  Connack(Bool, Int32, Array[Property])
   Publish(@moonbit-mqtt.Publish, Array[Property])
-  Puback(Int, Int, Array[Property])
-  Suback(Int, Array[Int], Array[Property])
-  Unsuback(Int, Array[Int], Array[Property])
+  Puback(Int32, Int32, Array[Property])
+  Suback(Int32, Array[Int32], Array[Property])
+  Unsuback(Int32, Array[Int32], Array[Property])
   Pingresp
-  Disconnect(Int, Array[Property])
+  Disconnect(Int32, Array[Property])
 } derive(@debug.Debug)
 
 pub(all) enum Property {
-  PayloadFormat(Int)
+  PayloadFormat(Int32)
   MessageExpiry(Int64)
   ContentType(String)
   ResponseTopic(String)
   CorrelationData(Bytes)
-  SubscriptionIdentifier(Int)
+  SubscriptionIdentifier(Int32)
   SessionExpiry(Int64)
   AssignedClientIdentifier(String)
-  ServerKeepAlive(Int)
+  ServerKeepAlive(Int32)
   AuthenticationMethod(String)
   AuthenticationData(Bytes)
-  RequestProblemInformation(Int)
+  RequestProblemInformation(Int32)
   WillDelay(Int64)
-  RequestResponseInformation(Int)
+  RequestResponseInformation(Int32)
   ResponseInformation(String)
   ServerReference(String)
   ReasonString(String)
-  ReceiveMaximum(Int)
-  TopicAliasMaximum(Int)
-  TopicAlias(Int)
-  MaximumQoS(Int)
-  RetainAvailable(Int)
+  ReceiveMaximum(Int32)
+  TopicAliasMaximum(Int32)
+  TopicAlias(Int32)
+  MaximumQoS(Int32)
+  RetainAvailable(Int32)
   UserProperty(String, String)
   MaximumPacketSize(Int64)
-  WildcardSubscriptionAvailable(Int)
-  SubscriptionIdentifiersAvailable(Int)
-  SharedSubscriptionAvailable(Int)
+  WildcardSubscriptionAvailable(Int32)
+  SubscriptionIdentifiersAvailable(Int32)
+  SharedSubscriptionAvailable(Int32)
 } derive(Eq, @debug.Debug)
 
 // Type aliases
