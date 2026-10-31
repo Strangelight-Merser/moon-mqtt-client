@@ -1,5 +1,8 @@
 name: toolchain startup diagnosis
 on:
+  push:
+    branches: [codex/competition-release-v0.8.0]
+    paths: [.github/workflows/toolchain-startup.yml]
   workflow_dispatch:
 permissions:
   contents: read
