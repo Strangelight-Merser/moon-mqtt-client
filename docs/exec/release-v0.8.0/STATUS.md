@@ -34,3 +34,20 @@ Its failed status and original artifacts are retained. The first full Release
 run was canceled after this invalid source snapshot was identified, before
 spending the long-soak budget. Local initial index download interruption is
 recorded separately; it did not execute code tests.
+
+## Cold compiler startup diagnosis
+
+The original macOS Integration and push Core at `aa38a7f` timed out at the first
+raw-protocol `moon run` invocation (8 seconds); the same-source PR Core passed.
+The new compiler's `moon build` uses `-g -O0`, while `moon run` uses `-O0
+-stacktrace`, invalidating the shared dependency build cache. An isolated hosted
+[diagnostic](https://github.com/Strangelight-Merser/moon-mqtt-client/actions/runs/41206987665)
+reproduced a cold 8-second timeout, retained its captured stderr, then passed all
+10 original cases in 3.03 seconds after an explicit `moon run --build-only`.
+The diagnostic is not a replacement acceptance run. Original failed runs remain.
+
+The acceptance runner now records a required build-only preparation before the
+raw protocol suite. Original test files, 5-second peer accept deadline, 8-second
+process deadline, and assertions remain unchanged. This separates compilation
+from protocol timing rather than increasing the budget. The temporary diagnostic
+workflow is removed after retaining its run and result.

@@ -40,3 +40,9 @@ Resource evidence samples the native executable while alive. Post-scope cleanup
 must be observed before process exit; a vanished PID is not evidence of stable
 runtime resources. Measurement thresholds and tradeoffs are submitted to Pro
 after collecting the baseline.
+
+On the fixed 0.10.17 toolchain, `moon build` and `moon run` use different debug
+flags. The runner records a separate `protocol-driver-build` preparation step
+immediately before the raw protocol suite. It uses `moon run --build-only` so
+compilation happens before the unchanged peer accept and process deadlines.
+This preparation must pass; no test, timeout, or failure assertion is altered.

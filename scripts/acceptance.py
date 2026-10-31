@@ -67,6 +67,17 @@ def main():
         if unknown:
             parser.error(f"unknown scenarios: {sorted(unknown)}")
         scenarios = [s for s in scenarios if s["id"] in args.only]
+    # Moon 0.10.17 builds with -g but runs with -stacktrace by default.
+    # Compile the exact run profile before the peer's unchanged 5s accept / 8s
+    # process deadlines start; compilation failure is still an acceptance failure.
+    prepared = []
+    for scenario in scenarios:
+        if scenario["id"] == "raw-protocol":
+            prepared.append({"id": "protocol-driver-build", "level": "core",
+                             "command": ["{moon}", "run", "examples/fault_driver",
+                                         "--target", "native", "--build-only"]})
+        prepared.append(scenario)
+    scenarios = prepared
     if args.list:
         print(json.dumps(scenarios, indent=2)); return
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
