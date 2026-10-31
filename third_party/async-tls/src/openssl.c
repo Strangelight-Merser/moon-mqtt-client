@@ -112,8 +112,14 @@ int strangelight_async_tls_load_openssl(int *major, int *minor, int *fix) {
   void *handle = 0;
 
 #ifdef __MACH__
-  handle = dlopen("/usr/lib/libssl.48.dylib", RTLD_LAZY);
-  if (!handle) handle = dlopen("/usr/lib/libssl.46.dylib", RTLD_LAZY);
+  // Use the supported OpenSSL 3 installation, rather than Apple's old
+  // LibreSSL implementation, which fails TLS 1.3 client authentication
+  // against newer broker environments.
+#ifdef __aarch64__
+  handle = dlopen("/opt/homebrew/opt/openssl@3/lib/libssl.3.dylib", RTLD_LAZY);
+#else
+  handle = dlopen("/usr/local/opt/openssl@3/lib/libssl.3.dylib", RTLD_LAZY);
+#endif
 #else
   handle = dlopen("libssl.so.3", RTLD_LAZY);
   if (!handle) handle = dlopen("libssl.so.1.1", RTLD_LAZY);
