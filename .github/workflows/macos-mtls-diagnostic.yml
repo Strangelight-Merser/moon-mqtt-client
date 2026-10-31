@@ -8,8 +8,14 @@ permissions:
   contents: read
 jobs:
   diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        probe: [1, 2, 3]
     runs-on: macos-latest
     timeout-minutes: 15
+    env:
+      MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,7 +27,13 @@ jobs:
           ./scripts/install-moonbit-ci.sh fixed
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
           python -m pip install -r tests/integration/requirements.txt
+      - name: Original positive mTLS test on this image
+        run: |
+          moon update
+          moon build --target native
+          MOON="$(command -v moon)" python tests/integration/run.py IntegrationTest.test_mtls_qos1_roundtrip
       - name: Capture native TLS cause with registry 0.8.0
+        if: always()
         run: |
           mkdir -p _build/mtls-diagnosis
           MOON="$(command -v moon)" python scripts/diagnose-macos-mtls.py 2>&1 | tee _build/mtls-diagnosis/diagnostic.log
@@ -29,6 +41,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mtls-diagnosis-${{ github.sha }}
+          name: mtls-diagnosis-${{ github.sha }}-${{ matrix.probe }}
           path: _build/mtls-diagnosis/
           retention-days: 30
