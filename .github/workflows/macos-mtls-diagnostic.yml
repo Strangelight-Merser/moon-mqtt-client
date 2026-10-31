@@ -44,7 +44,7 @@ jobs:
           MOON="$(command -v moon)" python tests/integration/run.py IntegrationTest.test_mtls_qos1_roundtrip IntegrationTest.test_mtls_tls13_only_qos1_roundtrip IntegrationTest.test_mtls_rejection_matrix
           moon test --target native --build-only
           python - <<'PY'
-          import json, pathlib, subprocess
+          import json, os, pathlib, signal, subprocess
           rows = []
           # Bounded diagnosis only: run the original test bodies individually
           # to identify a stalled case. These are not acceptance passes.
@@ -53,10 +53,12 @@ jobs:
               count = sum(line.startswith('async test ') for line in path.read_text().splitlines())
               for index in range(count):
                   print('DIAGNOSTIC_CASE', filename, index, flush=True)
+                  process = subprocess.Popen(['moon', 'test', str(path), '--index', str(index), '--target', 'native'], start_new_session=True)
                   try:
-                      r = subprocess.run(['moon', 'test', str(path), '--index', str(index), '--target', 'native'], timeout=60)
-                      row = {'file': filename, 'index': index, 'returncode': r.returncode}
+                      row = {'file': filename, 'index': index, 'returncode': process.wait(timeout=60)}
                   except subprocess.TimeoutExpired:
+                      os.killpg(process.pid, signal.SIGKILL)
+                      process.wait()
                       row = {'file': filename, 'index': index, 'diagnostic_timeout': 60}
                   rows.append(row)
                   print('DIAGNOSTIC_RESULT', json.dumps(row), flush=True)
