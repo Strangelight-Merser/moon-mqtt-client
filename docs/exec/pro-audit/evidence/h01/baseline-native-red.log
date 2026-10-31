@@ -1,0 +1,16 @@
+PanicError
+    at @moonbitlang/core/option.Option::unwrap[@Strangelight-Merser/moon-mqtt-client.Outgoing] (/Users/huaiyi/Documents/ChatGPT/moon-mqtt-client/.tools/moon/lib/core/builtin/option.mbt:40)
+    at @Strangelight-Merser/moon-mqtt-client.__test_6372656469745f6e6f6e7075626c6973685f7762746573742e6d6274_2 (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/credit_nonpublish_wbtest.mbt:72)
+    at ??? (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/__generated_driver_for_whitebox_test.mbt:0)
+    at @Strangelight-Merser/moon-mqtt-client.moonbit_test_driver_internal_catch_error (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/__generated_driver_for_whitebox_test.mbt:432)
+    at impl @Strangelight-Merser/moon-mqtt-client.MoonBit_Test_Driver for @Strangelight-Merser/moon-mqtt-client.MoonBit_Test_Driver_Internal_No_Args with run_test (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/__generated_driver_for_whitebox_test.mbt:520)
+    at @Strangelight-Merser/moon-mqtt-client.moonbit_test_driver_internal_do_execute (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/__generated_driver_for_whitebox_test.mbt:860)
+    at moonbit_main (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/__generated_driver_for_whitebox_test.mbt:703)
+    at main (/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/__generated_driver_for_whitebox_test.mbt:701)
+Error: failed to run test for target Native
+
+Caused by:
+    Failed to run the test: /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/_build/native/debug/test/Strangelight-Merser/moon-mqtt-client/moon-mqtt-client.whitebox_test.exe
+    The test executable exited with signal: 6 (SIGABRT)
+    Active test at executable exit:
+      - /Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/credit_nonpublish_wbtest.mbt:60 "MQTT5 credit audit: bypass preserves PUBLISH FIFO and credit bound"

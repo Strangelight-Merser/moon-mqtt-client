@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import importlib.util
 from pathlib import Path
 import socket
@@ -13,6 +14,7 @@ import time
 import unittest
 
 from protocol_faults import recv_packet, body_offset, publish_id
+from harness import NativeProcess
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -59,7 +61,7 @@ class RuntimePeers(unittest.TestCase):
             raise AssertionError(f"production runtime driver missing: {matches}")
         cls.driver = matches[0]
 
-    def run_peer(self, mode, action, *, success=True, extra_env=None):
+    def run_peer(self, mode, action, *, success=True, extra_env=None, phases=None):
         failures = []
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
@@ -74,11 +76,17 @@ class RuntimePeers(unittest.TestCase):
                     failures.append(error)
             thread = threading.Thread(target=serve, daemon=True)
             thread.start()
-            result = subprocess.run(
-                [str(self.driver), mode, str(listener.getsockname()[1])],
-                cwd=ROOT, text=True, capture_output=True, timeout=12,
-                env={**os.environ, "MOONBIT_ASYNC_CHECK_FD_LEAK": "1", **(extra_env or {})},
-            )
+            command = [str(self.driver), mode, str(listener.getsockname()[1])]
+            env = {**os.environ, "MOONBIT_ASYNC_CHECK_FD_LEAK": "1", **(extra_env or {})}
+            if phases is None:
+                result = subprocess.run(command, cwd=ROOT, text=True,
+                                        capture_output=True, timeout=12, env=env)
+            else:
+                process = NativeProcess(command, cwd=ROOT, env=env, events=phases)
+                try:
+                    result = process.finish(timeout=12)
+                finally:
+                    process.close()
             thread.join(5)
             self.assertFalse(thread.is_alive(), "raw peer did not terminate")
             self.assertEqual(failures, [], (failures, result.stdout, result.stderr))
@@ -87,6 +95,42 @@ class RuntimePeers(unittest.TestCase):
             else:
                 self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
             return result
+
+    def test_receive_maximum_does_not_block_subscribe_or_unsubscribe(self):
+        phases = queue.Queue()
+
+        def phase(expected):
+            self.assertEqual(phases.get(timeout=3), expected)
+
+        def peer(conn, _):
+            connack(conn, b"\x21\x00\x01")
+            first = recv_packet(conn)
+            self.assertEqual(first[0], 0x32)
+            self.assertTrue(first.endswith(b"first"))
+            phase("h01: second-admitted pending=2 business=1")
+            phase("h01: subscriptions-admitted pending=4")
+            # These bounded reads fail on the original parked-head production
+            # path, before any request timeout can advance the scenario.
+            for expected, response in ((0x82, 0x90), (0xa2, 0xb0)):
+                request = recv_packet(conn)
+                self.assertEqual(request[0], expected, "PUBLISH spent unavailable credit")
+                offset = body_offset(request)
+                conn.sendall(frame(response, request[offset:offset + 2] + b"\x00\x00"))
+            barrier = recv_packet(conn)
+            self.assertEqual(barrier[0], 0x82, "SUBACK/UNSUBACK incorrectly restored publish credit")
+            self.assertIn(b"h01/barrier", barrier)
+            offset = body_offset(barrier)
+            conn.sendall(frame(0x90, barrier[offset:offset + 2] + b"\x00\x00"))
+            ack(conn, publish_id(first))
+            second = recv_packet(conn)
+            self.assertEqual(second[0], 0x32)
+            self.assertTrue(second.endswith(b"second"))
+            self.assertNotEqual(publish_id(first), publish_id(second))
+            ack(conn, publish_id(second))
+            self.assertEqual(recv_packet(conn)[0], 0xe0)
+
+        result = self.run_peer("flow-subscriptions", peer, phases=phases)
+        self.assertIn("h01: complete", result.stdout)
 
     def test_receive_maximum_keeps_control_ack_moving(self):
         def peer(conn, _):

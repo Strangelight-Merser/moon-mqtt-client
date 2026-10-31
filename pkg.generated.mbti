@@ -51,7 +51,7 @@ pub(all) suberror DurableStoreError {
 
 // Types and methods
 pub(all) struct BrokerReason {
-  code : Int
+  code : Int32
   reason_string : String?
 } derive(Eq, @debug.Debug)
 
@@ -61,7 +61,7 @@ pub fn Client::negotiated_settings(Self) -> NegotiatedSettings raise ClientError
 pub async fn Client::next_event(Self) -> Event
 pub async fn Client::publish(Self, String, Bytes, qos? : QoS, retain? : Bool, properties? : PublishProperties) -> Unit
 pub async fn Client::publish_detailed(Self, String, Bytes, qos? : QoS, retain? : Bool, properties? : PublishProperties) -> PublishReceipt
-pub fn Client::set_reconnect_seed(Self, Int) -> Unit
+pub fn Client::set_reconnect_seed(Self, Int32) -> Unit
 pub fn Client::stats(Self) -> ClientStats
 pub fn Client::submit_delivery(Self, String, String, Bytes, retain? : Bool, properties? : PublishProperties) -> DeliveryHandle raise ClientError
 pub async fn Client::submit_durable_delivery(Self, String, String, Bytes, Int64, retain? : Bool, properties? : PublishProperties) -> DeliveryHandle
@@ -77,21 +77,21 @@ pub(all) struct ClientIdentity {
 }
 
 pub(all) struct ClientStats {
-  generation : Int
+  generation : Int32
   connected : Bool
-  business_queue_depth : Int
-  control_queue_depth : Int
-  event_queue_depth : Int
-  pending_requests : Int
-  reconnects : Int
-  disconnects : Int
-  unknown_outcomes : Int
+  business_queue_depth : Int32
+  control_queue_depth : Int32
+  event_queue_depth : Int32
+  pending_requests : Int32
+  reconnects : Int32
+  disconnects : Int32
+  unknown_outcomes : Int32
   last_disconnect : String?
 }
 
 pub(all) struct Config {
   host : String
-  port : Int
+  port : Int32
   client_id : String
   protocol : ProtocolVersion
   session_policy : SessionPolicy
@@ -102,22 +102,22 @@ pub(all) struct Config {
   username : String?
   password : Bytes?
   will : Will?
-  keep_alive_secs : Int
-  connect_timeout_ms : Int
-  operation_timeout_ms : Int
-  write_timeout_ms : Int
-  ping_response_timeout_ms : Int
-  send_capacity : Int
-  receive_capacity : Int
-  max_inflight : Int
-  max_packet_size : Int
-  reconnect_delay_ms : Int
-  max_reconnect_delay_ms : Int
-  reconnect_attempts : Int
+  keep_alive_secs : Int32
+  connect_timeout_ms : Int32
+  operation_timeout_ms : Int32
+  write_timeout_ms : Int32
+  ping_response_timeout_ms : Int32
+  send_capacity : Int32
+  receive_capacity : Int32
+  max_inflight : Int32
+  max_packet_size : Int32
+  reconnect_delay_ms : Int32
+  max_reconnect_delay_ms : Int32
+  reconnect_attempts : Int32
   server_disconnect_policy : ServerDisconnectPolicy
-  control_capacity : Int
+  control_capacity : Int32
 }
-pub fn Config::new(String, String, protocol? : ProtocolVersion, port? : Int, session_policy? : SessionPolicy, session_expiry_secs? : Int64, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int, connect_timeout_ms? : Int, operation_timeout_ms? : Int, write_timeout_ms? : Int, ping_response_timeout_ms? : Int, send_capacity? : Int, receive_capacity? : Int, max_inflight? : Int, max_packet_size? : Int, reconnect_delay_ms? : Int, max_reconnect_delay_ms? : Int, reconnect_attempts? : Int, server_disconnect_policy? : ServerDisconnectPolicy, control_capacity? : Int) -> Self
+pub fn Config::new(String, String, protocol? : ProtocolVersion, port? : Int32, session_policy? : SessionPolicy, session_expiry_secs? : Int64, transport? : NetworkTransport, tls? : TlsMode, client_identity? : ClientIdentity?, username? : String?, password? : Bytes?, will? : Will?, keep_alive_secs? : Int32, connect_timeout_ms? : Int32, operation_timeout_ms? : Int32, write_timeout_ms? : Int32, ping_response_timeout_ms? : Int32, send_capacity? : Int32, receive_capacity? : Int32, max_inflight? : Int32, max_packet_size? : Int32, reconnect_delay_ms? : Int32, max_reconnect_delay_ms? : Int32, reconnect_attempts? : Int32, server_disconnect_policy? : ServerDisconnectPolicy, control_capacity? : Int32) -> Self
 
 pub struct DeliveryHandle {
   // private fields
@@ -141,14 +141,14 @@ pub(all) struct DeliveryStatus {
   phase : DeliveryPhase
   terminal_cause : ClientError?
   broker_reason : BrokerReason?
-  packet_id : Int
-  attempts : Int
-  generation : Int?
+  packet_id : Int32
+  attempts : Int32
+  generation : Int32?
 } derive(@debug.Debug)
 
 pub(all) struct DurableDeliveryInfo {
   delivery_id : String
-  packet_id : Int
+  packet_id : Int32
   sequence : Int64
   topic : String
   payload : Bytes
@@ -156,7 +156,7 @@ pub(all) struct DurableDeliveryInfo {
   message_expiry_at_ms : Int64?
   retain : Bool
   expires_at_ms : Int64
-  attempts : Int
+  attempts : Int32
   ever_started : Bool
   state : DurableDeliveryState
 } derive(@debug.Debug)
@@ -168,15 +168,15 @@ pub(all) enum DurableDeliveryState {
 
 pub(all) struct DurableOutboxOptions {
   path : String
-  max_records : Int
+  max_records : Int32
   max_payload_bytes : Int64
-  max_pages : Int
+  max_pages : Int32
 }
-pub fn DurableOutboxOptions::new(String, max_records? : Int, max_payload_bytes? : Int64, max_pages? : Int) -> Self
+pub fn DurableOutboxOptions::new(String, max_records? : Int32, max_payload_bytes? : Int64, max_pages? : Int32) -> Self
 
 pub(all) enum Event {
-  Connected(Int)
-  Disconnected(Int, String)
+  Connected(Int32)
+  Disconnected(Int32, String)
   MessageReceived(Message)
 } derive(@debug.Debug)
 
@@ -186,16 +186,16 @@ pub(all) struct Message {
   qos : QoS
   retain : Bool
   dup : Bool
-  generation : Int
+  generation : Int32
   properties : PublishProperties
 } derive(@debug.Debug)
 
 pub(all) struct NegotiatedSettings {
-  receive_maximum : Int
-  max_packet_size : Int
+  receive_maximum : Int32
+  max_packet_size : Int32
   maximum_qos : QoS
   retain_available : Bool
-  keep_alive_secs : Int
+  keep_alive_secs : Int32
   session_expiry_secs : Int64
 } derive(@debug.Debug)
 

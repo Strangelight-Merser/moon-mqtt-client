@@ -1,0 +1,19 @@
+Finished. moon: ran 4 tasks, now up to date
+test_durable_negative_ack_reports_rejection_and_persists_removal (__main__.RuntimePeers.test_durable_negative_ack_reports_rejection_and_persists_removal) ... ok
+test_durable_process_restart_preserves_metadata_and_decreases_expiry (__main__.RuntimePeers.test_durable_process_restart_preserves_metadata_and_decreases_expiry) ... ok
+test_empty_durable_outbox_remembers_logical_session (__main__.RuntimePeers.test_empty_durable_outbox_remembers_logical_session) ... ok
+test_fresh_resume_rejects_unowned_session (__main__.RuntimePeers.test_fresh_resume_rejects_unowned_session) ... ok
+test_mixed_subscription_reasons_preserve_reader_lifecycle (__main__.RuntimePeers.test_mixed_subscription_reasons_preserve_reader_lifecycle) ... ok
+test_negative_puback_is_definite_broker_rejection (__main__.RuntimePeers.test_negative_puback_is_definite_broker_rejection) ... ok
+test_negotiated_publication_limits_reject_before_write (__main__.RuntimePeers.test_negotiated_publication_limits_reject_before_write) ... ok
+test_production_metadata_roundtrip_with_independent_paho (__main__.RuntimePeers.test_production_metadata_roundtrip_with_independent_paho) ... ok
+test_receive_maximum_does_not_block_subscribe_or_unsubscribe (__main__.RuntimePeers.test_receive_maximum_does_not_block_subscribe_or_unsubscribe) ... ok
+test_receive_maximum_keeps_control_ack_moving (__main__.RuntimePeers.test_receive_maximum_keeps_control_ack_moving) ... ok
+test_reconnect_reduces_credit_without_quarantining_queued_deliveries (__main__.RuntimePeers.test_reconnect_reduces_credit_without_quarantining_queued_deliveries) ... ok
+test_server_disconnect_reason_is_terminal_without_reconnect (__main__.RuntimePeers.test_server_disconnect_reason_is_terminal_without_reconnect) ... ok
+test_server_keepalive_overrides_configured_interval (__main__.RuntimePeers.test_server_keepalive_overrides_configured_interval) ... ok
+
+----------------------------------------------------------------------
+Ran 13 tests in 7.384s
+
+OK

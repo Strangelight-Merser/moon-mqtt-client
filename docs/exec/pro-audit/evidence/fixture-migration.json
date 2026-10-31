@@ -1,0 +1,22 @@
+{
+  "audit_v071_a1_wbtest.mbt": {
+    "path": "delivery_expiry_wbtest.mbt",
+    "test_names": [
+      "A1 expired never-written delivery stays not-sent",
+      "A1 expired delivery written by an older generation stays unknown"
+    ],
+    "assertion_count": 10
+  },
+  "audit_v071_a2_wbtest.mbt": {
+    "path": "heartbeat_wbtest.mbt",
+    "test_names": [
+      "A2 repeated ticks keep only one queued ping",
+      "A2 early PINGRESP stays pending until the current write returns",
+      "A2 PINGRESP timeout starts after blocked write completion",
+      "A2 abort clears ping state and blocked completion cannot revive it",
+      "A2 pending ping preserves PUBACK and DISCONNECT control slots",
+      "A2 queued PINGREQ ignores PINGRESP until a write can start"
+    ],
+    "assertion_count": 25
+  }
+}

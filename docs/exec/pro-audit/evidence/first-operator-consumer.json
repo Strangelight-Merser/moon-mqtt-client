@@ -1,0 +1,22 @@
+{
+  "source": "extracted library and operator candidates",
+  "workspace_override": true,
+  "clean_venv": true,
+  "MOON_WORK_removed": true,
+  "module_version": "0.7.1",
+  "tests_run": 9,
+  "failures": 0,
+  "errors": 0,
+  "skipped": 0,
+  "successful": true,
+  "operator_sha256": "3eac5d2d7267369775bb28b144f3035ebb3205e6cdacd91ea465bf02d589bb22",
+  "library_sha256": "2081a556866eff8b91b7c5d52104c4bbb46c71d95d4d8eb79291cc675e3b36ef",
+  "provenance": {
+    "candidate": "0.7.1-audit-91f9d2c144f9",
+    "module_version": "0.7.1",
+    "source_commit": "cf26088f0e76f5d89522940585d890ba5824ac90",
+    "source_dirty": true,
+    "source_files_sha256": "91f9d2c144f96ee6dcef05a4acf9fba45f40eec65bd84a4bc4fdb54346438413",
+    "published": false
+  }
+}

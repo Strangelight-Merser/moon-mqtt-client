@@ -1,0 +1,76 @@
+name: native client release acceptance
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 * * 1'
+permissions:
+  contents: read
+jobs:
+  release:
+    name: release (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-latest
+            platform: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    env:
+      MOONBIT_ASYNC_CHECK_FD_LEAK: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install broker (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y mosquitto openssl libssl-dev
+      - name: Install broker (macOS)
+        if: runner.os == 'macOS'
+        run: brew install mosquitto openssl@3
+      - name: Match localhost to IPv4 broker (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo 'precedence ::ffff:127.0.0.1/128 100' | sudo tee -a /etc/gai.conf
+          python -c 'import socket; results=socket.getaddrinfo("localhost", None, 0, 0, 0, socket.AI_ADDRCONFIG); assert results[0][4][0] == "127.0.0.1"'
+      - name: Install verified MoonBit baseline
+        run: |
+          ./scripts/install-moonbit-ci.sh fixed
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Install acceptance dependencies
+        run: python -m pip install -r tests/integration/requirements.txt
+      - name: Shared Release acceptance
+        run: MOON="$(command -v moon)" PYTHON="$(command -v python)" ./scripts/check.sh release
+      - name: Preserve first-attempt evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.platform }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            _build/acceptance/
+            !_build/acceptance/**/*.key
+            !_build/acceptance/**/*.pem
+            !_build/acceptance/**/*.sqlite3*
+            !_build/acceptance/**/*.mqttrec
+          if-no-files-found: error
+          retention-days: 30
+
+  latest-compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install rolling stable MoonBit
+        run: |
+          ./scripts/install-moonbit-ci.sh latest
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - name: Latest compatibility check
+        run: |
+          moon update
+          moon check --target native
+          moon test --target native
+          moon build --target native

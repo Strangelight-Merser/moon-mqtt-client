@@ -8,7 +8,10 @@ Uses, as separate dependencies:
 - moonbitlang/async 0.21.3 (async I/O, networking), Apache-2.0
   https://github.com/moonbitlang/async
 - Strangelight-Merser/async-tls 0.1.0 (native TLS with mTLS identity), Apache-2.0
-  derived from moonbitlang/async 0.21.3 TLS; linked locally via moon.work until published
+  derived from moonbitlang/async 0.21.3 TLS; separately published on Mooncakes
+
+- moonbit-community/sqlite3 0.2.2 (SQLite bindings), Apache-2.0
+  https://github.com/moonbit-community/sqlite3.mbt
 
 Includes a modified native WebSocket client subset from moonbitlang/async 0.21.3,
 Copyright 2025 International Digital Economy Academy, Apache-2.0.

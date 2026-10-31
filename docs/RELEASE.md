@@ -1,3 +1,17 @@
+# Current competition delivery
+
+The 2026-10-31 acceptance notice requires MoonBit as the main implementation,
+moonc >= 0.10.16, a public repository with development history, documented and
+reproducible core functionality, CI check/build/test, a runnable example, core
+path tests, Mooncakes publication, and an OSI-approved license with attribution.
+No additional pre-acceptance form is required for already-approved contestants.
+
+The current 0.8.0 software delivery and exact verification status are recorded in
+[release acceptance](exec/release-v0.8.0/STATUS.md) and [current status](CURRENT.md).
+The following older release checklist is retained as historical evidence.
+
+---
+
 # Release and competition checklist
 
 Passing local tests is separate from completing the competition's submission and

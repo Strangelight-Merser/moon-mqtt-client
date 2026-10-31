@@ -11,15 +11,23 @@
 
 ## 安装与构建
 
-当前发布版本为 [**0.7.0**](https://github.com/Strangelight-Merser/moon-mqtt-client/releases/tag/v0.7.0)，提供 TCP/TLS、WS/WSS、可恢复 QoS 1、SQLite 持久 outbox 和 MQTT 5 应用子集。
-发布与注册表安装状态见 [执行状态](docs/exec/STATE.md)，源码能力不代表已发布。添加注册表依赖的命令为：
+本源码版本为 **0.8.0**，包含接收额度调度、心跳状态和关闭竞态修复。
+发布状态、验收证据及支持矩阵见[发布状态](docs/CURRENT.md)。
+添加注册表依赖的命令为：
 
 ```sh
 moon add Strangelight-Merser/moon-mqtt-client
 ```
 
 需要从源码运行示例或测试时，使用支持 native 目标的 MoonBit 工具链。
-已验证版本为 `moon 0.1.20260904` 和 `moonc v0.10.12+1634b282e`（2026-09-07）。
+本版本固定使用 `moon 0.1.20261023` 和 `moonc v0.10.17+d971670cd`（2026-10-23），
+满足验收要求的 `moonc >= 0.10.16`。首次安装固定工具链：
+
+```sh
+MOON_HOME="$PWD/.tools/moon" ./scripts/install-moonbit-ci.sh fixed
+export MOON_HOME="$PWD/.tools/moon"
+export PATH="$MOON_HOME/bin:$PATH"
+```
 
 ```sh
 moon update
@@ -208,6 +216,10 @@ TLS 验证使用的主机名，没有关闭证书验证的选项。身份文件�
 `TlsFailure`。CLI 使用成对的 `--cert` / `--key`，并且必须同时指定 `--tls`。
 
 ## 投递结果与失败语义
+
+先按[投递生命周期指南](docs/DELIVERY-GUIDE.md)选择普通、可恢复或持久投递；
+各连接阶段的政策、请求结果和持久记录变化见[故障矩阵](docs/FAILURE-MATRIX.md)。
+本地与 CI 共用的 Core / Integration / Release 入口见[验收说明](docs/ACCEPTANCE.md)。
 
 超时、排队、取消和失败分类的完整约定见[运行时契约](docs/API-CONTRACT.md)。
 

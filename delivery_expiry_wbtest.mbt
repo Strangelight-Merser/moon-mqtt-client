@@ -1,10 +1,11 @@
+// Regression origin: PR #4, audit_v071_a1_wbtest.mbt. Original assertions retained.
 ///|
-struct AuditV071A1Writer {
+struct ExpirySpyWriter {
   mut writes : Int
 }
 
 ///|
-impl @io.Writer for AuditV071A1Writer with fn write_once(
+impl @io.Writer for ExpirySpyWriter with fn write_once(
   self,
   _buf,
   offset~,
@@ -15,7 +16,7 @@ impl @io.Writer for AuditV071A1Writer with fn write_once(
 }
 
 ///|
-fn audit_v071_a1_record(
+fn expiry_test_record(
   ever_started : Bool,
   expiry_at_ms : Int64,
 ) -> DeliveryRecord {
@@ -43,7 +44,7 @@ fn audit_v071_a1_record(
 }
 
 ///|
-fn audit_v071_a1_session(
+fn expiry_test_session(
   delivery : DeliveryRecord,
   writer : &@io.Writer,
   generation? : Int = 1,
@@ -53,38 +54,28 @@ fn audit_v071_a1_session(
   attached[delivery.packet_id] = delivery
   let reserved : Map[Int, DeliveryRecord] = Map([])
   reserved[delivery.packet_id] = delivery
-  {
-    generation,
+  fixture_session(
     reader,
     writer,
-    close_transport: () => {
+    () => {
       reader.close()
       peer_writer.close()
     },
-    outgoing: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    control_queue: @aqueue.Queue(kind=@aqueue.Blocking(2)),
-    business_depth: 0,
-    control_depth: 0,
-    pending: {},
-    deliveries: attached,
-    reserved_deliveries: reserved,
-    delivery_slots: 1,
-    qos1_outstanding: 0,
-    receive_maximum: 1,
-    parked_business: None,
-    outgoing_limit: 4096,
-    delivery_changed: @cond_var.Cond(),
-    next_id: 2,
-    alive: true,
-    last_write: @async.now(),
-    ping_sent: None,
-    early_messages: [],
-    failure_reason: None,
-  }
+    send_capacity=2,
+    control_capacity=2,
+    generation=generation,
+    deliveries=attached,
+    reserved_deliveries=reserved,
+    delivery_slots=1,
+    receive_maximum=1,
+    outgoing_limit=4096,
+    next_id=2,
+    last_write=@async.now(),
+  )
 }
 
 ///|
-fn audit_v071_a1_client(delivery : DeliveryRecord) -> Client {
+fn expiry_test_client(delivery : DeliveryRecord) -> Client {
   let deliveries = DeliveryBook::new()
   deliveries.active[delivery.delivery_id] = delivery
   deliveries.reserved[delivery.packet_id] = delivery
@@ -98,10 +89,10 @@ fn audit_v071_a1_client(delivery : DeliveryRecord) -> Client {
 
 ///|
 async test "A1 expired never-written delivery stays not-sent" {
-  let writer : AuditV071A1Writer = { writes: 0, }
-  let delivery = audit_v071_a1_record(false, durable_now_ms() - 1000L)
-  let session = audit_v071_a1_session(delivery, writer)
-  let client = audit_v071_a1_client(delivery)
+  let writer : ExpirySpyWriter = { writes: 0, }
+  let delivery = expiry_test_record(false, durable_now_ms() - 1000L)
+  let session = expiry_test_session(delivery, writer)
+  let client = expiry_test_client(delivery)
   assert_false(
     session.write_one(
       {
@@ -123,11 +114,11 @@ async test "A1 expired never-written delivery stays not-sent" {
 
 ///|
 async test "A1 expired delivery written by an older generation stays unknown" {
-  let first_writer : AuditV071A1Writer = { writes: 0, }
-  let second_writer : AuditV071A1Writer = { writes: 0, }
-  let delivery = audit_v071_a1_record(false, durable_now_ms() + 1000L)
-  let client = audit_v071_a1_client(delivery)
-  let first = audit_v071_a1_session(delivery, first_writer)
+  let first_writer : ExpirySpyWriter = { writes: 0, }
+  let second_writer : ExpirySpyWriter = { writes: 0, }
+  let delivery = expiry_test_record(false, durable_now_ms() + 1000L)
+  let client = expiry_test_client(delivery)
+  let first = expiry_test_session(delivery, first_writer)
   assert_true(
     first.write_one(
       {
@@ -145,7 +136,7 @@ async test "A1 expired delivery written by an older generation stays unknown" {
   first.abort("first generation ended after its write")
   @async.sleep(1100)
   delivery.attach(2, @async.now() + 5000L)
-  let second = audit_v071_a1_session(delivery, second_writer, generation=2)
+  let second = expiry_test_session(delivery, second_writer, generation=2)
   assert_false(
     second.write_one(
       {

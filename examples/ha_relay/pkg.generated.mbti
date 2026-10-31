@@ -41,7 +41,7 @@ pub fn Command::encode(Self) -> String
 
 pub(all) struct Feedback {
   boot_id : String
-  sequence : Int
+  sequence : Int32
   state : Bool
   correlation_id : String
 } derive(Eq, @debug.Debug)

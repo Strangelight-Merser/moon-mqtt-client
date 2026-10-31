@@ -20,12 +20,13 @@ async fn main {
     },
     session_expiry_secs=if resume_enabled { 60L } else { 0L },
     keep_alive_secs=30,
-    operation_timeout_ms=4000,
+    operation_timeout_ms=if mode == "flow-subscriptions" { 15000 } else { 4000 },
     connect_timeout_ms=4000,
     reconnect_delay_ms=20,
     max_reconnect_delay_ms=50,
     reconnect_attempts=2,
-    max_inflight=4,
+    max_inflight=if mode == "flow-subscriptions" { 8 } else { 4 },
+    send_capacity=if mode == "flow-subscriptions" { 8 } else { 64 },
   )
   if mode == "durable" || mode == "durable-empty" || mode == "durable-negative" {
     let path = @env.get_env_var("M1_OUTBOX").unwrap_or_else(() => {
@@ -74,9 +75,10 @@ async fn main {
     }
     return
   }
-  @async.with_timeout(9000, async fn() {
+  @async.with_timeout(if mode == "flow-subscriptions" { 20000 } else { 9000 }, async fn() {
     @mqtt.with_client(config, async fn(client) {
       match mode {
+        "flow-subscriptions" => credit_nonpublish(client)
         "flow" | "flow-reconnect" => {
           let first = client.submit_delivery("first", "m1/request", b"first")
           let second = client.submit_delivery("second", "m1/request", b"second")
@@ -202,5 +204,54 @@ async fn main {
         println("disconnect=\{reason.code}")
       error => raise error
     }
+  })
+}
+
+///|
+/// The raw peer holds both subscription acknowledgements until all admissions
+/// are visible. Polling observes state; no elapsed sleep establishes ordering.
+async fn wait_pending(client : @mqtt.Client, count : Int) -> Unit {
+  @async.with_timeout(3000, async fn() {
+    while client.stats().pending_requests != count {
+      @async.sleep(1)
+    }
+  })
+}
+
+///|
+async fn credit_nonpublish(client : @mqtt.Client) -> Unit {
+  @async.with_task_group(group => {
+    let first = group.spawn(() => {
+      client.publish("h01/request", b"first", qos=@mqtt.AtLeastOnce)
+    })
+    wait_pending(client, 1)
+    @async.with_timeout(3000, async fn() {
+      while client.stats().business_queue_depth != 0 {
+        @async.sleep(1)
+      }
+    })
+    let second = group.spawn(() => {
+      client.publish("h01/request", b"second", qos=@mqtt.AtLeastOnce)
+    })
+    wait_pending(client, 2)
+    assert_eq(client.stats().business_queue_depth, 1)
+    @stdio.stdout.write(@utf8.encode("h01: second-admitted pending=2 business=1\n"))
+    let sub = group.spawn(() => {
+      ignore(client.subscribe([{ topic: "h01/reply", qos: @mqtt.AtMostOnce }]))
+    })
+    wait_pending(client, 3)
+    let unsub = group.spawn(() => client.unsubscribe(["h01/reply"]))
+    wait_pending(client, 4)
+    @stdio.stdout.write(@utf8.encode("h01: subscriptions-admitted pending=4\n"))
+    sub.wait()
+    unsub.wait()
+    assert_eq(client.stats().pending_requests, 2)
+    assert_eq(client.stats().business_queue_depth, 1)
+    // A further non-PUBLISH round trip proves the scheduler made progress after
+    // processing both acknowledgements, with the second PUBLISH still blocked.
+    ignore(client.subscribe([{ topic: "h01/barrier", qos: @mqtt.AtMostOnce }]))
+    first.wait()
+    second.wait()
+    @stdio.stdout.write(@utf8.encode("h01: complete\n"))
   })
 }

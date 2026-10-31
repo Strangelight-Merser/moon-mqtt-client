@@ -1,0 +1,42 @@
+{
+  "platform": "macOS-15.6-arm64-arm-64bit-Mach-O",
+  "power_loss_tested": false,
+  "full_gate": true,
+  "passed": true,
+  "cases": [
+    {
+      "case": "operator_fsync_EIO",
+      "injected": "fsync EIO /private/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/mqtt-storage-0133szxf/fsync/.recovery-source-73mzsawg.sqlite3-journal\n",
+      "source_preserved": true,
+      "archive_absent": true,
+      "stderr": "durable recovery refused: cannot create consistent SQLite backup: disk I/O error\n"
+    },
+    {
+      "case": "native_ACK_DELETE_fsync_EIO",
+      "injected": "fsync EIO /private/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/mqtt-storage-0133szxf/fsync/native.sqlite3-journal\n",
+      "row_retained": true,
+      "result": "active id=durable-1 packet=1 attempts=1\nstorage-error=DurableStoreIo(\"commit durable transaction: disk I/O error\")\nStrangelight-Merser/moon-mqtt-client.ClientError.DurableStorage\n"
+    },
+    {
+      "case": "operator_pwrite_EIO",
+      "injected": "pwrite EIO /private/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/mqtt-storage-0133szxf/pwrite/.recovery-source-yis7ao_k.sqlite3-journal\n",
+      "source_preserved": true,
+      "archive_absent": true,
+      "stderr": "durable recovery refused: cannot create consistent SQLite backup: disk I/O error\n"
+    },
+    {
+      "case": "native_ACK_DELETE_pwrite_EIO",
+      "injected": "pwrite EIO /private/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/mqtt-storage-0133szxf/pwrite/native.sqlite3-journal\n",
+      "row_retained": true,
+      "result": "active id=durable-1 packet=1 attempts=1\nstorage-error=DurableStoreIo(\"remove acknowledged durable delivery: disk I/O error\")\nStrangelight-Merser/moon-mqtt-client.ClientError.DurableStorage\n"
+    },
+    {
+      "case": "real_ENOSPC",
+      "source_preserved": true,
+      "archive_absent": true,
+      "native_result": "storage-error=DurableStoreIo(\"commit durable admission row: unable to open database file\")\nStrangelight-Merser/moon-mqtt-client.ClientError.DurableStorage\n",
+      "operator_result": "durable recovery refused: storage failure: [Errno 28] No space left on device: '/private/var/folders/qh/smby8tjs56s7zrmf7_0klzhc0000gn/T/mqtt-storage-0133szxf/volume/.recovery-source-r6rhuxf_.sqlite3'; preserve files and inspect/status before resuming\n",
+      "volume_bytes": 33513472
+    }
+  ]
+}

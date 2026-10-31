@@ -21,6 +21,7 @@ import unittest
 import uuid
 
 import paho.mqtt.client as paho
+from harness import retain_container_log
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -263,13 +264,18 @@ class WsBroker:
             raise
 
     def close(self) -> None:
-        subprocess.run(
-            ["docker", "rm", "--force", self.name],
-            check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        shutil.rmtree(self.temp, ignore_errors=True)
+        try:
+            if self.process_started:
+                retain_container_log(self.name)
+        finally:
+            subprocess.run(
+                ["docker", "rm", "--force", self.name],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            self.process_started = False
+            shutil.rmtree(self.temp, ignore_errors=True)
 
 
 def main() -> None:

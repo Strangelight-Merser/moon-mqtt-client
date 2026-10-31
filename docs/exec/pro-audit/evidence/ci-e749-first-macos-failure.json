@@ -1,0 +1,151 @@
+{
+  "level": "core",
+  "subset": null,
+  "source_commit": "a1785a5edda52efe6d8fab1945c4e1d68c62efd5",
+  "platform": "Darwin",
+  "attempts": [
+    {
+      "id": "check",
+      "attempt": 1,
+      "command": [
+        "/Users/runner/.moon/bin/moon",
+        "check",
+        "--target",
+        "native"
+      ],
+      "log": "check.log",
+      "status": "failed",
+      "returncode": 255,
+      "seconds": 0.013,
+      "log_sha256": "ef9394f3ae9877fbe63f747e496099771c1a6246a26dec3272dd9d8f5f649aeb"
+    },
+    {
+      "id": "native",
+      "attempt": 1,
+      "command": [
+        "/Users/runner/.moon/bin/moon",
+        "test",
+        "--target",
+        "native"
+      ],
+      "log": "native.log",
+      "status": "failed",
+      "returncode": 255,
+      "seconds": 0.025,
+      "log_sha256": "dcd921594e665c3c021ebd78fe20aa307b6a0db499831102c304109bf5dc06ac"
+    },
+    {
+      "id": "build",
+      "attempt": 1,
+      "command": [
+        "/Users/runner/.moon/bin/moon",
+        "build",
+        "--target",
+        "native"
+      ],
+      "log": "build.log",
+      "status": "failed",
+      "returncode": 255,
+      "seconds": 0.013,
+      "log_sha256": "dcd921594e665c3c021ebd78fe20aa307b6a0db499831102c304109bf5dc06ac"
+    },
+    {
+      "id": "mosquitto-core",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "tests/integration/run.py",
+        "IntegrationTest.test_tcp_qos0_qos1_and_subscription",
+        "IntegrationTest.test_reconnect_and_resubscribe",
+        "IntegrationTest.test_lost_puback_never_reports_success"
+      ],
+      "log": "mosquitto-core.log",
+      "status": "failed",
+      "returncode": 1,
+      "seconds": 21.491,
+      "log_sha256": "43d3eae9fa12a7bf102902e631fbf540e3c444a4d393f88a39c97272e2464738"
+    },
+    {
+      "id": "raw-protocol",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "tests/protocol_faults.py"
+      ],
+      "log": "raw-protocol.log",
+      "status": "failed",
+      "returncode": 1,
+      "seconds": 5.1,
+      "log_sha256": "0f2928fce0f8db4b1239f45467837d8a30ebf2efcb8eaeff568f895138fe49fe"
+    },
+    {
+      "id": "mqtt5-codec",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "tests/mqtt5_codec.py"
+      ],
+      "log": "mqtt5-codec.log",
+      "status": "failed",
+      "returncode": 1,
+      "seconds": 0.147,
+      "log_sha256": "e5aea1447873eb0d60e935e38e27871280b084a5d6fb3f1fbf6ff3e28130b9ca"
+    },
+    {
+      "id": "mqtt5-runtime-h01",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "tests/mqtt5_runtime.py"
+      ],
+      "log": "mqtt5-runtime-h01.log",
+      "status": "failed",
+      "returncode": 5,
+      "seconds": 0.166,
+      "log_sha256": "5ab5ab8feab36c173e9bed66c02fa166e674b2eae5367cf824a379964e666770"
+    },
+    {
+      "id": "maintenance",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "-W",
+        "error::ResourceWarning",
+        "tests/reason_reconnect.py"
+      ],
+      "log": "maintenance.log",
+      "status": "failed",
+      "returncode": 5,
+      "seconds": 0.106,
+      "log_sha256": "3002611e5c7769b8e14be88d39fd1f126390fffe0dc7edb4241f69ab6459c1e1"
+    },
+    {
+      "id": "recoverable",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "tests/recoverable_qos1.py"
+      ],
+      "log": "recoverable.log",
+      "status": "failed",
+      "returncode": 5,
+      "seconds": 0.106,
+      "log_sha256": "1ac995970ab432de223cda78c160dcdfc98c3200a07d54197478bb9432881140"
+    },
+    {
+      "id": "durable-crash",
+      "attempt": 1,
+      "command": [
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python",
+        "tests/durable_outbox.py"
+      ],
+      "log": "durable-crash.log",
+      "status": "failed",
+      "returncode": 5,
+      "seconds": 0.065,
+      "log_sha256": "9340a0837e231fbe28ca93cdc7ccf1f888777c1943dff1a312c1aed57d71171d"
+    }
+  ],
+  "successful": false,
+  "full_level": true
+}

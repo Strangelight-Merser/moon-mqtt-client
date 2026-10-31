@@ -39,12 +39,12 @@ pub fn Alert::to_json(Self) -> String
 
 pub struct AlertDeduper {
   recent : Array[String?]
-  mut next : Int
-  mut count : Int
+  mut next : Int32
+  mut count : Int32
 }
 pub fn AlertDeduper::accept(Self, FrigateEvent, String) -> Alert?
-pub fn AlertDeduper::new(Int) -> Self
-pub fn AlertDeduper::remembered(Self) -> Int
+pub fn AlertDeduper::new(Int32) -> Self
+pub fn AlertDeduper::remembered(Self) -> Int32
 
 pub(all) enum EventPhase {
   New
@@ -61,7 +61,7 @@ pub(all) struct FrigateEvent {
 
 pub(all) enum PrimitiveTelemetry {
   BoolValue(Bool)
-  IntValue(Int)
+  IntValue(Int32)
   DoubleValue(Double)
   TextValue(String)
 } derive(Eq, @debug.Debug)

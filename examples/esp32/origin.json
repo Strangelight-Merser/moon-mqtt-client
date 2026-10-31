@@ -1,0 +1,13 @@
+{
+  "source_commit": "fa89f2fa8fb151e94db570bddf253fb11365bb19",
+  "source_note": "Previously untracked ESP32 integration files; these original bytes remain in the existing worktree. Not a new live-acceptance claim.",
+  "files_sha256": {
+    "campus_device/campus_device.ino": "7ab60acfeebd2a42dcf7a35c264f10a7680a7d58e86cb74deb78e5f24944a69b",
+    "check_live.py": "b57973bfd788f5f3648778ab6cda6cce8afb29d4f0c63f0625ce3d876494c4a1",
+    "check_ha.py": "aaf116f5c874e328ef3d501f5c1f9b65a766b19b4d60c1eeb02b45b170d031f8",
+    "host.py": "007afb43b440e8a25dab4c5ba0bebe499a871170bb6e6f7456377539b602a0a9",
+    "prepare_broker.py": "9200276a0e56c21b3f944fc5bf9e14cbeb374c0fbb89d991654cd4d67242bcf7",
+    "provision.py": "acb1329ad5762d346e53529c5cfc1907fd069bea6801fedda60d791260d805bc",
+    "setup_ha.py": "41a97bc1ede8449fac7d100c27456f0ec1b9c439c18840940431d2b89981ba87"
+  }
+}

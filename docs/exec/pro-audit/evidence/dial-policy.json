@@ -1,0 +1,157 @@
+[
+  {
+    "protocol": 311,
+    "origin": "initial",
+    "wire_reason": 1,
+    "result": [
+      "terminal ConnectionRefused"
+    ]
+  },
+  {
+    "protocol": 311,
+    "origin": "initial",
+    "wire_reason": 3,
+    "result": [
+      "terminal ConnectionRefused"
+    ]
+  },
+  {
+    "protocol": 311,
+    "origin": "initial",
+    "wire_reason": 5,
+    "result": [
+      "terminal ConnectionRefused"
+    ]
+  },
+  {
+    "protocol": 311,
+    "origin": "transport",
+    "wire_reason": 1,
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 311,
+    "origin": "transport",
+    "wire_reason": 3,
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 311,
+    "origin": "transport",
+    "wire_reason": 5,
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "initial",
+    "wire_reason": 135,
+    "result": [
+      "terminal BrokerRejected 135"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "initial",
+    "wire_reason": 137,
+    "result": [
+      "terminal BrokerRejected 137"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "initial",
+    "wire_reason": 156,
+    "result": [
+      "terminal BrokerRejected 156"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "transport",
+    "wire_reason": 135,
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "transport",
+    "wire_reason": 137,
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "transport",
+    "wire_reason": 156,
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "maintenance",
+    "wire_reason": 135,
+    "result": [
+      "connected 1",
+      "terminal BrokerRejected 135"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "maintenance",
+    "wire_reason": 137,
+    "result": [
+      "connected 1",
+      "terminal BrokerRejected 137"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "maintenance",
+    "wire_reason": 156,
+    "result": [
+      "connected 1",
+      "terminal BrokerRejected 156"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "initial",
+    "tls_failure": "untrusted_CA",
+    "result": [
+      "terminal TlsFailure"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "transport",
+    "tls_failure": "untrusted_CA",
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  },
+  {
+    "protocol": 5,
+    "origin": "maintenance",
+    "tls_failure": "untrusted_CA",
+    "result": [
+      "connected 1",
+      "connected 2"
+    ]
+  }
+]

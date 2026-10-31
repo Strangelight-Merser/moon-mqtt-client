@@ -34,7 +34,7 @@ pub fn relay_step(Bool?, Double) -> RelayDecision
 // Types and methods
 pub(all) struct DemoConfig {
   host : String
-  port : Int
+  port : Int32
   client_id : String
   username : String?
   password : String?
@@ -48,7 +48,7 @@ pub fn DemoConfig::mqtt_config(Self) -> @moon-mqtt-client.Config
 
 pub(all) struct DeviceFeedback {
   startup_id : String
-  sequence : Int
+  sequence : Int32
   state_on : Bool
   command_id : String?
   query_id : String?

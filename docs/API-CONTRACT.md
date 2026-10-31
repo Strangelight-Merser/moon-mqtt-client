@@ -66,6 +66,14 @@ best-effort and does not claim cross-field atomicity.
 | `DurableStorage(error)` | A required SQLite transition failed; the nested error retains busy/full/read-only/corrupt/I/O/schema/identity/limit/state classification | Depends; inspect the stable ID before reopening |
 | `Closed` | The client was shut down normally (`disconnect` or `with_client` scope end) | n/a |
 
+`Client.disconnect()` succeeds after its local MQTT DISCONNECT write completes
+and its worker cleanup is joined. MQTT supplies no DISCONNECT acknowledgement;
+neither a peer EOF nor a WebSocket Close proves that write succeeded. If the
+local write never began, the request remains `NotSent`; if it may be partial,
+it remains `OutcomeUnknown`. A reader close after the local write returns
+cannot revise that completed result. Already completed publications keep their
+own results.
+
 A failed first connection raises the classified error to `wait_connected` and to
 `with_client`. `Closed` is reserved for a normal stop; it does not replace
 `InvalidConfig` or `TlsFailure`.
@@ -275,6 +283,12 @@ identifier space. Consequences:
 `Client.stats()` returns generation, connection state, business/control/event
 queue occupancy, pending requests, cumulative reconnects, cumulative
 disconnects, cumulative unknown outcomes, and the most recent disconnect reason.
+`disconnects` counts `Disconnected` notifications successfully queued for the
+client, including some failed recovery dials. It is neither a broker restart
+count nor a count of every socket close, and an additional notification need
+not imply a new generation. `generation` advances on successful CONNACK;
+`Connected(generation)` is emitted only after subscription restoration and
+the connection is ready. These observations must be accounted for separately.
 It contains no credentials and no message bodies, and the client does not depend
 on any monitoring service to produce it.
 

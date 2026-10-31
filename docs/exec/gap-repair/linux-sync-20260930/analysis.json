@@ -1,0 +1,766 @@
+{
+  "diagnostic_only": true,
+  "inventory_files": 68,
+  "trials": [
+    {
+      "trial": "off1",
+      "completed": 3502,
+      "throughput": 116.64041666373573,
+      "exact_p99_ns": 11160000,
+      "overflow": 2,
+      "stage_ns": {
+        "count": 3502,
+        "sum": 29821320247,
+        "p99": 11104227,
+        "max": 445391578
+      },
+      "sync_wall_ns": {
+        "count": 56032,
+        "sum": 13449388507,
+        "p99": 500858,
+        "max": 156350907
+      },
+      "sync_cpu_ns": {
+        "count": 56032,
+        "sum": 2097156654,
+        "p99": 62958,
+        "max": 102824
+      },
+      "sync_runqueue_ns": {
+        "count": 56032,
+        "sum": 7867665,
+        "p99": 0,
+        "max": 936839
+      },
+      "call_names": [
+        "fsync"
+      ],
+      "file_names": [
+        "outbox.sqlite3",
+        "outbox.sqlite3-journal"
+      ],
+      "longest": [
+        {
+          "id": "bench-sample-0-3015",
+          "stage_ns": 445391578,
+          "sync_wall_ns": 439077025,
+          "sync_cpu_ns": 866835,
+          "sync_runqueue_ns": 32991,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-3014",
+          "stage_ns": 138145796,
+          "sync_wall_ns": 133728867,
+          "sync_cpu_ns": 646124,
+          "sync_runqueue_ns": 79940,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-3016",
+          "stage_ns": 53180649,
+          "sync_wall_ns": 48009557,
+          "sync_cpu_ns": 645351,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1790",
+          "stage_ns": 26206338,
+          "sync_wall_ns": 21600109,
+          "sync_cpu_ns": 631306,
+          "sync_runqueue_ns": 10179,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1181",
+          "stage_ns": 19810207,
+          "sync_wall_ns": 15136029,
+          "sync_cpu_ns": 565715,
+          "sync_runqueue_ns": 6772,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2404",
+          "stage_ns": 18517117,
+          "sync_wall_ns": 14040986,
+          "sync_cpu_ns": 476201,
+          "sync_runqueue_ns": 38252,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-563",
+          "stage_ns": 17055280,
+          "sync_wall_ns": 12481519,
+          "sync_cpu_ns": 601695,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1747",
+          "stage_ns": 14826053,
+          "sync_wall_ns": 9730035,
+          "sync_cpu_ns": 650384,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2701",
+          "stage_ns": 13888454,
+          "sync_wall_ns": 9126219,
+          "sync_cpu_ns": 628527,
+          "sync_runqueue_ns": 22161,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2370",
+          "stage_ns": 13699640,
+          "sync_wall_ns": 8460780,
+          "sync_cpu_ns": 601543,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        }
+      ]
+    },
+    {
+      "trial": "on1",
+      "completed": 3564,
+      "throughput": 118.7001878252522,
+      "exact_p99_ns": 11890000,
+      "overflow": 0,
+      "stage_ns": {
+        "count": 3564,
+        "sum": 29814166703,
+        "p99": 11820202,
+        "max": 19840446
+      },
+      "sync_wall_ns": {
+        "count": 57024,
+        "sum": 13005786549,
+        "p99": 497572,
+        "max": 5988277
+      },
+      "sync_cpu_ns": {
+        "count": 57024,
+        "sum": 2062683697,
+        "p99": 55052,
+        "max": 214902
+      },
+      "sync_runqueue_ns": {
+        "count": 57024,
+        "sum": 8373917,
+        "p99": 0,
+        "max": 939541
+      },
+      "call_names": [
+        "fsync"
+      ],
+      "file_names": [
+        "outbox.sqlite3",
+        "outbox.sqlite3-journal"
+      ],
+      "longest": [
+        {
+          "id": "bench-sample-0-3019",
+          "stage_ns": 19840446,
+          "sync_wall_ns": 10892805,
+          "sync_cpu_ns": 1362627,
+          "sync_runqueue_ns": 10169,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-3067",
+          "stage_ns": 19627937,
+          "sync_wall_ns": 14941558,
+          "sync_cpu_ns": 521895,
+          "sync_runqueue_ns": 43491,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2635",
+          "stage_ns": 15357777,
+          "sync_wall_ns": 6342542,
+          "sync_cpu_ns": 832182,
+          "sync_runqueue_ns": 16961,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2641",
+          "stage_ns": 15121379,
+          "sync_wall_ns": 9467278,
+          "sync_cpu_ns": 592670,
+          "sync_runqueue_ns": 7083,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2642",
+          "stage_ns": 15065908,
+          "sync_wall_ns": 6732996,
+          "sync_cpu_ns": 875783,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-3017",
+          "stage_ns": 14705917,
+          "sync_wall_ns": 7017866,
+          "sync_cpu_ns": 1265651,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-835",
+          "stage_ns": 13611749,
+          "sync_wall_ns": 8979631,
+          "sync_cpu_ns": 575873,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2755",
+          "stage_ns": 13475520,
+          "sync_wall_ns": 8371884,
+          "sync_cpu_ns": 551901,
+          "sync_runqueue_ns": 13596,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2104",
+          "stage_ns": 13396273,
+          "sync_wall_ns": 8757000,
+          "sync_cpu_ns": 643819,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1655",
+          "stage_ns": 13202247,
+          "sync_wall_ns": 8498854,
+          "sync_cpu_ns": 518548,
+          "sync_runqueue_ns": 6553,
+          "sync_count": 16
+        }
+      ]
+    },
+    {
+      "trial": "off2",
+      "completed": 3544,
+      "throughput": 118.03367606455564,
+      "exact_p99_ns": 12290000,
+      "overflow": 0,
+      "stage_ns": {
+        "count": 3544,
+        "sum": 29801635285,
+        "p99": 12216115,
+        "max": 19288028
+      },
+      "sync_wall_ns": {
+        "count": 56704,
+        "sum": 13233723597,
+        "p99": 506941,
+        "max": 6404752
+      },
+      "sync_cpu_ns": {
+        "count": 56704,
+        "sum": 2130850419,
+        "p99": 63528,
+        "max": 298717
+      },
+      "sync_runqueue_ns": {
+        "count": 56704,
+        "sum": 6245029,
+        "p99": 0,
+        "max": 361062
+      },
+      "call_names": [
+        "fsync"
+      ],
+      "file_names": [
+        "outbox.sqlite3",
+        "outbox.sqlite3-journal"
+      ],
+      "longest": [
+        {
+          "id": "bench-sample-0-55",
+          "stage_ns": 19288028,
+          "sync_wall_ns": 12443561,
+          "sync_cpu_ns": 1698639,
+          "sync_runqueue_ns": 10860,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-3018",
+          "stage_ns": 18377658,
+          "sync_wall_ns": 13804091,
+          "sync_cpu_ns": 521354,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-56",
+          "stage_ns": 14980991,
+          "sync_wall_ns": 6921099,
+          "sync_cpu_ns": 1055268,
+          "sync_runqueue_ns": 16641,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-51",
+          "stage_ns": 14880232,
+          "sync_wall_ns": 7153212,
+          "sync_cpu_ns": 1248216,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-250",
+          "stage_ns": 14211379,
+          "sync_wall_ns": 9646395,
+          "sync_cpu_ns": 665300,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1188",
+          "stage_ns": 14123627,
+          "sync_wall_ns": 9093345,
+          "sync_cpu_ns": 620568,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-52",
+          "stage_ns": 13712043,
+          "sync_wall_ns": 6190526,
+          "sync_cpu_ns": 1016486,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-735",
+          "stage_ns": 13530937,
+          "sync_wall_ns": 8747329,
+          "sync_cpu_ns": 564351,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-572",
+          "stage_ns": 13332364,
+          "sync_wall_ns": 8075240,
+          "sync_cpu_ns": 623434,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1567",
+          "stage_ns": 13286604,
+          "sync_wall_ns": 8772148,
+          "sync_cpu_ns": 650497,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        }
+      ]
+    },
+    {
+      "trial": "on2",
+      "completed": 3515,
+      "throughput": 117.04776808075313,
+      "exact_p99_ns": 11740000,
+      "overflow": 0,
+      "stage_ns": {
+        "count": 3515,
+        "sum": 29803494649,
+        "p99": 11567212,
+        "max": 16030300
+      },
+      "sync_wall_ns": {
+        "count": 56240,
+        "sum": 13067551563,
+        "p99": 513112,
+        "max": 5660196
+      },
+      "sync_cpu_ns": {
+        "count": 56240,
+        "sum": 2111351502,
+        "p99": 64161,
+        "max": 188552
+      },
+      "sync_runqueue_ns": {
+        "count": 56240,
+        "sum": 10060911,
+        "p99": 0,
+        "max": 485179
+      },
+      "call_names": [
+        "fsync"
+      ],
+      "file_names": [
+        "outbox.sqlite3",
+        "outbox.sqlite3-journal"
+      ],
+      "longest": [
+        {
+          "id": "bench-sample-0-2990",
+          "stage_ns": 16030300,
+          "sync_wall_ns": 11125457,
+          "sync_cpu_ns": 639244,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1174",
+          "stage_ns": 15107708,
+          "sync_wall_ns": 6887018,
+          "sync_cpu_ns": 953563,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1173",
+          "stage_ns": 15046623,
+          "sync_wall_ns": 7342874,
+          "sync_cpu_ns": 1139859,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1171",
+          "stage_ns": 14201638,
+          "sync_wall_ns": 5756496,
+          "sync_cpu_ns": 917152,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1860",
+          "stage_ns": 14042671,
+          "sync_wall_ns": 8856102,
+          "sync_cpu_ns": 604307,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1165",
+          "stage_ns": 13771451,
+          "sync_wall_ns": 8115329,
+          "sync_cpu_ns": 704842,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2276",
+          "stage_ns": 13653962,
+          "sync_wall_ns": 8662402,
+          "sync_cpu_ns": 655413,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2339",
+          "stage_ns": 13338200,
+          "sync_wall_ns": 8378106,
+          "sync_cpu_ns": 705311,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2038",
+          "stage_ns": 13297421,
+          "sync_wall_ns": 5711625,
+          "sync_cpu_ns": 658350,
+          "sync_runqueue_ns": 721308,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-749",
+          "stage_ns": 13092595,
+          "sync_wall_ns": 8363802,
+          "sync_cpu_ns": 689483,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        }
+      ]
+    },
+    {
+      "trial": "off3",
+      "completed": 3574,
+      "throughput": 119.04271609331919,
+      "exact_p99_ns": 11350000,
+      "overflow": 0,
+      "stage_ns": {
+        "count": 3574,
+        "sum": 29802535177,
+        "p99": 11282973,
+        "max": 18636819
+      },
+      "sync_wall_ns": {
+        "count": 57184,
+        "sum": 13161154924,
+        "p99": 505949,
+        "max": 5900899
+      },
+      "sync_cpu_ns": {
+        "count": 57184,
+        "sum": 2140077500,
+        "p99": 63699,
+        "max": 213439
+      },
+      "sync_runqueue_ns": {
+        "count": 57184,
+        "sum": 6798767,
+        "p99": 0,
+        "max": 349930
+      },
+      "call_names": [
+        "fsync"
+      ],
+      "file_names": [
+        "outbox.sqlite3",
+        "outbox.sqlite3-journal"
+      ],
+      "longest": [
+        {
+          "id": "bench-sample-0-3025",
+          "stage_ns": 18636819,
+          "sync_wall_ns": 13745688,
+          "sync_cpu_ns": 625728,
+          "sync_runqueue_ns": 48115,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2334",
+          "stage_ns": 15656603,
+          "sync_wall_ns": 9751856,
+          "sync_cpu_ns": 1068823,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2335",
+          "stage_ns": 15254089,
+          "sync_wall_ns": 7238004,
+          "sync_cpu_ns": 1086358,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-3008",
+          "stage_ns": 13774145,
+          "sync_wall_ns": 9192916,
+          "sync_cpu_ns": 668207,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2957",
+          "stage_ns": 13770769,
+          "sync_wall_ns": 9024653,
+          "sync_cpu_ns": 736542,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1490",
+          "stage_ns": 13473328,
+          "sync_wall_ns": 8517481,
+          "sync_cpu_ns": 607159,
+          "sync_runqueue_ns": 14056,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2333",
+          "stage_ns": 13232870,
+          "sync_wall_ns": 6029429,
+          "sync_cpu_ns": 1074464,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1530",
+          "stage_ns": 13123252,
+          "sync_wall_ns": 8551095,
+          "sync_cpu_ns": 678686,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1347",
+          "stage_ns": 13095860,
+          "sync_wall_ns": 8471817,
+          "sync_cpu_ns": 688844,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-71",
+          "stage_ns": 13081945,
+          "sync_wall_ns": 8131074,
+          "sync_cpu_ns": 634994,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        }
+      ]
+    },
+    {
+      "trial": "on3",
+      "completed": 3520,
+      "throughput": 117.23755787680508,
+      "exact_p99_ns": 12330000,
+      "overflow": 0,
+      "stage_ns": {
+        "count": 3520,
+        "sum": 29801627166,
+        "p99": 12272328,
+        "max": 22138452
+      },
+      "sync_wall_ns": {
+        "count": 56320,
+        "sum": 13002060828,
+        "p99": 522850,
+        "max": 6153512
+      },
+      "sync_cpu_ns": {
+        "count": 56320,
+        "sum": 2117680761,
+        "p99": 59450,
+        "max": 256319
+      },
+      "sync_runqueue_ns": {
+        "count": 56320,
+        "sum": 6673749,
+        "p99": 0,
+        "max": 276940
+      },
+      "call_names": [
+        "fsync"
+      ],
+      "file_names": [
+        "outbox.sqlite3",
+        "outbox.sqlite3-journal"
+      ],
+      "longest": [
+        {
+          "id": "bench-sample-0-1218",
+          "stage_ns": 22138452,
+          "sync_wall_ns": 10639070,
+          "sync_cpu_ns": 1292998,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2959",
+          "stage_ns": 18104841,
+          "sync_wall_ns": 13178860,
+          "sync_cpu_ns": 658024,
+          "sync_runqueue_ns": 12824,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1215",
+          "stage_ns": 16168933,
+          "sync_wall_ns": 6407596,
+          "sync_cpu_ns": 891492,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1757",
+          "stage_ns": 14615531,
+          "sync_wall_ns": 9286766,
+          "sync_cpu_ns": 628893,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1653",
+          "stage_ns": 13981652,
+          "sync_wall_ns": 9226825,
+          "sync_cpu_ns": 618927,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2433",
+          "stage_ns": 13632197,
+          "sync_wall_ns": 8233351,
+          "sync_cpu_ns": 561765,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1733",
+          "stage_ns": 13555814,
+          "sync_wall_ns": 8174000,
+          "sync_cpu_ns": 624436,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1429",
+          "stage_ns": 13539474,
+          "sync_wall_ns": 8178008,
+          "sync_cpu_ns": 581658,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-1214",
+          "stage_ns": 13491490,
+          "sync_wall_ns": 7175737,
+          "sync_cpu_ns": 1155648,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        },
+        {
+          "id": "bench-sample-0-2177",
+          "stage_ns": 13444435,
+          "sync_wall_ns": 8067058,
+          "sync_cpu_ns": 688214,
+          "sync_runqueue_ns": 0,
+          "sync_count": 16
+        }
+      ]
+    }
+  ],
+  "comparison": {
+    "version": 2,
+    "verdict": "within_trigger",
+    "population_cv": {
+      "throughput": {
+        "off": 0.008353351916689039,
+        "on": 0.006274771684378583
+      },
+      "p99": {
+        "off": 0.042588882600106376,
+        "on": 0.02088799995351938
+      }
+    },
+    "throughput": {
+      "off": [
+        116.64041666373573,
+        118.03367606455564,
+        119.04271609331919
+      ],
+      "on": [
+        118.7001878252522,
+        117.04776808075313,
+        117.23755787680508
+      ]
+    },
+    "p99_ns": {
+      "off": [
+        11160000,
+        12290000,
+        11350000
+      ],
+      "on": [
+        11890000,
+        11740000,
+        12330000
+      ]
+    },
+    "throughput_drop_fraction": 0.006744839390710244,
+    "p99_rise_fraction": 0.047577092511013275
+  }
+}

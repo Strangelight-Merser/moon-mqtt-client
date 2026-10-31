@@ -1,6 +1,8 @@
 # Durable logical-session recovery
 
-Status: approved B1 contract. The implementation is an independent Python CLI
+Status: operator tooling. `resolve` and `resume` are **experimental**; that label
+does not weaken data preservation, identity ownership or no-overwrite guarantees.
+The implementation is an independent Python CLI
 using the standard-library `sqlite3` module and pinned `paho-mqtt==2.1.0`. The
 MoonBit public API, runtime, original tests, and durable schema version 2 stay
 unchanged.
@@ -21,7 +23,7 @@ mode. Old IDs are evidence only and cannot be reused as proof of `NotSent`.
 The operation is:
 
 1. inspect or export an existing source without network or source writes;
-2. publish a complete, tamper-evident resolution archive and `Prepared`
+2. publish a complete, checksum-verified resolution archive and `Prepared`
    sidecar journal;
 3. transactionally retire the source identity while retaining every row;
 4. clean the old and new broker client IDs through separately authorized
@@ -29,6 +31,17 @@ The operation is:
 5. create and publish an empty schema-2 outbox for the different new client ID.
 
 ## Observation
+
+Archives contain sensitive business payloads, topics, identifiers and operator
+decisions. File mode 0600 restricts local access but does not encrypt contents.
+SHA-256 detects byte changes only when compared with a trusted digest; it does
+not authenticate the origin or prevent an attacker replacing both data and
+hashes. Keep archives and credentials private. CI/public review bundles contain
+synthetic fixtures and summaries, never raw user archives or device secrets.
+
+Online resolution supports plain TCP only. A store bound to TLS/WS is rejected;
+never change its identity or downgrade transport to make the CLI accept it.
+Offline inspect/export do not require a broker connection.
 
 ```text
 python scripts/durable_recovery.py inspect --source OLD

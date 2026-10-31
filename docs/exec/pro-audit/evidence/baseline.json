@@ -1,0 +1,45 @@
+{
+  "source_commit": "f0a0e9ec33b7aee2aeee26ea20572904d05e3069",
+  "source_tree": "71f79cb5e42a2e93fbf63e3a2a84bde5457d074d",
+  "platform": "macOS-15.6-arm64-arm-64bit-Mach-O",
+  "attachment_sha256": "50659953356b9195b1f1f5297d0d707e4eb5cfd7c9e75b54d05501b1369880d5",
+  "baseline_tar_sha256": "c03034da799c31cf61af79601ff0c9b6c70dde20ba656312daf4cbdf80aadc46",
+  "moon": {
+    "command": [
+      "./scripts/moon.sh",
+      "version"
+    ],
+    "returncode": 0,
+    "stdout": "moon 0.1.20260904 (94521db 2026-09-04)\n\nFeature flags enabled: rr_moon_mod,rr_moon_pkg\n",
+    "stderr": ""
+  },
+  "moonc": {
+    "command": [
+      "./scripts/moon.sh",
+      "version",
+      "--all"
+    ],
+    "returncode": 0,
+    "stdout": "moon 0.1.20260904 (94521db 2026-09-04) ~/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/.tools/moon/bin/moon\nmoonc v0.10.12+1634b282e (2026-09-07) ~/Documents/ChatGPT/moon-mqtt-client/.tools/moon/bin/moonc\nmoonrun 0.1.20260904 (94521db 2026-09-04) ~/Documents/ChatGPT/moon-mqtt-client/.tools/moon/bin/moonrun\n\nFeature flags enabled: rr_moon_mod,rr_moon_pkg\n",
+    "stderr": ""
+  },
+  "broker": {
+    "command": [
+      "./.tools/mosquitto",
+      "-h"
+    ],
+    "stdout": "mosquitto version 2.0.22\n\nmosquitto is an MQTT v5.0/v3.1.1/v3.1 broker.\n\nUsage: mosquitto [-c config_file] [-d] [-h] [-p port]\n\n -c : specify the broker config file.\n -d : put the broker into the background after starting.\n -h : display this help.\n -p : start the broker listening on the specified port.\n      Not recommended in conjunction with the -c option.\n -v : verbose mode - enable all logging types. This overrides\n      any logging options given in the config file.\n\nSee https://mosquitto.org/ for more information.\n\n"
+  },
+  "files": {
+    "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/moon.mod": "532f160fc537a6cdc313170cd3dbec3bfe8dfa75ea02cb6eb01ff66d4700d2a0",
+    "/Users/huaiyi/.codex/worktrees/moon-mqtt-pro-audit/moon-mqtt-client/pkg.generated.mbti": "6ffcdeb66d4081e53afe52e6e480a7d6ee7d0dcba15b8944da6ad18f53775885"
+  },
+  "paho": "2.1.0",
+  "attachment_files_verified": {
+    "CODEX_PR6_TASK.md": true,
+    "EVIDENCE.md": true,
+    "credit_nonpublish_wbtest.mbt": true,
+    "model-results.json": true,
+    "reproduce_credit_hol.py": true
+  }
+}

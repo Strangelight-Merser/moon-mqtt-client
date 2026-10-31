@@ -1,0 +1,105 @@
+{
+  "binary_sha256": "0625aa4d25fffec6ab0f6561b68beb6e7bf056e0f4f03f6720875019138aa0a9",
+  "recovery_sha256": "e0f8d1a1b63ab8f8e7dc04409313769e5e3af8906298078a076f3d210a7618a5",
+  "physical_evidence": false,
+  "results": [
+    {
+      "stage": "before_admission_commit",
+      "pid": 43790,
+      "exit": 86,
+      "first_wire_hex": null,
+      "rows_after_crash": [],
+      "crash_mechanism": "test-only SQLite trace callback _exit at exact statement boundary",
+      "physical_result": "evidence_insufficient; no hardware observed"
+    },
+    {
+      "stage": "admission_commit",
+      "pid": 43792,
+      "exit": 86,
+      "first_wire_hex": null,
+      "rows_after_crash": [
+        [
+          "bench-sample-0-1",
+          1,
+          0,
+          0
+        ]
+      ],
+      "crash_mechanism": "test-only SQLite trace callback _exit at exact statement boundary",
+      "physical_result": "evidence_insufficient; no hardware observed",
+      "recovery_wire_hex": "3234001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "same_packet_id": true,
+      "dup": false,
+      "native_recovered": true
+    },
+    {
+      "stage": "possible_write_commit",
+      "pid": 43795,
+      "exit": 86,
+      "first_wire_hex": null,
+      "rows_after_crash": [
+        [
+          "bench-sample-0-1",
+          1,
+          1,
+          1
+        ]
+      ],
+      "crash_mechanism": "test-only SQLite trace callback _exit at exact statement boundary",
+      "physical_result": "evidence_insufficient; no hardware observed",
+      "recovery_wire_hex": "3a34001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "same_packet_id": true,
+      "dup": true,
+      "native_recovered": true
+    },
+    {
+      "stage": "after_publish",
+      "pid": 43798,
+      "exit": -9,
+      "first_wire_hex": "3234001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "rows_after_crash": [
+        [
+          "bench-sample-0-1",
+          1,
+          1,
+          1
+        ]
+      ],
+      "crash_mechanism": "SIGKILL after raw peer observed complete PUBLISH",
+      "physical_result": "evidence_insufficient; no hardware observed",
+      "recovery_wire_hex": "3a34001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "same_packet_id": true,
+      "dup": true,
+      "native_recovered": true
+    },
+    {
+      "stage": "before_delete",
+      "pid": 43801,
+      "exit": 86,
+      "first_wire_hex": "3234001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "rows_after_crash": [
+        [
+          "bench-sample-0-1",
+          1,
+          1,
+          1
+        ]
+      ],
+      "crash_mechanism": "test-only SQLite trace callback _exit at exact statement boundary",
+      "physical_result": "evidence_insufficient; no hardware observed",
+      "recovery_wire_hex": "3a34001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "same_packet_id": true,
+      "dup": true,
+      "native_recovered": true
+    },
+    {
+      "stage": "delete_commit",
+      "pid": 43804,
+      "exit": 86,
+      "first_wire_hex": "3234001062656e63682d73616d706c652d302d3100015858585858585858585858585858585858585858585858585858585858585858",
+      "rows_after_crash": [],
+      "crash_mechanism": "test-only SQLite trace callback _exit at exact statement boundary",
+      "physical_result": "evidence_insufficient; no hardware observed"
+    }
+  ]
+}

@@ -572,6 +572,7 @@ async fn Session::request(
     kind,
     changed: @cond_var.Cond(),
     started: false,
+    local_write_complete: false,
     result: None,
     queued_at: @async.now(),
     refresh: refresh.map(builder => () => builder(id)),
