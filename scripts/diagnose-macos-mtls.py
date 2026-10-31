@@ -4,6 +4,7 @@ import ctypes
 import importlib.util
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 
@@ -15,8 +16,22 @@ broker = h.Broker(mtls=True)
 broker.start()
 try:
     for command in (["sw_vers"], ["which", "openssl"], ["openssl", "version", "-a"],
+                    ["otool", "-L", shutil.which("mosquitto")],
                     ["openssl", "x509", "-in", str(broker.temp / "client.pem"), "-noout", "-text"]):
         subprocess.run(command, check=True)
+    for executable in ("/usr/bin/openssl", shutil.which("openssl")):
+        for protocol in ([], ["-tls1_2"]):
+            command = [executable, "s_client", "-connect", f"127.0.0.1:{broker.port}",
+                       "-servername", "localhost", "-CAfile", str(broker.temp / "ca.pem"),
+                       "-cert", str(broker.temp / "client.pem"), "-key", str(broker.temp / "client.key"),
+                       *protocol]
+            print("RAW_TLS_CONTROL", command, flush=True)
+            try:
+                result = subprocess.run(command, input="", text=True, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, timeout=10)
+                print(result.stdout, "RAW_TLS_EXIT", result.returncode, flush=True)
+            except subprocess.TimeoutExpired as error:
+                print("RAW_TLS_TIMEOUT", error.stdout, flush=True)
     for name in ("/usr/lib/libssl.48.dylib", "/usr/lib/libssl.46.dylib"):
         try:
             lib = ctypes.CDLL(name)
