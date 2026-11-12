@@ -3,7 +3,7 @@
   "levels": ["core", "integration", "release"],
   "scenarios": [
     {"id":"dependencies","level":"core","command":["{moon}","update"]},
-    {"id":"check","level":"core","command":["{moon}","check","--target","native"]},
+    {"id":"check","level":"core","command":["{moon}","check","--target","native","--no-mbti"]},
     {"id":"native","level":"core","command":["{moon}","test","--target","native"]},
     {"id":"build","level":"core","command":["{moon}","build","--target","native"]},
     {"id":"mosquitto-core","level":"core","only_levels":["core"],"command":["{python}","tests/integration/run.py","IntegrationTest.test_tcp_qos0_qos1_and_subscription","IntegrationTest.test_reconnect_and_resubscribe","IntegrationTest.test_lost_puback_never_reports_success"]},

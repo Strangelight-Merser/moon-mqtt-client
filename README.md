@@ -19,9 +19,10 @@
 moon add Strangelight-Merser/moon-mqtt-client
 ```
 
-需要从源码运行示例或测试时，使用支持 native 目标的 MoonBit 工具链。
-本版本固定使用 `moon 0.1.20261023` 和 `moonc v0.10.17+d971670cd`（2026-10-23），
-满足验收要求的 `moonc >= 0.10.16`。首次安装固定工具链：
+项目使用 MoonBit 的 `native` 后端，验证平台为 Linux x86-64 和 macOS ARM64。
+发布验收固定使用 `moon 0.1.20261023` 和 `moonc v0.10.17+d971670cd`（2026-10-23）。
+官方滚动版 `moonc v0.10.20+65efd5b93` 也已通过这两个平台的检查、构建和原生测试，详见[工具链兼容性记录](docs/CURRENT.md#2026-11-11-toolchain-compatibility)。
+首次安装固定工具链可执行以下命令。
 
 ```sh
 MOON_HOME="$PWD/.tools/moon" ./scripts/install-moonbit-ci.sh fixed
@@ -31,10 +32,12 @@ export PATH="$MOON_HOME/bin:$PATH"
 
 ```sh
 moon update
-moon check --target native
+moon check --target native --no-mbti
 moon test --target native
 moon build --target native
 ```
+
+`--no-mbti` 让类型检查跳过生成 API 描述文件。需要刷新接口描述时可显式运行 `moon info`。
 
 仓库中的 `scripts/moon.sh` 优先使用显式配置的 `MOON_HOME`，其次使用本地
 `.tools/moon`，否则使用 PATH 中的 `moon`。工具链和构建产物不随源码分发。
