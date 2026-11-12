@@ -71,6 +71,6 @@ jobs:
       - name: Latest compatibility check
         run: |
           moon update
-          moon check --target native
+          moon check --target native --no-mbti
           moon test --target native
           moon build --target native
